@@ -4,9 +4,9 @@
 // Run with:
 //   uv run --group playground python playground/run_example.py
 
-local auth  = import 'kiln/auth/jwt.libsonnet';
-local field = import 'kiln/models/fields.libsonnet';
-local crud  = import 'kiln/crud/presets.libsonnet';
+local auth = import "kiln/auth/jwt.libsonnet";
+local crud = import "kiln/crud/presets.libsonnet";
+local field = import "kiln/models/fields.libsonnet";
 
 local timestamps = [
   field.datetime("created_at", auto_now_add=true),
@@ -67,11 +67,11 @@ local timestamps = [
       require_auth: true,
       parameters: [
         { name: "start_date", type: "date" },
-        { name: "end_date",   type: "date" },
+        { name: "end_date", type: "date" },
       ],
       returns: [
-        { name: "user_id",    type: "uuid" },
-        { name: "post_count", type: "int"  },
+        { name: "user_id", type: "uuid" },
+        { name: "post_count", type: "int" },
       ],
     },
   ],

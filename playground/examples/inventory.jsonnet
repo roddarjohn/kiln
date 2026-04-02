@@ -4,9 +4,9 @@
 // Run with:
 //   uv run --group playground python playground/run_example.py examples/inventory.jsonnet
 
-local auth  = import 'kiln/auth/jwt.libsonnet';
-local field = import 'kiln/models/fields.libsonnet';
-local crud  = import 'kiln/crud/presets.libsonnet';
+local auth = import "kiln/auth/jwt.libsonnet";
+local crud = import "kiln/crud/presets.libsonnet";
+local field = import "kiln/models/fields.libsonnet";
 
 {
   version: "1",
@@ -63,12 +63,12 @@ local crud  = import 'kiln/crud/presets.libsonnet';
       require_auth: true,
       parameters: [
         { name: "start_date", type: "date" },
-        { name: "end_date",   type: "date" },
+        { name: "end_date", type: "date" },
       ],
       returns: [
-        { name: "product_id",  type: "uuid"  },
-        { name: "sku",         type: "str"   },
-        { name: "net_quantity", type: "int"  },
+        { name: "product_id", type: "uuid" },
+        { name: "sku", type: "str" },
+        { name: "net_quantity", type: "int" },
       ],
     },
   ],

@@ -4,8 +4,8 @@
 // Run with:
 //   uv run --group playground python playground/run_example.py examples/blog.jsonnet
 
-local field = import 'kiln/models/fields.libsonnet';
-local crud  = import 'kiln/crud/presets.libsonnet';
+local crud = import "kiln/crud/presets.libsonnet";
+local field = import "kiln/models/fields.libsonnet";
 
 local timestamps = [
   field.datetime("created_at", auto_now_add=true),
@@ -80,10 +80,10 @@ local timestamps = [
       // and calls it from the generated route.
       query_fn: "blog.db.views.published_articles.get_query",
       returns: [
-        { name: "id",           type: "uuid"     },
-        { name: "title",        type: "str"      },
-        { name: "slug",         type: "str"      },
-        { name: "author_name",  type: "str"      },
+        { name: "id", type: "uuid" },
+        { name: "title", type: "str" },
+        { name: "slug", type: "str" },
+        { name: "author_name", type: "str" },
         { name: "published_at", type: "datetime" },
       ],
     },
