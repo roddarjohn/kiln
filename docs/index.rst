@@ -10,6 +10,7 @@ kiln
    :caption: Getting started
 
    usage
+   playground
 
 .. toctree::
    :maxdepth: 2
