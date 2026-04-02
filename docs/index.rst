@@ -9,13 +9,15 @@ kiln
    :maxdepth: 2
    :caption: Getting started
 
-   usage
+   getting_started
    playground
+   usage
 
 .. toctree::
    :maxdepth: 2
    :caption: Reference
 
+   reference
    api
    extending
 
