@@ -358,3 +358,73 @@ def test_registry_write_files(full_config, tmp_path: Path):
     written2, skipped2 = _write_files(files, tmp_path)
     assert written2 == written  # all files overwritten again (none are stubs)
     assert skipped2 == 0
+
+
+# ---------------------------------------------------------------------------
+# _helpers — column_def branches
+# ---------------------------------------------------------------------------
+
+
+def test_column_def_foreign_key():
+    from kiln.generators._helpers import column_def
+
+    f = FieldConfig(
+        name="author_id", type="uuid", foreign_key="authors.id", nullable=True
+    )
+    result = column_def(f)
+    assert 'PGCraftForeignKey("authors.id")' in result
+    assert "nullable=True" in result
+
+
+def test_column_def_auto_now_add_and_auto_now():
+    from kiln.generators._helpers import column_def
+
+    f1 = FieldConfig(name="created_at", type="datetime", auto_now_add=True)
+    assert "server_default=func.now()" in column_def(f1)
+
+    f2 = FieldConfig(name="updated_at", type="datetime", auto_now=True)
+    assert "onupdate=func.now()" in column_def(f2)
+
+
+def test_type_imports_json_and_date():
+    from kiln.generators._helpers import type_imports
+
+    result = type_imports(["json", "date"])
+    assert "from typing import Any" in result
+    assert "from datetime import date" in result
+    assert "import uuid" not in result
+
+
+# ---------------------------------------------------------------------------
+# ViewGenerator — validation and missing query_fn
+# ---------------------------------------------------------------------------
+
+
+def test_view_generator_validation_error_missing_file():
+    view = ViewModel(
+        name="my_view",
+        model="Thing",
+        query_fn="totally.missing.module.get_query",
+        parameters=[],
+        returns=[ViewColumn(name="id", type="uuid")],
+    )
+    cfg = KilnConfig(views=[view])
+    with pytest.raises(ValueError, match="query_fn modules could not be found"):
+        ViewGenerator().generate(cfg)
+
+
+def test_view_generator_plain_missing_query_fn_raises():
+    view = ViewModel(
+        name="bad_view",
+        model="Thing",
+        query_fn=None,
+        parameters=[],
+        returns=[ViewColumn(name="id", type="uuid")],
+    )
+    cfg = KilnConfig(views=[view])
+    ViewGenerator.skip_validation = True
+    try:
+        with pytest.raises(ValueError, match=r"missing.*query_fn"):
+            ViewGenerator().generate(cfg)
+    finally:
+        ViewGenerator.skip_validation = False
