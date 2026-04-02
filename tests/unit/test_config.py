@@ -109,6 +109,26 @@ def test_load_unsupported_extension(tmp_path: Path):
         load(bad)
 
 
+def test_load_jsonnet(tmp_path: Path):
+    # Minimal inline jsonnet (no kiln/ stdlib imports needed).
+    jsonnet_src = '{ module: "jsonnet_app", models: [] }'
+    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file.write_text(jsonnet_src)
+    cfg = load(cfg_file)
+    assert cfg.module == "jsonnet_app"
+
+
+def test_load_jsonnet_relative_import(tmp_path: Path):
+    # Tests the non-kiln/ branch of _import_callback.
+    helper = tmp_path / "helper.libsonnet"
+    helper.write_text('{ mod: "helper_app" }')
+    jsonnet_src = 'local h = import "helper.libsonnet"; { module: h.mod }'
+    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file.write_text(jsonnet_src)
+    cfg = load(cfg_file)
+    assert cfg.module == "helper_app"
+
+
 def test_load_validation_error(tmp_path: Path):
     # missing required 'fields' on model
     data = {
