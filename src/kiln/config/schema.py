@@ -93,11 +93,11 @@ class ViewColumn(BaseModel):
 class ViewModel(BaseModel):
     """A database view or function exposed as a FastAPI endpoint.
 
-    When ``parameters`` is empty, a pgcraft view stub is generated
-    using ``PGCraftViewMixin``. When non-empty, a set-returning
-    function stub using ``PGCraftFunctionMixin`` is generated.
-    In both cases the FastAPI route queries the named database
-    object without embedding SQL logic.
+    When ``parameters`` is empty the route calls ``query_fn()`` to
+    obtain a SQLAlchemy ``select()`` expression — the developer writes
+    and owns that function.  When ``parameters`` is non-empty the route
+    calls the named set-returning function via
+    ``func.<schema>.<name>(params).table_valued(cols)``.
     """
 
     name: str
@@ -108,6 +108,12 @@ class ViewModel(BaseModel):
     returns: list[ViewColumn]
     require_auth: bool = True
     http_method: Literal["GET", "POST"] = "GET"
+    query_fn: str | None = None
+    """Dotted import path to a zero-argument function returning a
+    SQLAlchemy ``select()`` expression, e.g.
+    ``"app.db.views.published_articles.get_query"``.
+    Required for non-parameterised views; unused for function views.
+    """
 
 
 class KilnConfig(BaseModel):

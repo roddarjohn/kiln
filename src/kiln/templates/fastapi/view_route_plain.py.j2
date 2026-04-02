@@ -18,14 +18,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 {% if has_auth %}
 from {{ module }}.auth.dependencies import get_current_user
 {% endif %}
 from {{ module }}.db.session import get_db
-from {{ module }}.{{ view.name }}.stub import {{ view.name }}_table
+from {{ query_fn_module }} import {{ query_fn_name }}
 
 router = APIRouter(prefix="/{{ slug }}", tags=["{{ slug }}"])
 DB = Annotated[AsyncSession, Depends(get_db)]
@@ -52,7 +51,7 @@ async def get_{{ view.name }}(
 {% endif %}
 ) -> list[{{ result_class }}]:
     """{{ description }}"""
-    result = await db.execute(select({{ view.name }}_table))
+    result = await db.execute({{ query_fn_name }}())
     return [
         {{ result_class }}.model_validate(dict(r._mapping)) for r in result.all()
     ]

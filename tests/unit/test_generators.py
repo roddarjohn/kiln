@@ -81,6 +81,7 @@ def plain_view() -> ViewModel:
             ViewColumn(name="email", type="str"),
         ],
         require_auth=False,
+        query_fn="app.db.views.active_users.get_query",
     )
 
 
@@ -185,29 +186,21 @@ def test_model_generator_postgrest_plugin():
 # ---------------------------------------------------------------------------
 
 
-def test_view_generator_produces_stub_and_route(
-    full_config, parameterised_view
-):
+def test_view_generator_produces_route(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert f"{parameterised_view.name}/stub.py" in paths
     assert f"{parameterised_view.name}/route.py" in paths
 
 
-def test_view_stub_no_overwrite(full_config, parameterised_view):
+def test_view_generator_no_stubs(full_config):
     files = ViewGenerator().generate(full_config)
-    stub = next(
-        f for f in files if f.path == f"{parameterised_view.name}/stub.py"
-    )
-    assert stub.overwrite is False
+    assert not any("stub" in f.path for f in files)
 
 
 def test_view_route_overwrite(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     route = next(
-        f
-        for f in files
-        if f.path == f"{parameterised_view.name}/route.py"
+        f for f in files if f.path == f"{parameterised_view.name}/route.py"
     )
     assert route.overwrite is True
 
@@ -355,6 +348,6 @@ def test_registry_write_files(full_config, tmp_path: Path):
     written, skipped = _write_files(files, tmp_path)
     assert written > 0
     assert skipped == 0
-    # view stub should not be overwritten on second run
     written2, skipped2 = _write_files(files, tmp_path)
-    assert skipped2 > 0
+    assert written2 == 0  # nothing new on second run, all overwritten in place
+    assert skipped2 == 0
