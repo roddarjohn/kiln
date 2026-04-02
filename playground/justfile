@@ -1,0 +1,23 @@
+config := "examples/project.jsonnet"
+out    := "generated"
+
+# List available recipes
+default:
+    @just --list
+
+# Nuke all generated files
+reset:
+    rm -rf {{ out }}
+
+alias r := reset
+
+# Generate everything from the project config
+generate:
+    uv run --project .. kiln generate --config {{ config }} --out {{ out }}
+
+alias g := generate
+
+# Reset then generate
+regen: reset generate
+
+alias rg := regen
