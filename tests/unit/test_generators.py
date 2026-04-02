@@ -155,7 +155,7 @@ def test_model_generator_cannot_generate_empty():
 
 def test_model_generator_output_paths(full_config):
     files = PGCraftModelGenerator().generate(full_config)
-    assert any(f.path == "db/models/user.py" for f in files)
+    assert any(f.path == "user/model.py" for f in files)
 
 
 def test_model_generator_valid_python(full_config):
@@ -190,14 +190,14 @@ def test_view_generator_produces_stub_and_route(
 ):
     files = ViewGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert f"db/views/{parameterised_view.name}.py" in paths
-    assert f"api/views/{parameterised_view.name}.py" in paths
+    assert f"{parameterised_view.name}/stub.py" in paths
+    assert f"{parameterised_view.name}/route.py" in paths
 
 
 def test_view_stub_no_overwrite(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     stub = next(
-        f for f in files if f.path == f"db/views/{parameterised_view.name}.py"
+        f for f in files if f.path == f"{parameterised_view.name}/stub.py"
     )
     assert stub.overwrite is False
 
@@ -207,21 +207,21 @@ def test_view_route_overwrite(full_config, parameterised_view):
     route = next(
         f
         for f in files
-        if f.path == f"api/views/{parameterised_view.name}.py"
+        if f.path == f"{parameterised_view.name}/route.py"
     )
     assert route.overwrite is True
 
 
 def test_view_route_valid_python(full_config):
     for f in ViewGenerator().generate(full_config):
-        if f.path.startswith("api/views/"):
+        if f.path.endswith("/route.py"):
             ast.parse(f.content)
 
 
 def test_plain_view_route_uses_table(plain_view):
     cfg = KilnConfig(views=[plain_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.startswith("api/views/"))
+    route = next(f for f in files if f.path.endswith("/route.py"))
     assert "active_users_table" in route.content
     assert "table_valued" not in route.content
 
@@ -229,7 +229,7 @@ def test_plain_view_route_uses_table(plain_view):
 def test_function_view_route_uses_table_valued(parameterised_view):
     cfg = KilnConfig(views=[parameterised_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.startswith("api/views/"))
+    route = next(f for f in files if f.path.endswith("/route.py"))
     assert "table_valued" in route.content
     assert "func." in route.content
 
@@ -252,7 +252,7 @@ def test_crud_generator_skips_no_crud():
 
 def test_crud_generator_output_path(full_config, simple_model):
     files = CRUDGenerator().generate(full_config)
-    assert any(f.path == "api/routes/user.py" for f in files)
+    assert any(f.path == "user/routes.py" for f in files)
 
 
 def test_crud_generator_valid_python(full_config):

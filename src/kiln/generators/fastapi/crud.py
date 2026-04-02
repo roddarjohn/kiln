@@ -59,7 +59,7 @@ class CRUDGenerator:
         has_auth = config.auth is not None
         return [
             GeneratedFile(
-                path=f"api/routes/{m.name.lower()}.py",
+                path=f"{m.name.lower()}/routes.py",
                 content=_render_crud(
                     m, m.crud, config.module, has_auth=has_auth
                 ),

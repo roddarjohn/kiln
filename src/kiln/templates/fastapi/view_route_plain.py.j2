@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from {{ module }}.auth.dependencies import get_current_user
 {% endif %}
 from {{ module }}.db.session import get_db
-from {{ module }}.db.views.{{ view.name }} import {{ view.name }}_table
+from {{ module }}.{{ view.name }}.stub import {{ view.name }}_table
 
 router = APIRouter(prefix="/{{ slug }}", tags=["{{ slug }}"])
 DB = Annotated[AsyncSession, Depends(get_db)]

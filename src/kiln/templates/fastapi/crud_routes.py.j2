@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 {% if has_auth %}
 from {{ module }}.auth.dependencies import get_current_user
 {% endif %}
-from {{ module }}.db.models.{{ model.name | lower }} import {{ model.name }}
+from {{ module }}.{{ model.name | lower }}.model import {{ model.name }}
 from {{ module }}.db.session import get_db
 
 router = APIRouter(prefix="/{{ model.table }}", tags=["{{ model.table }}"])

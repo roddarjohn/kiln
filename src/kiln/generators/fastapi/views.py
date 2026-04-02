@@ -64,14 +64,14 @@ class ViewGenerator:
         for view in config.views:
             files.append(
                 GeneratedFile(
-                    path=f"db/views/{view.name}.py",
+                    path=f"{view.name}/stub.py",
                     content=_render_stub(view, config.module),
                     overwrite=False,
                 )
             )
             files.append(
                 GeneratedFile(
-                    path=f"api/views/{view.name}.py",
+                    path=f"{view.name}/route.py",
                     content=_render_route(view, config.module),
                     overwrite=True,
                 )

@@ -50,7 +50,7 @@ class PGCraftModelGenerator:
         """
         return [
             GeneratedFile(
-                path=f"db/models/{m.name.lower()}.py",
+                path=f"{m.name.lower()}/model.py",
                 content=_render_model(m, config.module),
             )
             for m in config.models
