@@ -21,8 +21,9 @@
   email(name, unique=false, nullable=false)::
     self._base(name, "email", { unique: unique, nullable: nullable }),
 
-  int(name, nullable=false, foreign_key=null)::
+  int(name, primary_key=false, nullable=false, foreign_key=null)::
     self._base(name, "int", {
+      primary_key: primary_key,
       nullable: nullable,
     } + (if foreign_key != null then { foreign_key: foreign_key } else {})),
 

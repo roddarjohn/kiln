@@ -1,11 +1,15 @@
 """Kiln playground runner.
 
-Evaluates example.jsonnet, runs all generators, and writes the
-output to playground/generated/.
+Evaluates a Jsonnet config, runs all generators, and writes the
+output to playground/generated/<config-stem>/.
 
 Usage::
 
+    # run the default example
     uv run --group playground python playground/run_example.py
+
+    # run a specific example
+    uv run --group playground python playground/run_example.py examples/blog.jsonnet
 
 The generated/ directory is created fresh on each run.
 Files with ``overwrite=False`` (pgcraft stubs) are only written once.
@@ -24,25 +28,25 @@ sys.path.insert(0, str(_ROOT / "src"))
 from kiln.config.loader import load  # noqa: E402
 from kiln.generators.registry import GeneratorRegistry  # noqa: E402
 
-_CONFIG = Path(__file__).parent / "example.jsonnet"
-_OUT = Path(__file__).parent / "generated"
+_PLAYGROUND = Path(__file__).parent
+_DEFAULT_CONFIG = _PLAYGROUND / "example.jsonnet"
 
 
-def main() -> None:
-    """Run the playground example and print a summary."""
-    # Fresh output directory each run (respects overwrite=False logic).
-    if _OUT.exists():
-        shutil.rmtree(_OUT)
-    _OUT.mkdir()
+def run(config_path: Path) -> None:
+    """Run generators for *config_path* and write output under generated/."""
+    out = _PLAYGROUND / "generated" / config_path.stem
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
 
-    config = load(_CONFIG)
+    config = load(config_path)
     registry = GeneratorRegistry.default()
     files = registry.run(config)
 
     written = 0
     skipped = 0
     for f in files:
-        target = _OUT / f.path
+        target = out / f.path
         if target.exists() and not f.overwrite:
             skipped += 1
             continue
@@ -52,7 +56,23 @@ def main() -> None:
         print(f"  wrote  {f.path}")
 
     print(f"\n{written} file(s) written, {skipped} stub(s) skipped.")
-    print(f"Output: {_OUT}")
+    print(f"Output: {out}\n")
+
+
+def main() -> None:
+    """Run one or all playground examples."""
+    if len(sys.argv) > 1:
+        configs = [_PLAYGROUND / sys.argv[1]]
+    else:
+        # Run all .jsonnet files: the root example plus everything in examples/
+        configs = sorted(
+            [_DEFAULT_CONFIG]
+            + list((_PLAYGROUND / "examples").glob("*.jsonnet"))
+        )
+
+    for cfg in configs:
+        print(f"=== {cfg.relative_to(_PLAYGROUND)} ===")
+        run(cfg)
 
 
 if __name__ == "__main__":
