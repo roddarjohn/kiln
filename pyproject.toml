@@ -15,9 +15,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = [
-  "typer>=0.24.1",
-]
+dependencies = ["typer>=0.24.1"]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -35,12 +33,7 @@ build-backend = "uv_build"
 
 
 [dependency-groups]
-dev = [
-  "pytest>=8",
-  "coverage[toml]>=7.0",
-  "tox>=4.49.1",
-  "tox-uv>=1.33.2",
-]
+dev = ["pytest>=8", "coverage[toml]>=7.0", "tox>=4.49.1", "tox-uv>=1.33.2"]
 docs = [
   "myst-parser>=4.0",
   "sphinx>=7.0",
