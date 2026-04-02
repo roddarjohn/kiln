@@ -42,6 +42,12 @@ class AuthConfig(BaseModel):
         "/openapi.json",
         "/health",
     ]
+    get_current_user_fn: str | None = None
+    """Dotted import path to a custom ``get_current_user`` dependency,
+    e.g. ``"myapp.auth.custom.get_current_user"``.  When set, the
+    generated ``auth/dependencies.py`` re-exports this function instead
+    of containing the default JWT implementation.
+    """
 
 
 class FieldConfig(BaseModel):
@@ -140,7 +146,13 @@ class ViewModel(BaseModel):
 
 
 class KilnConfig(BaseModel):
-    """Top-level kiln configuration."""
+    """Top-level kiln configuration.
+
+    Can be used as either an app-level config (``module``, ``models``,
+    ``views``) or a project-level config (``apps``, ``auth``,
+    ``databases``).  When ``apps`` is non-empty kiln treats the file as
+    a project config and runs generation for every listed app.
+    """
 
     version: str = "1"
     module: str = "app"
@@ -148,3 +160,14 @@ class KilnConfig(BaseModel):
     databases: list[DatabaseConfig] = []
     models: list[ModelConfig] = []
     views: list[ViewModel] = []
+    apps: list["AppRef"] = []
+
+
+class AppRef(BaseModel):
+    """An app config entry inside a project-level config."""
+
+    config: KilnConfig
+    prefix: str
+
+
+KilnConfig.model_rebuild()

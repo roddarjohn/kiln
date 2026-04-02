@@ -50,7 +50,7 @@ class RouterGenerator:
         """
         return [
             GeneratedFile(
-                path="routes/__init__.py",
+                path=f"{config.module}/routes/__init__.py",
                 content=_render_router(config),
             )
         ]

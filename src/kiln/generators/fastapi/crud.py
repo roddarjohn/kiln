@@ -60,8 +60,9 @@ class CRUDGenerator:
 
         """
         has_auth = config.auth is not None
+        app = config.module
         files: list[GeneratedFile] = [
-            GeneratedFile(path="schemas/__init__.py", content=""),
+            GeneratedFile(path=f"{app}/schemas/__init__.py", content=""),
         ]
         for m in config.models:
             if m.crud is None:
@@ -71,13 +72,13 @@ class CRUDGenerator:
             )
             files.append(
                 GeneratedFile(
-                    path=f"schemas/{m.name.lower()}.py",
+                    path=f"{app}/schemas/{m.name.lower()}.py",
                     content=_render_schemas(m),
                 )
             )
             files.append(
                 GeneratedFile(
-                    path=f"routes/{m.name.lower()}.py",
+                    path=f"{app}/routes/{m.name.lower()}.py",
                     content=_render_crud(
                         m,
                         config.module,

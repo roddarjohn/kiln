@@ -10,8 +10,10 @@ if TYPE_CHECKING:
     from kiln.generators.base import GeneratedFile, Generator
 from kiln.generators.fastapi.crud import CRUDGenerator
 from kiln.generators.fastapi.models import PGCraftModelGenerator
+from kiln.generators.fastapi.project_router import ProjectRouterGenerator
 from kiln.generators.fastapi.router import RouterGenerator
 from kiln.generators.fastapi.views import ViewGenerator
+from kiln.generators.init.scaffold import ScaffoldGenerator
 
 _BUILTIN_GENERATORS: list[type[Generator]] = [
     PGCraftModelGenerator,
@@ -28,6 +30,19 @@ class GeneratorRegistry:
 
         registry = GeneratorRegistry.default()
         files = registry.run(config)
+
+    In **project mode** (``config.apps`` is non-empty) the registry:
+
+    1. Generates ``db/`` and ``auth/`` scaffold from the project config.
+    2. Runs all app-level generators for each app, merging the project's
+       ``auth`` and ``databases`` into each app config.
+    3. Generates a root ``routes/__init__.py`` that mounts all app routers.
+
+    In **app mode** (``config.apps`` is empty) the registry:
+
+    1. Generates ``db/`` and ``auth/`` scaffold if the config includes
+       ``auth`` or ``databases``.
+    2. Runs all app-level generators against the config directly.
 
     Third-party generators are registered via the
     ``kiln.generators`` entry-point group in their
@@ -52,8 +67,7 @@ class GeneratorRegistry:
         via the ``kiln.generators`` entry-point group.
 
         Returns:
-            A :class:`GeneratorRegistry` ready to call
-            :meth:`run`.
+            A :class:`GeneratorRegistry` ready to call :meth:`run`.
 
         """
         registry = cls()
@@ -88,8 +102,8 @@ class GeneratorRegistry:
     def run(self, config: KilnConfig) -> list[GeneratedFile]:
         """Run all applicable generators against *config*.
 
-        Generators whose :meth:`~Generator.can_generate` returns
-        ``False`` are skipped.
+        Automatically detects project mode vs app mode based on whether
+        ``config.apps`` is populated.  See class docstring for details.
 
         Args:
             config: The validated kiln configuration.
@@ -99,6 +113,38 @@ class GeneratorRegistry:
             objects from every generator that ran.
 
         """
+        if config.apps:
+            return self._run_project(config)
+        return self._run_app(config)
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _run_project(self, config: KilnConfig) -> list[GeneratedFile]:
+        """Project mode: scaffold + per-app generation + root router."""
+        files: list[GeneratedFile] = []
+        files.extend(ScaffoldGenerator().generate(config))
+        for app_ref in config.apps:
+            app_config = app_ref.config.model_copy(
+                update={"auth": config.auth, "databases": config.databases}
+            )
+            files.extend(self._run_app_generators(app_config))
+        proj_router = ProjectRouterGenerator()
+        if proj_router.can_generate(config):
+            files.extend(proj_router.generate(config))
+        return files
+
+    def _run_app(self, config: KilnConfig) -> list[GeneratedFile]:
+        """App mode: optional scaffold + app generators."""
+        files: list[GeneratedFile] = []
+        if config.auth is not None or config.databases:
+            files.extend(ScaffoldGenerator().generate(config))
+        files.extend(self._run_app_generators(config))
+        return files
+
+    def _run_app_generators(self, config: KilnConfig) -> list[GeneratedFile]:
+        """Run all registered app-level generators against *config*."""
         return [
             f
             for gen in self._generators.values()

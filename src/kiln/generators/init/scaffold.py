@@ -1,8 +1,9 @@
-"""Scaffold generator for ``kiln init``.
+"""Scaffold generator for infrastructure files.
 
-Produces the one-time boilerplate files that do not change when
-the config is updated: the SQLAlchemy/pgcraft base, the async
-session factory, and the JWT authentication dependency.
+Produces ``db/`` and ``auth/`` boilerplate driven entirely by the
+project config.  All files are overwritten on every run so that
+changes to auth strategy or database pool settings are always
+reflected without manual editing.
 """
 
 from __future__ import annotations
@@ -13,87 +14,102 @@ from kiln.generators._env import env
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
-    from kiln.config.schema import KilnConfig
+    from kiln.config.schema import AuthConfig, KilnConfig
 
 
 class ScaffoldGenerator:
-    """Generates one-time scaffold files for a new kiln project.
+    """Generates infrastructure scaffold files from a kiln config.
 
-    Call :meth:`generate` to produce the boilerplate files.
-    These files are written with ``overwrite=False`` so that
-    ``kiln init`` never overwrites hand-edited scaffolds.
+    Call :meth:`generate` to produce ``db/`` and ``auth/`` files.
+    All files use ``overwrite=True`` — the config is the source of
+    truth and re-running is always safe.
     """
 
-    def generate(self, config: KilnConfig | None = None) -> list[GeneratedFile]:
-        """Return all scaffold files.
+    def generate(self, config: KilnConfig) -> list[GeneratedFile]:
+        """Return all scaffold files for *config*.
 
-        When *config* includes a ``databases`` list, one session file is
-        generated per database (e.g. ``db/primary_session.py``).  Without
-        a databases config the legacy single-file layout is used
-        (``db/session.py``).
+        Generates per-database session files when ``config.databases``
+        is non-empty, or a single ``db/session.py`` otherwise.  Emits
+        ``auth/dependencies.py`` only when ``config.auth`` is set.
 
         Args:
-            config: Optional project config.  When supplied, database
-                session files are generated per database entry.
+            config: The validated project or app-level kiln config.
 
         Returns:
             List of :class:`~kiln.generators.base.GeneratedFile`
-            objects, all with ``overwrite=False``.
+            objects, all with ``overwrite=True``.
 
         """
-        session_tmpl = env.get_template("init/db_session.py.j2")
-
-        databases = config.databases if config else []
-        if databases:
-            session_files = [
-                GeneratedFile(
-                    f"db/{db.key}_session.py",
-                    session_tmpl.render(
-                        key=db.key,
-                        url_env=db.url_env,
-                        echo=db.echo,
-                        pool_size=db.pool_size,
-                        max_overflow=db.max_overflow,
-                        pool_timeout=db.pool_timeout,
-                        pool_recycle=db.pool_recycle,
-                        pool_pre_ping=db.pool_pre_ping,
-                        get_db_fn=f"get_{db.key}_db",
-                    ),
-                    overwrite=False,
-                )
-                for db in databases
-            ]
-        else:
-            session_files = [
-                GeneratedFile(
-                    "db/session.py",
-                    session_tmpl.render(
-                        key=None,
-                        url_env="DATABASE_URL",
-                        echo=False,
-                        pool_size=5,
-                        max_overflow=10,
-                        pool_timeout=30,
-                        pool_recycle=-1,
-                        pool_pre_ping=True,
-                        get_db_fn="get_db",
-                    ),
-                    overwrite=False,
-                )
-            ]
-
-        return [
-            GeneratedFile("auth/__init__.py", "", overwrite=False),
-            GeneratedFile(
-                "auth/dependencies.py",
-                env.get_template("init/auth_dependencies.py.j2").render(),
-                overwrite=False,
-            ),
-            GeneratedFile("db/__init__.py", "", overwrite=False),
-            GeneratedFile(
-                "db/base.py",
-                env.get_template("init/db_base.py.j2").render(),
-                overwrite=False,
-            ),
-            *session_files,
+        db_base = env.get_template("init/db_base.py.j2").render()
+        files: list[GeneratedFile] = [
+            GeneratedFile("db/__init__.py", ""),
+            GeneratedFile("db/base.py", db_base),
         ]
+        files.extend(_render_sessions(config))
+        if config.auth is not None:
+            files += [
+                GeneratedFile("auth/__init__.py", ""),
+                GeneratedFile(
+                    "auth/dependencies.py", _render_auth_deps(config.auth)
+                ),
+            ]
+        return files
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _render_sessions(config: KilnConfig) -> list[GeneratedFile]:
+    """Return one session file per database, or the legacy single file."""
+    session_tmpl = env.get_template("init/db_session.py.j2")
+    if config.databases:
+        return [
+            GeneratedFile(
+                f"db/{db.key}_session.py",
+                session_tmpl.render(
+                    key=db.key,
+                    url_env=db.url_env,
+                    echo=db.echo,
+                    pool_size=db.pool_size,
+                    max_overflow=db.max_overflow,
+                    pool_timeout=db.pool_timeout,
+                    pool_recycle=db.pool_recycle,
+                    pool_pre_ping=db.pool_pre_ping,
+                    get_db_fn=f"get_{db.key}_db",
+                ),
+            )
+            for db in config.databases
+        ]
+    return [
+        GeneratedFile(
+            "db/session.py",
+            session_tmpl.render(
+                key=None,
+                url_env="DATABASE_URL",
+                echo=False,
+                pool_size=5,
+                max_overflow=10,
+                pool_timeout=30,
+                pool_recycle=-1,
+                pool_pre_ping=True,
+                get_db_fn="get_db",
+            ),
+        ),
+    ]
+
+
+def _render_auth_deps(auth: AuthConfig) -> str:
+    """Render ``auth/dependencies.py`` from *auth* config."""
+    gcu_module: str | None = None
+    gcu_name: str | None = None
+    if auth.get_current_user_fn:
+        gcu_module, gcu_name = auth.get_current_user_fn.rsplit(".", 1)
+    return env.get_template("init/auth_dependencies.py.j2").render(
+        gcu_module=gcu_module,
+        gcu_name=gcu_name,
+        secret_env=auth.secret_env,
+        algorithm=auth.algorithm,
+        token_url=auth.token_url,
+    )

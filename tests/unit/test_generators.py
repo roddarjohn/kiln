@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from kiln.config.schema import (
+    AppRef,
     AuthConfig,
     CrudConfig,
     DatabaseConfig,
@@ -19,6 +20,7 @@ from kiln.config.schema import (
 from kiln.generators.base import GeneratedFile, Generator
 from kiln.generators.fastapi.crud import CRUDGenerator
 from kiln.generators.fastapi.models import PGCraftModelGenerator
+from kiln.generators.fastapi.project_router import ProjectRouterGenerator
 from kiln.generators.fastapi.router import RouterGenerator
 from kiln.generators.fastapi.views import ViewGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
@@ -121,23 +123,45 @@ def test_generator_protocol():
 # ---------------------------------------------------------------------------
 
 
-def test_scaffold_generates_expected_paths():
-    files = ScaffoldGenerator().generate()
+def test_scaffold_generates_db_files():
+    cfg = KilnConfig()
+    files = ScaffoldGenerator().generate(cfg)
     paths = {f.path for f in files}
-    assert "auth/dependencies.py" in paths
     assert "db/base.py" in paths
     assert "db/session.py" in paths
+    assert "auth/dependencies.py" not in paths  # no auth in config
 
 
-def test_scaffold_files_no_overwrite():
-    for f in ScaffoldGenerator().generate():
-        assert f.overwrite is False, f"{f.path} should have overwrite=False"
+def test_scaffold_with_auth_generates_deps():
+    cfg = KilnConfig(auth=AuthConfig())
+    files = ScaffoldGenerator().generate(cfg)
+    paths = {f.path for f in files}
+    assert "auth/dependencies.py" in paths
+
+
+def test_scaffold_all_files_overwriteable():
+    cfg = KilnConfig(auth=AuthConfig())
+    for f in ScaffoldGenerator().generate(cfg):
+        assert f.overwrite is True, f"{f.path} should have overwrite=True"
 
 
 def test_scaffold_auth_deps_valid_python():
-    files = {f.path: f for f in ScaffoldGenerator().generate()}
+    cfg = KilnConfig(auth=AuthConfig())
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
     src = files["auth/dependencies.py"].content
     ast.parse(src)  # raises SyntaxError if invalid
+
+
+def test_scaffold_auth_deps_injection():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            get_current_user_fn="myapp.auth.custom.get_current_user"
+        )
+    )
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    src = files["auth/dependencies.py"].content
+    assert "from myapp.auth.custom import get_current_user" in src
+    assert "jwt.decode" not in src
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +179,8 @@ def test_model_generator_cannot_generate_empty():
 
 def test_model_generator_output_paths(full_config):
     files = PGCraftModelGenerator().generate(full_config)
-    assert any(f.path == "models/user.py" for f in files)
-    assert any(f.path == "models/__init__.py" for f in files)
+    assert any(f.path == "app/models/user.py" for f in files)
+    assert any(f.path == "app/models/__init__.py" for f in files)
 
 
 def test_model_generator_valid_python(full_config):
@@ -166,7 +190,7 @@ def test_model_generator_valid_python(full_config):
 
 def test_model_generator_contains_class(full_config, simple_model):
     files = PGCraftModelGenerator().generate(full_config)
-    model_file = next(f for f in files if f.path == "models/user.py")
+    model_file = next(f for f in files if f.path == "app/models/user.py")
     assert f"class {simple_model.name}(Base):" in model_file.content
 
 
@@ -179,7 +203,7 @@ def test_model_generator_postgrest_plugin():
     )
     cfg = KilnConfig(models=[m])
     files = PGCraftModelGenerator().generate(cfg)
-    model_file = next(f for f in files if f.path == "models/item.py")
+    model_file = next(f for f in files if f.path == "app/models/item.py")
     assert "PostgRESTPlugin" in model_file.content
 
 
@@ -191,7 +215,7 @@ def test_model_generator_postgrest_plugin():
 def test_view_generator_produces_route(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert f"routes/{parameterised_view.name}.py" in paths
+    assert f"app/routes/{parameterised_view.name}.py" in paths
 
 
 def test_view_generator_no_stubs(full_config):
@@ -202,7 +226,7 @@ def test_view_generator_no_stubs(full_config):
 def test_view_route_overwrite(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     route = next(
-        f for f in files if f.path == f"routes/{parameterised_view.name}.py"
+        f for f in files if f.path == f"app/routes/{parameterised_view.name}.py"
     )
     assert route.overwrite is True
 
@@ -215,7 +239,7 @@ def test_view_route_valid_python(full_config):
 def test_plain_view_route_uses_query_fn(plain_view):
     cfg = KilnConfig(views=[plain_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.startswith("routes/"))
+    route = next(f for f in files if "routes/" in f.path)
     assert "get_query" in route.content
     assert "get_query()" in route.content
     assert "table_valued" not in route.content
@@ -224,7 +248,7 @@ def test_plain_view_route_uses_query_fn(plain_view):
 def test_function_view_route_uses_table_valued(parameterised_view):
     cfg = KilnConfig(views=[parameterised_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.startswith("routes/"))
+    route = next(f for f in files if "routes/" in f.path)
     assert "table_valued" in route.content
     assert "func." in route.content
 
@@ -247,9 +271,9 @@ def test_crud_generator_skips_no_crud():
 
 def test_crud_generator_output_path(full_config):
     files = CRUDGenerator().generate(full_config)
-    assert any(f.path == "routes/user.py" for f in files)
-    assert any(f.path == "schemas/user.py" for f in files)
-    assert any(f.path == "schemas/__init__.py" for f in files)
+    assert any(f.path == "app/routes/user.py" for f in files)
+    assert any(f.path == "app/schemas/user.py" for f in files)
+    assert any(f.path == "app/schemas/__init__.py" for f in files)
 
 
 def test_crud_generator_valid_python(full_config):
@@ -259,7 +283,7 @@ def test_crud_generator_valid_python(full_config):
 
 def test_crud_generator_includes_auth(full_config):
     files = CRUDGenerator().generate(full_config)
-    routes = next(f for f in files if f.path == "routes/user.py")
+    routes = next(f for f in files if f.path == "app/routes/user.py")
     # update and delete require auth in fixture
     assert "CurrentUser" in routes.content
     assert "get_current_user" in routes.content
@@ -268,13 +292,13 @@ def test_crud_generator_includes_auth(full_config):
 def test_crud_generator_no_auth_when_unconfigured(simple_model):
     cfg = KilnConfig(models=[simple_model])  # no auth config
     files = CRUDGenerator().generate(cfg)
-    routes = next(f for f in files if f.path == "routes/user.py")
+    routes = next(f for f in files if "routes/user.py" in f.path)
     assert "get_current_user" not in routes.content
 
 
 def test_crud_generator_schemas_present(full_config, simple_model):
     files = CRUDGenerator().generate(full_config)
-    schema_file = next(f for f in files if f.path == "schemas/user.py")
+    schema_file = next(f for f in files if f.path == "app/schemas/user.py")
     assert f"{simple_model.name}Create" in schema_file.content
     assert f"{simple_model.name}Update" in schema_file.content
     assert f"{simple_model.name}Response" in schema_file.content
@@ -282,7 +306,7 @@ def test_crud_generator_schemas_present(full_config, simple_model):
 
 def test_crud_generator_excluded_field_not_in_schema(full_config):
     files = CRUDGenerator().generate(full_config)
-    schema_file = next(f for f in files if f.path == "schemas/user.py")
+    schema_file = next(f for f in files if f.path == "app/schemas/user.py")
     # hashed_password is exclude_from_api=True
     assert "hashed_password" not in schema_file.content
 
@@ -298,7 +322,7 @@ def test_router_generator_can_generate(full_config):
 
 def test_router_generator_output_path(full_config):
     files = RouterGenerator().generate(full_config)
-    assert any(f.path == "routes/__init__.py" for f in files)
+    assert any(f.path == "app/routes/__init__.py" for f in files)
 
 
 def test_router_generator_valid_python(full_config):
@@ -436,14 +460,14 @@ def test_view_generator_plain_missing_query_fn_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_scaffold_generates_single_session_without_config():
-    files = ScaffoldGenerator().generate()
+def test_scaffold_generates_single_session_without_databases():
+    files = ScaffoldGenerator().generate(KilnConfig())
     paths = {f.path for f in files}
     assert "db/session.py" in paths
     assert not any("primary" in p for p in paths)
 
 
-def test_scaffold_generates_per_db_sessions_with_config():
+def test_scaffold_generates_per_db_sessions():
     cfg = KilnConfig(
         databases=[
             DatabaseConfig(key="primary", url_env="DATABASE_URL", default=True),
@@ -465,9 +489,7 @@ def test_scaffold_per_db_session_uses_correct_env_var():
     cfg = KilnConfig(
         databases=[
             DatabaseConfig(
-                key="analytics",
-                url_env="ANALYTICS_DB_URL",
-                default=True,
+                key="analytics", url_env="ANALYTICS_DB_URL", default=True
             )
         ]
     )
@@ -479,7 +501,7 @@ def test_scaffold_per_db_session_uses_correct_env_var():
 
 def test_crud_route_uses_default_db_session(full_config):
     files = CRUDGenerator().generate(full_config)
-    route = next(f for f in files if f.path == "routes/user.py")
+    route = next(f for f in files if "routes/user.py" in f.path)
     assert "db.session" in route.content
     assert "get_db" in route.content
 
@@ -504,7 +526,7 @@ def test_crud_route_uses_named_db_session():
         models=[model],
     )
     files = CRUDGenerator().generate(cfg)
-    route = next(f for f in files if f.path == "routes/report.py")
+    route = next(f for f in files if "routes/report.py" in f.path)
     assert "db.analytics_session" in route.content
     assert "get_analytics_db" in route.content
 
@@ -522,7 +544,7 @@ def test_view_route_uses_named_db_session():
     )
     cfg = KilnConfig(databases=[db], views=[view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.startswith("routes/"))
+    route = next(f for f in files if "routes/" in f.path)
     assert "db.primary_session" in route.content
     assert "get_primary_db" in route.content
 
@@ -573,3 +595,96 @@ def test_resolve_db_session_unknown_key_raises():
     dbs = [DatabaseConfig(key="primary", default=True)]
     with pytest.raises(ValueError, match="'nope'"):
         resolve_db_session("nope", dbs)
+
+
+# ---------------------------------------------------------------------------
+# ProjectRouterGenerator
+# ---------------------------------------------------------------------------
+
+
+def _make_app_ref(module: str, prefix: str) -> AppRef:
+    return AppRef(config=KilnConfig(module=module), prefix=prefix)
+
+
+def test_project_router_can_generate():
+    cfg = KilnConfig(
+        apps=[
+            _make_app_ref("blog", "/blog"),
+            _make_app_ref("inventory", "/inventory"),
+        ]
+    )
+    assert ProjectRouterGenerator().can_generate(cfg)
+
+
+def test_project_router_cannot_generate_without_apps():
+    assert not ProjectRouterGenerator().can_generate(KilnConfig())
+
+
+def test_project_router_output_path():
+    cfg = KilnConfig(apps=[_make_app_ref("blog", "/blog")])
+    (f,) = ProjectRouterGenerator().generate(cfg)
+    assert f.path == "routes/__init__.py"
+
+
+def test_project_router_valid_python():
+    cfg = KilnConfig(
+        apps=[
+            _make_app_ref("blog", "/blog"),
+            _make_app_ref("inventory", "/inventory"),
+        ]
+    )
+    (f,) = ProjectRouterGenerator().generate(cfg)
+    ast.parse(f.content)
+
+
+def test_project_router_mounts_all_apps():
+    cfg = KilnConfig(
+        apps=[
+            _make_app_ref("blog", "/blog"),
+            _make_app_ref("inventory", "/inventory"),
+        ]
+    )
+    (f,) = ProjectRouterGenerator().generate(cfg)
+    assert "blog_router" in f.content
+    assert 'prefix="/blog"' in f.content
+    assert "inventory_router" in f.content
+    assert 'prefix="/inventory"' in f.content
+
+
+# ---------------------------------------------------------------------------
+# Registry — project mode
+# ---------------------------------------------------------------------------
+
+
+def test_registry_project_mode_generates_scaffold_and_apps():
+    blog_app = KilnConfig(
+        module="blog",
+        models=[
+            ModelConfig(
+                name="Article",
+                table="articles",
+                fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
+                crud=CrudConfig(),
+            )
+        ],
+    )
+    cfg = KilnConfig(
+        auth=AuthConfig(),
+        databases=[DatabaseConfig(key="primary", default=True)],
+        apps=[AppRef(config=blog_app, prefix="/blog")],
+    )
+    files = GeneratorRegistry.default().run(cfg)
+    paths = {f.path for f in files}
+    assert "auth/dependencies.py" in paths
+    assert "db/primary_session.py" in paths
+    assert "blog/models/article.py" in paths
+    assert "blog/routes/article.py" in paths
+    assert "routes/__init__.py" in paths
+
+
+def test_registry_app_mode_generates_scaffold_when_auth_present(full_config):
+    files = GeneratorRegistry.default().run(full_config)
+    paths = {f.path for f in files}
+    # full_config has auth=AuthConfig(), so scaffold should run
+    assert "auth/dependencies.py" in paths
+    assert "db/base.py" in paths

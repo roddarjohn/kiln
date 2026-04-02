@@ -12,5 +12,11 @@
       "/openapi.json",
       "/health",
     ]),
+    // Optional dotted path to a custom get_current_user dependency.
+    // When set, auth/dependencies.py re-exports this function instead
+    // of containing the default JWT implementation.
+    // e.g. get_current_user_fn: "myapp.auth.custom.get_current_user"
+    [if std.objectHas(opts, "get_current_user_fn") then "get_current_user_fn"]:
+      std.get(opts, "get_current_user_fn"),
   },
 }

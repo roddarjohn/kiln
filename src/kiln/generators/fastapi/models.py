@@ -48,12 +48,13 @@ class PGCraftModelGenerator:
             model, written to ``db/models/<name_lower>.py``.
 
         """
+        app = config.module
         files: list[GeneratedFile] = [
-            GeneratedFile(path="models/__init__.py", content=""),
+            GeneratedFile(path=f"{app}/models/__init__.py", content=""),
         ]
         files.extend(
             GeneratedFile(
-                path=f"models/{m.name.lower()}.py",
+                path=f"{app}/models/{m.name.lower()}.py",
                 content=_render_model(m, config.module),
             )
             for m in config.models

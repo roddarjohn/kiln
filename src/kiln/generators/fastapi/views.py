@@ -63,9 +63,10 @@ class ViewGenerator:
         """
         if not ViewGenerator.skip_validation:
             _validate_query_fns(config.views)
+        app = config.module
         return [
             GeneratedFile(
-                path=f"routes/{view.name}.py",
+                path=f"{app}/routes/{view.name}.py",
                 content=_render_route(view, config.module, config.databases),
             )
             for view in config.views

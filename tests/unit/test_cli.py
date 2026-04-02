@@ -18,60 +18,8 @@ def test_help():
 
 
 # ---------------------------------------------------------------------------
-# init command
+# generate — error handling
 # ---------------------------------------------------------------------------
-
-
-def test_init_writes_scaffold(tmp_path: Path):
-    result = runner.invoke(app, ["init", "--out", str(tmp_path)])
-    assert result.exit_code == 0
-    assert "Scaffold written" in result.output
-    assert (tmp_path / "db" / "base.py").exists()
-    assert (tmp_path / "auth" / "dependencies.py").exists()
-
-
-def test_init_with_config_generates_per_db_sessions(tmp_path: Path):
-    cfg = tmp_path / "project.json"
-    cfg.write_text('{"databases": [{"key": "primary", "default": true}]}')
-    result = runner.invoke(
-        app, ["init", "--config", str(cfg), "--out", str(tmp_path)]
-    )
-    assert result.exit_code == 0
-    assert (tmp_path / "db" / "primary_session.py").exists()
-    assert not (tmp_path / "db" / "session.py").exists()
-
-
-def test_init_with_bad_config_exits_1(tmp_path: Path):
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("not: valid: json")
-    result = runner.invoke(
-        app, ["init", "--config", str(bad), "--out", str(tmp_path)]
-    )
-    assert result.exit_code == 1
-    assert "Error" in result.output
-
-
-def test_init_does_not_overwrite(tmp_path: Path):
-    # First run writes files.
-    runner.invoke(app, ["init", "--out", str(tmp_path)])
-    sentinel = tmp_path / "db" / "base.py"
-    original = sentinel.read_text()
-    sentinel.write_text("# modified")
-    # Second run must not overwrite.
-    runner.invoke(app, ["init", "--out", str(tmp_path)])
-    assert sentinel.read_text() == "# modified"
-    _ = original  # silence unused-variable warning
-
-
-# ---------------------------------------------------------------------------
-# generate command
-# ---------------------------------------------------------------------------
-
-
-def _write_json_config(tmp_path: Path, data: dict) -> Path:
-    cfg = tmp_path / "kiln.json"
-    cfg.write_text(json.dumps(data))
-    return cfg
 
 
 def test_generate_bad_config_exits_1(tmp_path: Path):
@@ -84,7 +32,18 @@ def test_generate_bad_config_exits_1(tmp_path: Path):
     assert "Error" in result.output
 
 
-def test_generate_writes_files(tmp_path: Path):
+def _write_json_config(tmp_path: Path, data: dict) -> Path:
+    cfg = tmp_path / "kiln.json"
+    cfg.write_text(json.dumps(data))
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# generate — app mode (no apps list)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_writes_app_files(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
         {
@@ -108,9 +67,46 @@ def test_generate_writes_files(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert "Generated" in result.output
-    assert (out / "models" / "post.py").exists()
-    assert (out / "routes" / "post.py").exists()
-    assert (out / "schemas" / "post.py").exists()
+    assert (out / "myapp" / "models" / "post.py").exists()
+    assert (out / "myapp" / "routes" / "post.py").exists()
+    assert (out / "myapp" / "schemas" / "post.py").exists()
+
+
+def test_generate_with_auth_writes_scaffold(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "auth": {"type": "jwt"},
+            "databases": [{"key": "primary", "default": True}],
+            "models": [],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app, ["generate", "--config", str(cfg), "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert (out / "db" / "base.py").exists()
+    assert (out / "db" / "primary_session.py").exists()
+    assert (out / "auth" / "dependencies.py").exists()
+
+
+def test_generate_overwrites_on_rerun(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "auth": {"type": "jwt"},
+            "models": [],
+        },
+    )
+    out = tmp_path / "out"
+    runner.invoke(app, ["generate", "--config", str(cfg), "--out", str(out)])
+    sentinel = out / "auth" / "dependencies.py"
+    sentinel.write_text("# modified")
+    runner.invoke(app, ["generate", "--config", str(cfg), "--out", str(out)])
+    assert sentinel.read_text() != "# modified"
 
 
 def test_generate_no_validate_skips_query_fn_check(tmp_path: Path):
@@ -159,6 +155,77 @@ def test_generate_validates_query_fn_by_default(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "query_fn" in result.output
+
+
+# ---------------------------------------------------------------------------
+# generate — project mode (apps list)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_project_mode_writes_all_apps(tmp_path: Path):
+    blog_cfg = tmp_path / "blog.json"
+    blog_cfg.write_text(
+        json.dumps(
+            {
+                "module": "blog",
+                "models": [
+                    {
+                        "name": "Article",
+                        "table": "articles",
+                        "fields": [
+                            {"name": "id", "type": "uuid", "primary_key": True}
+                        ],
+                        "crud": {},
+                    }
+                ],
+            }
+        )
+    )
+    inv_cfg = tmp_path / "inventory.json"
+    inv_cfg.write_text(
+        json.dumps(
+            {
+                "module": "inventory",
+                "models": [
+                    {
+                        "name": "Product",
+                        "table": "products",
+                        "fields": [
+                            {"name": "id", "type": "uuid", "primary_key": True}
+                        ],
+                        "crud": {},
+                    }
+                ],
+            }
+        )
+    )
+    project_cfg = _write_json_config(
+        tmp_path,
+        {
+            "auth": {"type": "jwt"},
+            "databases": [{"key": "primary", "default": True}],
+            "apps": [
+                {"config": json.loads(blog_cfg.read_text()), "prefix": "/blog"},
+                {
+                    "config": json.loads(inv_cfg.read_text()),
+                    "prefix": "/inventory",
+                },
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app, ["generate", "--config", str(project_cfg), "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert (out / "db" / "primary_session.py").exists()
+    assert (out / "auth" / "dependencies.py").exists()
+    assert (out / "blog" / "models" / "article.py").exists()
+    assert (out / "inventory" / "models" / "product.py").exists()
+    assert (out / "routes" / "__init__.py").exists()
+    root_router = (out / "routes" / "__init__.py").read_text()
+    assert "blog_router" in root_router
+    assert "inventory_router" in root_router
 
 
 # ---------------------------------------------------------------------------
