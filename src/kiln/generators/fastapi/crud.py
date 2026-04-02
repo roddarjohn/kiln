@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from kiln.config.schema import FieldConfig
 from kiln.generators._env import env
-from kiln.generators._helpers import PYTHON_TYPES
+from kiln.generators._helpers import PYTHON_TYPES, type_imports
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -57,16 +57,27 @@ class CRUDGenerator:
 
         """
         has_auth = config.auth is not None
-        return [
-            GeneratedFile(
-                path=f"{m.name.lower()}/routes.py",
-                content=_render_crud(
-                    m, m.crud, config.module, has_auth=has_auth
-                ),
-            )
-            for m in config.models
-            if m.crud is not None
+        files: list[GeneratedFile] = [
+            GeneratedFile(path="schemas/__init__.py", content=""),
         ]
+        for m in config.models:
+            if m.crud is None:
+                continue
+            files.append(
+                GeneratedFile(
+                    path=f"schemas/{m.name.lower()}.py",
+                    content=_render_schemas(m),
+                )
+            )
+            files.append(
+                GeneratedFile(
+                    path=f"routes/{m.name.lower()}.py",
+                    content=_render_crud(
+                        m, m.crud, config.module, has_auth=has_auth
+                    ),
+                )
+            )
+        return files
 
 
 # ---------------------------------------------------------------------------
@@ -92,9 +103,7 @@ def _create_fields(fields: list[FieldConfig]) -> list[FieldConfig]:
     return [
         f
         for f in _api_fields(fields)
-        if not f.primary_key
-        and not f.auto_now_add
-        and not f.auto_now
+        if not f.primary_key and not f.auto_now_add and not f.auto_now
     ]
 
 
@@ -103,46 +112,22 @@ def _response_fields(fields: list[FieldConfig]) -> list[FieldConfig]:
     return _api_fields(fields)
 
 
-def _render_crud(
-    model: ModelConfig,
-    crud: CrudConfig,
-    module: str,
-    *,
-    has_auth: bool,
-) -> str:
-    """Render the full CRUD route file for *model*.
+def _render_schemas(model: ModelConfig) -> str:
+    """Render the Pydantic schema file for *model*.
 
     Args:
         model: The model configuration.
-        crud: The CRUD settings for this model.
-        module: Root module name for generated import paths.
-        has_auth: Whether the project has an auth config.
 
     Returns:
         Python source string.
 
     """
-    pk = _pk(model)
     create_flds = _create_fields(model.fields)
     resp_flds = _response_fields(model.fields)
-    all_flds = model.fields
-
-    dt_parts: list[str] = []
-    if any(f.type == "datetime" for f in all_flds):
-        dt_parts.append("datetime")
-    if any(f.type == "date" for f in all_flds):
-        dt_parts.append("date")
-
-    tmpl = env.get_template("fastapi/crud_routes.py.j2")
+    tmpl = env.get_template("fastapi/schemas.py.j2")
     return tmpl.render(
         model=model,
-        module=module,
-        needs_uuid=any(f.type == "uuid" for f in all_flds),
-        dt_imports=", ".join(dt_parts),
-        needs_any=any(f.type == "json" for f in all_flds),
-        has_auth=has_auth,
-        pk={"name": pk.name, "py_type": PYTHON_TYPES[pk.type]},
-        crud=crud,
+        imports=type_imports([f.type for f in model.fields]),
         create_fields=[
             {"name": f.name, "py_type": PYTHON_TYPES[f.type]}
             for f in create_flds
@@ -155,4 +140,36 @@ def _render_crud(
             }
             for f in resp_flds
         ],
+    )
+
+
+def _render_crud(
+    model: ModelConfig,
+    crud: CrudConfig,
+    module: str,
+    *,
+    has_auth: bool,
+) -> str:
+    """Render the CRUD route file for *model*.
+
+    Args:
+        model: The model configuration.
+        crud: The CRUD settings for this model.
+        module: Root module name for generated import paths.
+        has_auth: Whether the project has an auth config.
+
+    Returns:
+        Python source string.
+
+    """
+    pk = _pk(model)
+    tmpl = env.get_template("fastapi/crud_routes.py.j2")
+    return tmpl.render(
+        model=model,
+        model_lower=model.name.lower(),
+        module=module,
+        imports=type_imports([pk.type]),
+        has_auth=has_auth,
+        pk={"name": pk.name, "py_type": PYTHON_TYPES[pk.type]},
+        crud=crud,
     )

@@ -7,7 +7,10 @@ Python objects.
 
 from __future__ import annotations
 
-from kiln.config.schema import FieldConfig, FieldType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kiln.config.schema import FieldConfig, FieldType
 
 # SQLAlchemy column type constructor strings.
 # Values are written verbatim into generated Column(...) calls.
@@ -83,6 +86,34 @@ PGCRAFT_FACTORIES: dict[str, tuple[str, str]] = {
 }
 
 
+def type_imports(field_types: list[str]) -> list[str]:
+    """Return the import lines needed for the given field type names.
+
+    Produces a minimal, ordered list of ``import`` / ``from ... import``
+    statements covering ``uuid``, ``datetime``/``date``, and ``Any`` as
+    required.  Pass the result directly to templates as ``imports`` and
+    render with ``{% for imp in imports %}{{ imp }}{% endfor %}``.
+
+    Args:
+        field_types: List of :data:`FieldType` strings, e.g.
+            ``[f.type for f in model.fields]``.
+
+    Returns:
+        List of import statement strings (no trailing newlines).
+
+    """
+    types = set(field_types)
+    lines: list[str] = []
+    if "uuid" in types:
+        lines.append("import uuid")
+    dt_parts = [t for t in ("datetime", "date") if t in types]
+    if dt_parts:
+        lines.append(f"from datetime import {', '.join(dt_parts)}")
+    if "json" in types:
+        lines.append("from typing import Any")
+    return lines
+
+
 def sa_type(field_type: FieldType) -> str:
     """Return the SQLAlchemy column type string for *field_type*."""
     return SA_TYPES[field_type]
@@ -111,6 +142,7 @@ def column_def(field: FieldConfig) -> str:
 
     Returns:
         A ``Column(...)`` expression as a string.
+
     """
     args: list[str] = [SA_TYPES[field.type]]
     if field.foreign_key:

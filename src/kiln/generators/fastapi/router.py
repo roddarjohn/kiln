@@ -50,7 +50,7 @@ class RouterGenerator:
         """
         return [
             GeneratedFile(
-                path="api/__init__.py",
+                path="routes/__init__.py",
                 content=_render_router(config),
             )
         ]
@@ -75,7 +75,6 @@ def _render_router(config: KilnConfig) -> str:
             for m in crud_models
         ],
         views=[
-            {"name": v.name, "alias": f"{v.name}_router"}
-            for v in config.views
+            {"name": v.name, "alias": f"{v.name}_router"} for v in config.views
         ],
     )

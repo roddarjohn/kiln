@@ -15,7 +15,12 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = ["typer>=0.24.1", "pydantic>=2.0", "jsonnet>=0.21.0", "jinja2>=3.0"]
+dependencies = [
+  "typer>=0.24.1",
+  "pydantic>=2.0",
+  "jsonnet>=0.21.0",
+  "jinja2>=3.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -51,7 +56,7 @@ lint = ["ruff>=0.15.5", "ty>=0.0.20"]
 
 [tool.ruff]
 line-length = 80
-exclude = ["docs"]
+exclude = ["docs", "playground"]
 
 
 [tool.ruff.lint]

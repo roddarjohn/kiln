@@ -24,6 +24,7 @@ class ScaffoldGenerator:
         Returns:
             List of :class:`~kiln.generators.base.GeneratedFile`
             objects, all with ``overwrite=False``.
+
         """
         return [
             GeneratedFile("auth/__init__.py", "", overwrite=False),
@@ -34,9 +35,7 @@ class ScaffoldGenerator:
             ),
             GeneratedFile("db/__init__.py", "", overwrite=False),
             GeneratedFile("db/base.py", _DB_BASE, overwrite=False),
-            GeneratedFile(
-                "db/session.py", _DB_SESSION, overwrite=False
-            ),
+            GeneratedFile("db/session.py", _DB_SESSION, overwrite=False),
         ]
 
 

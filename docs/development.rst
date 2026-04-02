@@ -12,12 +12,26 @@ You will need the following tools installed:
 * `Python 3.12+ <https://www.python.org/downloads/>`_
 * `uv <https://docs.astral.sh/uv/>`_ — dependency management and virtual environments
 * `just <https://just.systems>`_ — command runner
+* `go-jsonnet <https://github.com/google/go-jsonnet>`_ — Jsonnet formatter (``jsonnetfmt``)
 
 Install ``uv`` by following the
 `uv installation instructions <https://docs.astral.sh/uv/getting-started/installation/>`_.
 
 Install ``just`` by following the
 `just installation instructions <https://just.systems/man/en/packages.html>`_.
+
+Install ``jsonnetfmt`` using your system package manager:
+
+.. code-block:: bash
+
+    # macOS
+    brew install go-jsonnet
+
+    # Debian / Ubuntu
+    sudo apt install jsonnet
+
+    # Other Linux (via Go toolchain)
+    go install github.com/google/go-jsonnet/cmd/jsonnetfmt@latest
 
 Fork and clone
 --------------
@@ -79,15 +93,25 @@ coverage table to the terminal.
 Linting and formatting
 -----------------------
 
-kiln uses `ruff <https://docs.astral.sh/ruff/>`_ for linting and formatting.
-It runs automatically as a pre-commit hook, but you can also run it manually::
+kiln uses `ruff <https://docs.astral.sh/ruff/>`_ for Python linting and formatting,
+and `jsonnetfmt <https://github.com/google/go-jsonnet>`_ for Jsonnet formatting.
+Both run automatically as pre-commit hooks, but you can also run them manually.
+
+Python::
 
     just lint
 
-Ruff will check for style issues and verify formatting. To auto-fix and auto-format::
-
+    # auto-fix and format
     uv run --group lint ruff check --fix
     uv run --group lint ruff format
+
+Jsonnet::
+
+    # format a single file
+    jsonnetfmt --indent 2 --string-style d --in-place path/to/file.jsonnet
+
+    # format all Jsonnet files in the repo
+    find . -name '*.jsonnet' -o -name '*.libsonnet' | xargs jsonnetfmt --indent 2 --string-style d --in-place
 
 Type checking
 -------------

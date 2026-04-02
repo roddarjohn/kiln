@@ -19,5 +19,5 @@ env = jinja2.Environment(
     lstrip_blocks=True,
     keep_trailing_newline=True,
     undefined=jinja2.StrictUndefined,
-    autoescape=False,
+    autoescape=False,  # noqa: S701 — generating Python source, not HTML
 )

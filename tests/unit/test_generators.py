@@ -23,13 +23,12 @@ from kiln.generators.fastapi.views import ViewGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
 from kiln.generators.registry import GeneratorRegistry
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def simple_model() -> ModelConfig:
     return ModelConfig(
         name="User",
@@ -42,15 +41,13 @@ def simple_model() -> ModelConfig:
             FieldConfig(
                 name="hashed_password", type="str", exclude_from_api=True
             ),
-            FieldConfig(
-                name="created_at", type="datetime", auto_now_add=True
-            ),
+            FieldConfig(name="created_at", type="datetime", auto_now_add=True),
         ],
         crud=CrudConfig(require_auth=["update", "delete"]),
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def parameterised_view() -> ViewModel:
     return ViewModel(
         name="summarize_posts_by_user",
@@ -69,7 +66,7 @@ def parameterised_view() -> ViewModel:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def plain_view() -> ViewModel:
     return ViewModel(
         name="active_users",
@@ -81,11 +78,12 @@ def plain_view() -> ViewModel:
             ViewColumn(name="email", type="str"),
         ],
         require_auth=False,
-        query_fn="app.db.views.active_users.get_query",
+        # file exists on disk — passes validation
+        query_fn="tests.unit.test_generators.get_query",
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def full_config(simple_model, parameterised_view) -> KilnConfig:
     return KilnConfig(
         module="app",
@@ -156,7 +154,8 @@ def test_model_generator_cannot_generate_empty():
 
 def test_model_generator_output_paths(full_config):
     files = PGCraftModelGenerator().generate(full_config)
-    assert any(f.path == "user/model.py" for f in files)
+    assert any(f.path == "models/user.py" for f in files)
+    assert any(f.path == "models/__init__.py" for f in files)
 
 
 def test_model_generator_valid_python(full_config):
@@ -165,8 +164,9 @@ def test_model_generator_valid_python(full_config):
 
 
 def test_model_generator_contains_class(full_config, simple_model):
-    (f,) = PGCraftModelGenerator().generate(full_config)
-    assert f"class {simple_model.name}(Base):" in f.content
+    files = PGCraftModelGenerator().generate(full_config)
+    model_file = next(f for f in files if f.path == "models/user.py")
+    assert f"class {simple_model.name}(Base):" in model_file.content
 
 
 def test_model_generator_postgrest_plugin():
@@ -177,8 +177,9 @@ def test_model_generator_postgrest_plugin():
         fields=[FieldConfig(name="id", type="int", primary_key=True)],
     )
     cfg = KilnConfig(models=[m])
-    (f,) = PGCraftModelGenerator().generate(cfg)
-    assert "PostgRESTPlugin" in f.content
+    files = PGCraftModelGenerator().generate(cfg)
+    model_file = next(f for f in files if f.path == "models/item.py")
+    assert "PostgRESTPlugin" in model_file.content
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +190,7 @@ def test_model_generator_postgrest_plugin():
 def test_view_generator_produces_route(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert f"{parameterised_view.name}/route.py" in paths
+    assert f"routes/{parameterised_view.name}.py" in paths
 
 
 def test_view_generator_no_stubs(full_config):
@@ -200,29 +201,29 @@ def test_view_generator_no_stubs(full_config):
 def test_view_route_overwrite(full_config, parameterised_view):
     files = ViewGenerator().generate(full_config)
     route = next(
-        f for f in files if f.path == f"{parameterised_view.name}/route.py"
+        f for f in files if f.path == f"routes/{parameterised_view.name}.py"
     )
     assert route.overwrite is True
 
 
 def test_view_route_valid_python(full_config):
     for f in ViewGenerator().generate(full_config):
-        if f.path.endswith("/route.py"):
-            ast.parse(f.content)
+        ast.parse(f.content)
 
 
-def test_plain_view_route_uses_table(plain_view):
+def test_plain_view_route_uses_query_fn(plain_view):
     cfg = KilnConfig(views=[plain_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.endswith("/route.py"))
-    assert "active_users_table" in route.content
+    route = next(f for f in files if f.path.startswith("routes/"))
+    assert "get_query" in route.content
+    assert "get_query()" in route.content
     assert "table_valued" not in route.content
 
 
 def test_function_view_route_uses_table_valued(parameterised_view):
     cfg = KilnConfig(views=[parameterised_view])
     files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if f.path.endswith("/route.py"))
+    route = next(f for f in files if f.path.startswith("routes/"))
     assert "table_valued" in route.content
     assert "func." in route.content
 
@@ -243,9 +244,11 @@ def test_crud_generator_skips_no_crud():
     assert not CRUDGenerator().can_generate(KilnConfig(models=[m]))
 
 
-def test_crud_generator_output_path(full_config, simple_model):
+def test_crud_generator_output_path(full_config):
     files = CRUDGenerator().generate(full_config)
-    assert any(f.path == "user/routes.py" for f in files)
+    assert any(f.path == "routes/user.py" for f in files)
+    assert any(f.path == "schemas/user.py" for f in files)
+    assert any(f.path == "schemas/__init__.py" for f in files)
 
 
 def test_crud_generator_valid_python(full_config):
@@ -254,29 +257,33 @@ def test_crud_generator_valid_python(full_config):
 
 
 def test_crud_generator_includes_auth(full_config):
-    (f,) = CRUDGenerator().generate(full_config)
+    files = CRUDGenerator().generate(full_config)
+    routes = next(f for f in files if f.path == "routes/user.py")
     # update and delete require auth in fixture
-    assert "CurrentUser" in f.content
-    assert "get_current_user" in f.content
+    assert "CurrentUser" in routes.content
+    assert "get_current_user" in routes.content
 
 
 def test_crud_generator_no_auth_when_unconfigured(simple_model):
     cfg = KilnConfig(models=[simple_model])  # no auth config
-    (f,) = CRUDGenerator().generate(cfg)
-    assert "get_current_user" not in f.content
+    files = CRUDGenerator().generate(cfg)
+    routes = next(f for f in files if f.path == "routes/user.py")
+    assert "get_current_user" not in routes.content
 
 
 def test_crud_generator_schemas_present(full_config, simple_model):
-    (f,) = CRUDGenerator().generate(full_config)
-    assert f"{simple_model.name}Create" in f.content
-    assert f"{simple_model.name}Update" in f.content
-    assert f"{simple_model.name}Response" in f.content
+    files = CRUDGenerator().generate(full_config)
+    schema_file = next(f for f in files if f.path == "schemas/user.py")
+    assert f"{simple_model.name}Create" in schema_file.content
+    assert f"{simple_model.name}Update" in schema_file.content
+    assert f"{simple_model.name}Response" in schema_file.content
 
 
 def test_crud_generator_excluded_field_not_in_schema(full_config):
-    (f,) = CRUDGenerator().generate(full_config)
+    files = CRUDGenerator().generate(full_config)
+    schema_file = next(f for f in files if f.path == "schemas/user.py")
     # hashed_password is exclude_from_api=True
-    assert "hashed_password" not in f.content
+    assert "hashed_password" not in schema_file.content
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +297,7 @@ def test_router_generator_can_generate(full_config):
 
 def test_router_generator_output_path(full_config):
     files = RouterGenerator().generate(full_config)
-    assert any(f.path == "api/__init__.py" for f in files)
+    assert any(f.path == "routes/__init__.py" for f in files)
 
 
 def test_router_generator_valid_python(full_config):
@@ -329,10 +336,10 @@ def test_registry_custom_generator(full_config):
         def name(self) -> str:
             return "noop"
 
-        def can_generate(self, config: KilnConfig) -> bool:
+        def can_generate(self, _config: KilnConfig) -> bool:
             return True
 
-        def generate(self, config: KilnConfig) -> list[GeneratedFile]:
+        def generate(self, _config: KilnConfig) -> list[GeneratedFile]:
             return [GeneratedFile("noop.txt", "hi")]
 
     r = GeneratorRegistry()
@@ -349,5 +356,5 @@ def test_registry_write_files(full_config, tmp_path: Path):
     assert written > 0
     assert skipped == 0
     written2, skipped2 = _write_files(files, tmp_path)
-    assert written2 == 0  # nothing new on second run, all overwritten in place
+    assert written2 == written  # all files overwritten again (none are stubs)
     assert skipped2 == 0

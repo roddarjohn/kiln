@@ -31,6 +31,7 @@ def load(config_path: Path) -> KilnConfig:
     Raises:
         ValueError: If the file extension is not supported.
         pydantic.ValidationError: If the config fails validation.
+
     """
     suffix = config_path.suffix.lower()
     if suffix == ".jsonnet":
@@ -45,9 +46,7 @@ def load(config_path: Path) -> KilnConfig:
     return KilnConfig.model_validate(data)
 
 
-def _import_callback(
-    importing_dir: str, import_path: str
-) -> tuple[str, bytes]:
+def _import_callback(importing_dir: str, import_path: str) -> tuple[str, bytes]:
     """Resolve import paths during Jsonnet evaluation.
 
     Maps ``kiln/...`` imports to the bundled stdlib directory;
@@ -59,9 +58,10 @@ def _import_callback(
 
     Returns:
         ``(resolved_path, file_contents)`` tuple.
+
     """
     if import_path.startswith("kiln/"):
-        target = _STDLIB_DIR / import_path[len("kiln/"):]
+        target = _STDLIB_DIR / import_path[len("kiln/") :]
     else:
         target = Path(importing_dir) / import_path
     return str(target), target.read_bytes()
@@ -75,6 +75,7 @@ def _evaluate_jsonnet(path: Path) -> str:
 
     Returns:
         JSON string produced by the Jsonnet evaluator.
+
     """
     return _jsonnet.evaluate_file(  # type: ignore[no-any-return]
         str(path),

@@ -1,7 +1,6 @@
 """Tests for kiln config loading and schema validation."""
 
 import json
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -16,7 +15,6 @@ from kiln.config.schema import (
     ViewModel,
     ViewParam,
 )
-
 
 # ---------------------------------------------------------------------------
 # Schema tests
@@ -35,7 +33,7 @@ def test_kiln_config_defaults():
 def test_auth_config_defaults():
     auth = AuthConfig()
     assert auth.type == "jwt"
-    assert auth.secret_env == "JWT_SECRET"
+    assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
     assert "/docs" in auth.exclude_paths
 
@@ -92,9 +90,7 @@ def test_load_json(tmp_path: Path):
             {
                 "name": "Widget",
                 "table": "widgets",
-                "fields": [
-                    {"name": "id", "type": "int", "primary_key": True}
-                ],
+                "fields": [{"name": "id", "type": "int", "primary_key": True}],
             }
         ],
     }

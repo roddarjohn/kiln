@@ -21,6 +21,7 @@ class GeneratedFile:
             in (e.g. pgcraft view/function definitions) so that
             re-running ``kiln generate`` never destroys hand-written
             SQL.
+
     """
 
     path: str
@@ -55,6 +56,7 @@ class Generator(Protocol):
 
         Returns:
             ``True`` when the generator should run.
+
         """
         ...
 
@@ -67,5 +69,6 @@ class Generator(Protocol):
         Returns:
             List of :class:`GeneratedFile` objects.  Paths are
             relative to the output directory chosen by the caller.
+
         """
         ...

@@ -1,10 +1,19 @@
 """Pydantic models for kiln configuration."""
 
-from __future__ import annotations
-
-from typing import List, Literal
+import warnings
+from typing import List, Literal  # noqa: UP035
 
 from pydantic import BaseModel
+
+# Pydantic v2 warns when a field name shadows a deprecated attribute on
+# BaseModel.  ``schema`` shadows the deprecated v1-compat ``BaseModel.schema()``
+# classmethod, which is intentional — ``schema`` is a valid database concept.
+warnings.filterwarnings(
+    "ignore",
+    message='Field name "schema" .* shadows',
+    category=UserWarning,
+    module=__name__,
+)
 
 FieldType = Literal[
     "uuid",
@@ -25,10 +34,10 @@ class AuthConfig(BaseModel):
     """JWT authentication configuration."""
 
     type: Literal["jwt"] = "jwt"
-    secret_env: str = "JWT_SECRET"
+    secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
-    token_url: str = "/auth/token"
-    exclude_paths: list[str] = [  # noqa: RUF012
+    token_url: str = "/auth/token"  # noqa: S105
+    exclude_paths: list[str] = [
         "/docs",
         "/openapi.json",
         "/health",
@@ -59,7 +68,7 @@ class CrudConfig(BaseModel):
     delete: bool = True
     list: bool = True
     paginated: bool = True
-    require_auth: List[CrudOp] = []  # noqa: RUF012
+    require_auth: List[CrudOp] = []  # noqa: UP006
 
 
 class ModelConfig(BaseModel):
@@ -68,10 +77,8 @@ class ModelConfig(BaseModel):
     name: str
     table: str
     schema: str = "public"
-    pgcraft_type: Literal[
-        "simple", "append_only", "ledger", "eav"
-    ] = "simple"
-    pgcraft_plugins: list[str] = []  # noqa: RUF012
+    pgcraft_type: Literal["simple", "append_only", "ledger", "eav"] = "simple"
+    pgcraft_plugins: list[str] = []
     fields: list[FieldConfig]
     crud: CrudConfig | None = None
 
@@ -104,7 +111,7 @@ class ViewModel(BaseModel):
     model: str
     description: str = ""
     schema: str = "public"
-    parameters: list[ViewParam] = []  # noqa: RUF012
+    parameters: list[ViewParam] = []
     returns: list[ViewColumn]
     require_auth: bool = True
     http_method: Literal["GET", "POST"] = "GET"
@@ -122,5 +129,5 @@ class KilnConfig(BaseModel):
     version: str = "1"
     module: str = "app"
     auth: AuthConfig | None = None
-    models: list[ModelConfig] = []  # noqa: RUF012
-    views: list[ViewModel] = []  # noqa: RUF012
+    models: list[ModelConfig] = []
+    views: list[ViewModel] = []

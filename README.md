@@ -33,11 +33,16 @@ Full documentation is available at
 
 ## Development
 
+**Prerequisites:** [uv](https://docs.astral.sh/uv/), [just](https://just.systems), and `jsonnetfmt` — `brew install go-jsonnet` on macOS, `sudo apt install jsonnet` on Debian/Ubuntu.
+
 ```bash
 # Clone and install
 git clone https://github.com/<username>/kiln.git
 cd kiln
 uv sync --all-groups
+
+# Install pre-commit hooks (ruff + jsonnetfmt run on every commit)
+just setup
 
 # Run checks
 just lint          # ruff check + format

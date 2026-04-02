@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators._helpers import PGCRAFT_FACTORIES, column_def
+from kiln.generators._helpers import PGCRAFT_FACTORIES, column_def, type_imports
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
-    from kiln.config.schema import FieldConfig, KilnConfig, ModelConfig
+    from kiln.config.schema import KilnConfig, ModelConfig
 
 
 class PGCraftModelGenerator:
@@ -48,13 +48,17 @@ class PGCraftModelGenerator:
             model, written to ``db/models/<name_lower>.py``.
 
         """
-        return [
+        files: list[GeneratedFile] = [
+            GeneratedFile(path="models/__init__.py", content=""),
+        ]
+        files.extend(
             GeneratedFile(
-                path=f"{m.name.lower()}/model.py",
+                path=f"models/{m.name.lower()}.py",
                 content=_render_model(m, config.module),
             )
             for m in config.models
-        ]
+        )
+        return files
 
 
 def _render_model(model: ModelConfig, module: str) -> str:
@@ -77,12 +81,6 @@ def _render_model(model: ModelConfig, module: str) -> str:
     if has_postgrest:
         pgcraft_items.append("PostgRESTPlugin()")
 
-    dt_parts: list[str] = []
-    if any(f.type == "datetime" for f in fields):
-        dt_parts.append("datetime")
-    if any(f.type == "date" for f in fields):
-        dt_parts.append("date")
-
     sa_names = ["Column"]
     if any(f.type in ("str", "email") for f in fields):
         sa_names.append("String")
@@ -99,8 +97,7 @@ def _render_model(model: ModelConfig, module: str) -> str:
     return tmpl.render(
         model=model,
         module=module,
-        needs_uuid=any(f.type == "uuid" for f in fields),
-        dt_imports=", ".join(dt_parts),
+        imports=type_imports([f.type for f in fields]),
         needs_pg=any(
             f.type in ("uuid", "datetime", "date", "json") for f in fields
         ),
@@ -110,11 +107,5 @@ def _render_model(model: ModelConfig, module: str) -> str:
         factory_class=factory_class,
         factory_module=factory_module,
         pgcraft_list=", ".join(pgcraft_items),
-        columns=[
-            {"name": f.name, "coldef": column_def(f)} for f in fields
-        ],
+        columns=[{"name": f.name, "coldef": column_def(f)} for f in fields],
     )
-
-
-def _needs_uuid(fields: list[FieldConfig]) -> bool:
-    return any(f.type == "uuid" for f in fields)

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib.metadata
+from typing import TYPE_CHECKING
 
-from kiln.config.schema import KilnConfig
-from kiln.generators.base import GeneratedFile, Generator
+if TYPE_CHECKING:
+    from kiln.config.schema import KilnConfig
+    from kiln.generators.base import GeneratedFile, Generator
 from kiln.generators.fastapi.crud import CRUDGenerator
 from kiln.generators.fastapi.models import PGCraftModelGenerator
 from kiln.generators.fastapi.router import RouterGenerator
@@ -52,6 +54,7 @@ class GeneratorRegistry:
         Returns:
             A :class:`GeneratorRegistry` ready to call
             :meth:`run`.
+
         """
         registry = cls()
         for gen_cls in _BUILTIN_GENERATORS:
@@ -67,6 +70,7 @@ class GeneratorRegistry:
 
         Args:
             generator: The generator instance to register.
+
         """
         self._generators[generator.name] = generator
 
@@ -93,6 +97,7 @@ class GeneratorRegistry:
         Returns:
             Flat list of :class:`~kiln.generators.base.GeneratedFile`
             objects from every generator that ran.
+
         """
         return [
             f

@@ -15,12 +15,14 @@ definitions and points kiln at them via ``query_fn``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
 from kiln.generators._helpers import (
     PYTHON_TYPES,
     SA_INSTANCE_TYPES,
+    type_imports,
 )
 from kiln.generators.base import GeneratedFile
 
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
 
 class ViewGenerator:
     """Generates FastAPI routes for views and set-returning functions."""
+
+    skip_validation: bool = False
 
     @property
     def name(self) -> str:
@@ -56,13 +60,48 @@ class ViewGenerator:
             written to ``<name>/route.py``.
 
         """
+        if not ViewGenerator.skip_validation:
+            _validate_query_fns(config.views)
         return [
             GeneratedFile(
-                path=f"{view.name}/route.py",
+                path=f"routes/{view.name}.py",
                 content=_render_route(view, config.module),
             )
             for view in config.views
         ]
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_query_fns(views: list[ViewModel]) -> None:
+    """Raise ValueError for any plain view whose query_fn module file is absent.
+
+    Checks that the module path resolves to a ``.py`` file relative to the
+    current working directory.  Pass ``--no-validate`` to skip this check
+    when the module hasn't been written yet.
+
+    Args:
+        views: All view configs to validate.
+
+    """
+    cwd = Path.cwd()
+    errors: list[str] = []
+    for view in views:
+        if view.parameters or not view.query_fn:
+            continue
+        module_path, _ = view.query_fn.rsplit(".", 1)
+        file_path = cwd / Path(*module_path.split("."))
+        if not file_path.with_suffix(".py").exists():
+            errors.append(
+                f"  view '{view.name}': module '{module_path}' not found"
+                f" (from query_fn='{view.query_fn}')"
+            )
+    if errors:
+        msg = "query_fn modules could not be found:\n" + "\n".join(errors)
+        raise ValueError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -93,18 +132,11 @@ def _render_view_route(view: ViewModel, module: str) -> str:
             f"View '{view.name}' has no parameters but is missing "
             f"'query_fn'. Provide a dotted import path to a function "
             f"that returns a SQLAlchemy select(), e.g. "
-            f"\"app.db.views.{view.name}.get_query\"."
+            f'"app.db.views.{view.name}.get_query".'
         )
         raise ValueError(msg)
 
     query_fn_module, query_fn_name = view.query_fn.rsplit(".", 1)
-
-    all_cols = list(view.returns)
-    dt_parts: list[str] = []
-    if any(c.type == "datetime" for c in all_cols):
-        dt_parts.append("datetime")
-    if any(c.type == "date" for c in all_cols):
-        dt_parts.append("date")
 
     tmpl = env.get_template("fastapi/view_route_plain.py.j2")
     return tmpl.render(
@@ -114,9 +146,7 @@ def _render_view_route(view: ViewModel, module: str) -> str:
         has_auth=view.require_auth,
         method=view.http_method.lower(),
         slug=view.name.replace("_", "-"),
-        needs_uuid=any(c.type == "uuid" for c in all_cols),
-        dt_imports=", ".join(dt_parts),
-        needs_any=any(c.type == "json" for c in all_cols),
+        imports=type_imports([c.type for c in view.returns]),
         description=view.description or f"Query the {view.name} view.",
         query_fn_module=query_fn_module,
         query_fn_name=query_fn_name,
@@ -130,15 +160,8 @@ def _render_view_route(view: ViewModel, module: str) -> str:
 def _render_function_route(view: ViewModel, module: str) -> str:
     """Route that calls a set-returning function via func.table_valued."""
     all_items = list(view.parameters) + list(view.returns)
-    dt_parts: list[str] = []
-    if any(c.type == "datetime" for c in all_items):
-        dt_parts.append("datetime")
-    if any(c.type == "date" for c in all_items):
-        dt_parts.append("date")
-
     tv_cols = ", ".join(
-        f'column("{c.name}", {SA_INSTANCE_TYPES[c.type]})'
-        for c in view.returns
+        f'column("{c.name}", {SA_INSTANCE_TYPES[c.type]})' for c in view.returns
     )
     col_names_str = ", ".join(f'"{c.name}"' for c in view.returns)
     fn_args = ", ".join(p.name for p in view.parameters)
@@ -151,9 +174,7 @@ def _render_function_route(view: ViewModel, module: str) -> str:
         has_auth=view.require_auth,
         method=view.http_method.lower(),
         slug=view.name.replace("_", "-"),
-        needs_uuid=any(c.type == "uuid" for c in all_items),
-        dt_imports=", ".join(dt_parts),
-        needs_any=any(c.type == "json" for c in view.returns),
+        imports=type_imports([c.type for c in all_items]),
         description=view.description or f"Call the {view.name} function.",
         columns=[
             {"name": c.name, "py_type": PYTHON_TYPES[c.type]}
