@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.2.0...kiln-v0.2.1) (2026-04-02)
+
+
+### Features
+
+* name change ([#4](https://github.com/roddarjohn/kiln/issues/4)) ([947a467](https://github.com/roddarjohn/kiln/commit/947a467d198d722c93feb3c3ae115efbfd6d8db7))
+
 ## [0.2.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.1.0...kiln-v0.2.0) (2026-04-02)
 
 
