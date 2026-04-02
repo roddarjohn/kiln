@@ -21,6 +21,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
+Documentation = "https://roddarjohn.github.io/kiln/"
 Repository = "https://github.com/roddarjohn/kiln"
 Changelog = "https://github.com/roddarjohn/kiln/blob/main/CHANGELOG.md"
 Issues = "https://github.com/roddarjohn/kiln/issues"
@@ -39,6 +40,13 @@ dev = [
   "coverage[toml]>=7.0",
   "tox>=4.49.1",
   "tox-uv>=1.33.2",
+]
+docs = [
+  "myst-parser>=4.0",
+  "sphinx>=7.0",
+  "sphinx-autobuild>=2025.8.25",
+  "sphinx-autodoc-typehints>=3.0.1",
+  "sphinx-copybutton>=0.5.2",
 ]
 lint = ["ruff>=0.15.5", "ty>=0.0.20"]
 

@@ -1,0 +1,37 @@
+<div id="version-selector">
+  <h3>Versions</h3>
+  <ul id="version-list">
+    <li>{{ version }}</li>
+  </ul>
+</div>
+<script>
+(function () {
+  var parts = window.location.pathname.replace(/\/+$/, "").split("/");
+  var versionSegment = null;
+  for (var i = 1; i < parts.length; i++) {
+    if (parts[i] === "main" || parts[i].match(/^v\d+/)) {
+      versionSegment = i;
+      break;
+    }
+  }
+  if (versionSegment === null) return;
+  var root = parts.slice(0, versionSegment).join("/") || "";
+  var jsonUrl = root + "/versions.json";
+
+  fetch(jsonUrl)
+    .then(function (r) { return r.json(); })
+    .then(function (versions) {
+      var ul = document.getElementById("version-list");
+      ul.innerHTML = "";
+      versions.forEach(function (v) {
+        var li = document.createElement("li");
+        var a = document.createElement("a");
+        a.href = root + "/" + v + "/index.html";
+        a.textContent = v;
+        li.appendChild(a);
+        ul.appendChild(li);
+      });
+    })
+    .catch(function () {});
+})();
+</script>

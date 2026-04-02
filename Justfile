@@ -27,3 +27,15 @@ coverage *args:
 coverage-ci *args:
     uv run coverage run -m pytest {{args}}
     uv run coverage xml -o coverage.xml
+
+# Build HTML docs for all versions (output in docs/_build/html)
+docs:
+    uv run python scripts/docs/build_versioned_docs.py
+
+# Serve docs with live reload for editing (http://127.0.0.1:8000)
+serve-docs-autoreload:
+    uv run --group docs sphinx-autobuild docs docs/_build/html
+
+# Serve the full versioned docs build (http://localhost:8000)
+serve-docs-static: docs
+    python -m http.server -d docs/_build/html 8000

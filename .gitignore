@@ -7,5 +7,9 @@
 .tox/
 .coverage
 
+# Docs
+docs/_generated/
+docs/_build/
+
 # Claude Code
 .claude/worktrees/
