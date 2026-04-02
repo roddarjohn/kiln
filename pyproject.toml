@@ -15,7 +15,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = ["typer>=0.24.1"]
+dependencies = ["typer>=0.24.1", "pydantic>=2.0", "jsonnet>=0.21.0"]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -34,6 +34,12 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = ["pytest>=8", "coverage[toml]>=7.0", "tox>=4.49.1", "tox-uv>=1.33.2"]
+playground = [
+  "fastapi>=0.115",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg>=0.29",
+  "pgcraft",
+]
 docs = [
   "myst-parser>=4.0",
   "sphinx>=7.0",
@@ -89,7 +95,7 @@ ignore = [
 ]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = []
+allowed-unresolved-imports = ["_jsonnet"]
 
 [tool.coverage.run]
 source = ["kiln"]
