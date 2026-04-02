@@ -21,6 +21,10 @@ _engine = create_async_engine(
     os.environ.get("{{ url_env }}", "postgresql+asyncpg://localhost/dev"),
     echo={{ echo }},
     pool_size={{ pool_size }},
+    max_overflow={{ max_overflow }},
+    pool_timeout={{ pool_timeout }},
+    pool_recycle={{ pool_recycle }},
+    pool_pre_ping={{ pool_pre_ping }},
 )
 
 _SessionLocal = async_sessionmaker(

@@ -78,6 +78,10 @@ class DatabaseConfig(BaseModel):
     url_env: str = "DATABASE_URL"
     echo: bool = False
     pool_size: int = 5
+    max_overflow: int = 10
+    pool_timeout: int = 30
+    pool_recycle: int = -1
+    pool_pre_ping: bool = True
     default: bool = False
 
 
