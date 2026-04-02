@@ -16,6 +16,7 @@ kiln
    :caption: Reference
 
    api
+   extending
 
 .. toctree::
    :maxdepth: 1
