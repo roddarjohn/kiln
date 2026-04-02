@@ -55,5 +55,3 @@ just docs          # build Sphinx HTML docs
 ## License
 
 See [LICENSE](LICENSE) for details.
-
-This is a sample change
