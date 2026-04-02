@@ -18,6 +18,7 @@ just lint          # ruff check + format check
 just type-check    # ty check src/
 just dev-test      # pytest (fast, local dev)
 just test          # tox (full isolation, matches CI)
+just docs          # build Sphinx HTML docs
 just setup         # install pre-commit hooks
 ```
 
