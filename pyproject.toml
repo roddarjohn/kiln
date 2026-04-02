@@ -1,5 +1,5 @@
 [project]
-name = "kiln"
+name = "kiln-generator"
 version = "0.1.0"
 description = "CLI for autogenerating files from templates"
 readme = "README.md"
