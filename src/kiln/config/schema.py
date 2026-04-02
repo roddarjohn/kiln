@@ -71,6 +71,16 @@ class CrudConfig(BaseModel):
     require_auth: List[CrudOp] = []  # noqa: UP006
 
 
+class DatabaseConfig(BaseModel):
+    """Configuration for a single database connection."""
+
+    key: str
+    url_env: str = "DATABASE_URL"
+    echo: bool = False
+    pool_size: int = 5
+    default: bool = False
+
+
 class ModelConfig(BaseModel):
     """A pgcraft declarative model definition."""
 
@@ -81,6 +91,7 @@ class ModelConfig(BaseModel):
     pgcraft_plugins: list[str] = []
     fields: list[FieldConfig]
     crud: CrudConfig | None = None
+    db_key: str | None = None
 
 
 class ViewParam(BaseModel):
@@ -116,6 +127,7 @@ class ViewModel(BaseModel):
     require_auth: bool = True
     http_method: Literal["GET", "POST"] = "GET"
     query_fn: str | None = None
+    db_key: str | None = None
     """Dotted import path to a zero-argument function returning a
     SQLAlchemy ``select()`` expression, e.g.
     ``"app.db.views.published_articles.get_query"``.
@@ -129,5 +141,6 @@ class KilnConfig(BaseModel):
     version: str = "1"
     module: str = "app"
     auth: AuthConfig | None = None
+    databases: list[DatabaseConfig] = []
     models: list[ModelConfig] = []
     views: list[ViewModel] = []

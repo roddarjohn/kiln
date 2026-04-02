@@ -7,8 +7,13 @@ session factory, and the JWT authentication dependency.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from kiln.generators._env import env
 from kiln.generators.base import GeneratedFile
+
+if TYPE_CHECKING:
+    from kiln.config.schema import KilnConfig
 
 
 class ScaffoldGenerator:
@@ -19,14 +24,56 @@ class ScaffoldGenerator:
     ``kiln init`` never overwrites hand-edited scaffolds.
     """
 
-    def generate(self) -> list[GeneratedFile]:
+    def generate(self, config: KilnConfig | None = None) -> list[GeneratedFile]:
         """Return all scaffold files.
+
+        When *config* includes a ``databases`` list, one session file is
+        generated per database (e.g. ``db/primary_session.py``).  Without
+        a databases config the legacy single-file layout is used
+        (``db/session.py``).
+
+        Args:
+            config: Optional project config.  When supplied, database
+                session files are generated per database entry.
 
         Returns:
             List of :class:`~kiln.generators.base.GeneratedFile`
             objects, all with ``overwrite=False``.
 
         """
+        session_tmpl = env.get_template("init/db_session.py.j2")
+
+        databases = config.databases if config else []
+        if databases:
+            session_files = [
+                GeneratedFile(
+                    f"db/{db.key}_session.py",
+                    session_tmpl.render(
+                        key=db.key,
+                        url_env=db.url_env,
+                        echo=db.echo,
+                        pool_size=db.pool_size,
+                        get_db_fn=f"get_{db.key}_db",
+                    ),
+                    overwrite=False,
+                )
+                for db in databases
+            ]
+        else:
+            session_files = [
+                GeneratedFile(
+                    "db/session.py",
+                    session_tmpl.render(
+                        key=None,
+                        url_env="DATABASE_URL",
+                        echo=False,
+                        pool_size=5,
+                        get_db_fn="get_db",
+                    ),
+                    overwrite=False,
+                )
+            ]
+
         return [
             GeneratedFile("auth/__init__.py", "", overwrite=False),
             GeneratedFile(
@@ -40,9 +87,5 @@ class ScaffoldGenerator:
                 env.get_template("init/db_base.py.j2").render(),
                 overwrite=False,
             ),
-            GeneratedFile(
-                "db/session.py",
-                env.get_template("init/db_session.py.j2").render(),
-                overwrite=False,
-            ),
+            *session_files,
         ]

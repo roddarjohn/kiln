@@ -17,13 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 {% if has_auth %}
 from {{ module }}.auth.dependencies import get_current_user
 {% endif %}
-from {{ module }}.db.session import get_db
+from {{ module }}.{{ session_module }} import {{ get_db_fn }}
 # {{ query_fn_name }} is defined in {{ query_fn_module }} — write this yourself.
 # It must return a SQLAlchemy select() expression for the {{ view.name }} view.
 from {{ query_fn_module }} import {{ query_fn_name }}
 
 router = APIRouter(prefix="/{{ slug }}", tags=["{{ slug }}"])
-DB = Annotated[AsyncSession, Depends(get_db)]
+DB = Annotated[AsyncSession, Depends({{ get_db_fn }})]
 {% if has_auth %}
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 {% endif %}

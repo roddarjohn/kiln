@@ -22,12 +22,13 @@ from kiln.generators._env import env
 from kiln.generators._helpers import (
     PYTHON_TYPES,
     SA_INSTANCE_TYPES,
+    resolve_db_session,
     type_imports,
 )
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
-    from kiln.config.schema import KilnConfig, ViewModel
+    from kiln.config.schema import DatabaseConfig, KilnConfig, ViewModel
 
 
 class ViewGenerator:
@@ -65,7 +66,7 @@ class ViewGenerator:
         return [
             GeneratedFile(
                 path=f"routes/{view.name}.py",
-                content=_render_route(view, config.module),
+                content=_render_route(view, config.module, config.databases),
             )
             for view in config.views
         ]
@@ -109,23 +110,34 @@ def _validate_query_fns(views: list[ViewModel]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _render_route(view: ViewModel, module: str) -> str:
+def _render_route(
+    view: ViewModel,
+    module: str,
+    databases: list[DatabaseConfig],
+) -> str:
     """Render the FastAPI route file for *view*.
 
     Args:
         view: The view configuration.
         module: Root module name for generated import paths.
+        databases: The project-level database list.
 
     Returns:
         Python source string.
 
     """
+    session_module, get_db_fn = resolve_db_session(view.db_key, databases)
     if view.parameters:
-        return _render_function_route(view, module)
-    return _render_view_route(view, module)
+        return _render_function_route(view, module, session_module, get_db_fn)
+    return _render_view_route(view, module, session_module, get_db_fn)
 
 
-def _render_view_route(view: ViewModel, module: str) -> str:
+def _render_view_route(
+    view: ViewModel,
+    module: str,
+    session_module: str,
+    get_db_fn: str,
+) -> str:
     """Route that calls the developer-supplied query_fn."""
     if not view.query_fn:
         msg = (
@@ -150,6 +162,8 @@ def _render_view_route(view: ViewModel, module: str) -> str:
         description=view.description or f"Query the {view.name} view.",
         query_fn_module=query_fn_module,
         query_fn_name=query_fn_name,
+        session_module=session_module,
+        get_db_fn=get_db_fn,
         columns=[
             {"name": c.name, "py_type": PYTHON_TYPES[c.type]}
             for c in view.returns
@@ -157,7 +171,12 @@ def _render_view_route(view: ViewModel, module: str) -> str:
     )
 
 
-def _render_function_route(view: ViewModel, module: str) -> str:
+def _render_function_route(
+    view: ViewModel,
+    module: str,
+    session_module: str,
+    get_db_fn: str,
+) -> str:
     """Route that calls a set-returning function via func.table_valued."""
     all_items = list(view.parameters) + list(view.returns)
     tv_cols = ", ".join(
@@ -176,6 +195,8 @@ def _render_function_route(view: ViewModel, module: str) -> str:
         slug=view.name.replace("_", "-"),
         imports=type_imports([c.type for c in all_items]),
         description=view.description or f"Call the {view.name} function.",
+        session_module=session_module,
+        get_db_fn=get_db_fn,
         columns=[
             {"name": c.name, "py_type": PYTHON_TYPES[c.type]}
             for c in view.returns

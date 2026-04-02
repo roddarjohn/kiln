@@ -8,6 +8,7 @@ import pytest
 from kiln.config.schema import (
     AuthConfig,
     CrudConfig,
+    DatabaseConfig,
     FieldConfig,
     KilnConfig,
     ModelConfig,
@@ -428,3 +429,147 @@ def test_view_generator_plain_missing_query_fn_raises():
             ViewGenerator().generate(cfg)
     finally:
         ViewGenerator.skip_validation = False
+
+
+# ---------------------------------------------------------------------------
+# Multi-database support
+# ---------------------------------------------------------------------------
+
+
+def test_scaffold_generates_single_session_without_config():
+    files = ScaffoldGenerator().generate()
+    paths = {f.path for f in files}
+    assert "db/session.py" in paths
+    assert not any("primary" in p for p in paths)
+
+
+def test_scaffold_generates_per_db_sessions_with_config():
+    cfg = KilnConfig(
+        databases=[
+            DatabaseConfig(key="primary", url_env="DATABASE_URL", default=True),
+            DatabaseConfig(
+                key="analytics",
+                url_env="ANALYTICS_DATABASE_URL",
+                pool_size=2,
+            ),
+        ]
+    )
+    files = ScaffoldGenerator().generate(cfg)
+    paths = {f.path for f in files}
+    assert "db/primary_session.py" in paths
+    assert "db/analytics_session.py" in paths
+    assert "db/session.py" not in paths
+
+
+def test_scaffold_per_db_session_uses_correct_env_var():
+    cfg = KilnConfig(
+        databases=[
+            DatabaseConfig(
+                key="analytics",
+                url_env="ANALYTICS_DB_URL",
+                default=True,
+            )
+        ]
+    )
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    content = files["db/analytics_session.py"].content
+    assert "ANALYTICS_DB_URL" in content
+    assert "get_analytics_db" in content
+
+
+def test_crud_route_uses_default_db_session(full_config):
+    files = CRUDGenerator().generate(full_config)
+    route = next(f for f in files if f.path == "routes/user.py")
+    assert "db.session" in route.content
+    assert "get_db" in route.content
+
+
+def test_crud_route_uses_named_db_session():
+    db_primary = DatabaseConfig(
+        key="primary", url_env="DATABASE_URL", default=True
+    )
+    db_analytics = DatabaseConfig(
+        key="analytics", url_env="ANALYTICS_DATABASE_URL"
+    )
+    model = ModelConfig(
+        name="Report",
+        table="reports",
+        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
+        crud=CrudConfig(),
+        db_key="analytics",
+    )
+    cfg = KilnConfig(
+        module="myapp",
+        databases=[db_primary, db_analytics],
+        models=[model],
+    )
+    files = CRUDGenerator().generate(cfg)
+    route = next(f for f in files if f.path == "routes/report.py")
+    assert "db.analytics_session" in route.content
+    assert "get_analytics_db" in route.content
+
+
+def test_view_route_uses_named_db_session():
+    db = DatabaseConfig(key="primary", url_env="DATABASE_URL", default=True)
+    view = ViewModel(
+        name="active_users",
+        model="User",
+        parameters=[],
+        returns=[ViewColumn(name="id", type="uuid")],
+        require_auth=False,
+        query_fn="tests.unit.test_generators.get_query",
+        db_key="primary",
+    )
+    cfg = KilnConfig(databases=[db], views=[view])
+    files = ViewGenerator().generate(cfg)
+    route = next(f for f in files if f.path.startswith("routes/"))
+    assert "db.primary_session" in route.content
+    assert "get_primary_db" in route.content
+
+
+def test_resolve_db_session_no_databases():
+    from kiln.generators._helpers import resolve_db_session
+
+    assert resolve_db_session(None, []) == ("db.session", "get_db")
+
+
+def test_resolve_db_session_default():
+    from kiln.generators._helpers import resolve_db_session
+
+    dbs = [
+        DatabaseConfig(key="primary", default=True),
+        DatabaseConfig(key="analytics"),
+    ]
+    assert resolve_db_session(None, dbs) == (
+        "db.primary_session",
+        "get_primary_db",
+    )
+
+
+def test_resolve_db_session_by_key():
+    from kiln.generators._helpers import resolve_db_session
+
+    dbs = [
+        DatabaseConfig(key="primary", default=True),
+        DatabaseConfig(key="analytics"),
+    ]
+    assert resolve_db_session("analytics", dbs) == (
+        "db.analytics_session",
+        "get_analytics_db",
+    )
+
+
+def test_resolve_db_session_missing_default_raises():
+    from kiln.generators._helpers import resolve_db_session
+
+    dbs = [DatabaseConfig(key="primary"), DatabaseConfig(key="analytics")]
+    with pytest.raises(ValueError, match="default=True"):
+        resolve_db_session(None, dbs)
+
+
+def test_resolve_db_session_unknown_key_raises():
+    from kiln.generators._helpers import resolve_db_session
+
+    dbs = [DatabaseConfig(key="primary", default=True)]
+    with pytest.raises(ValueError, match="'nope'"):
+        resolve_db_session("nope", dbs)

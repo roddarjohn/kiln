@@ -30,6 +30,17 @@ def init(
         Path,
         typer.Option("--out", "-o", help="Output root directory."),
     ],
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                "Optional path to a .json or .jsonnet project config file. "
+                "When provided, per-database session files are generated."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Generate one-time scaffold files (db base, session, auth deps).
 
@@ -39,9 +50,18 @@ def init(
     Example::
 
         kiln init --out ./src/app
+        kiln init --config project.jsonnet --out ./src/app
     """
+    cfg: KilnConfig | None = None
+    if config is not None:
+        try:
+            cfg = load(config)
+        except Exception as exc:
+            typer.echo(f"Error loading config: {exc}", err=True)
+            raise typer.Exit(1) from exc
+
     scaffold = ScaffoldGenerator()
-    files = scaffold.generate()
+    files = scaffold.generate(cfg)
     _write_files(files, out)
     typer.echo(f"Scaffold written to {out}")
 

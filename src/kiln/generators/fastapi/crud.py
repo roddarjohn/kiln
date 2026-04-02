@@ -6,12 +6,15 @@ from typing import TYPE_CHECKING
 
 from kiln.config.schema import FieldConfig
 from kiln.generators._env import env
-from kiln.generators._helpers import PYTHON_TYPES, type_imports
+from kiln.generators._helpers import (
+    PYTHON_TYPES,
+    resolve_db_session,
+    type_imports,
+)
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
     from kiln.config.schema import (
-        CrudConfig,
         KilnConfig,
         ModelConfig,
     )
@@ -63,6 +66,9 @@ class CRUDGenerator:
         for m in config.models:
             if m.crud is None:
                 continue
+            session_module, get_db_fn = resolve_db_session(
+                m.db_key, config.databases
+            )
             files.append(
                 GeneratedFile(
                     path=f"schemas/{m.name.lower()}.py",
@@ -73,7 +79,11 @@ class CRUDGenerator:
                 GeneratedFile(
                     path=f"routes/{m.name.lower()}.py",
                     content=_render_crud(
-                        m, m.crud, config.module, has_auth=has_auth
+                        m,
+                        config.module,
+                        has_auth=has_auth,
+                        session_module=session_module,
+                        get_db_fn=get_db_fn,
                     ),
                 )
             )
@@ -145,23 +155,30 @@ def _render_schemas(model: ModelConfig) -> str:
 
 def _render_crud(
     model: ModelConfig,
-    crud: CrudConfig,
     module: str,
     *,
     has_auth: bool,
+    session_module: str,
+    get_db_fn: str,
 ) -> str:
     """Render the CRUD route file for *model*.
 
     Args:
-        model: The model configuration.
-        crud: The CRUD settings for this model.
+        model: The model configuration.  ``model.crud`` must not be None.
         module: Root module name for generated import paths.
         has_auth: Whether the project has an auth config.
+        session_module: Dotted sub-path to the session module, e.g.
+            ``"db.primary_session"``.
+        get_db_fn: Name of the dependency function, e.g. ``"get_primary_db"``.
 
     Returns:
         Python source string.
 
     """
+    crud = model.crud
+    if crud is None:
+        msg = f"_render_crud called on model '{model.name}' with no crud config"
+        raise ValueError(msg)
     pk = _pk(model)
     tmpl = env.get_template("fastapi/crud_routes.py.j2")
     return tmpl.render(
@@ -172,4 +189,6 @@ def _render_crud(
         has_auth=has_auth,
         pk={"name": pk.name, "py_type": PYTHON_TYPES[pk.type]},
         crud=crud,
+        session_module=session_module,
+        get_db_fn=get_db_fn,
     )

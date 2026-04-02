@@ -30,6 +30,27 @@ def test_init_writes_scaffold(tmp_path: Path):
     assert (tmp_path / "auth" / "dependencies.py").exists()
 
 
+def test_init_with_config_generates_per_db_sessions(tmp_path: Path):
+    cfg = tmp_path / "project.json"
+    cfg.write_text('{"databases": [{"key": "primary", "default": true}]}')
+    result = runner.invoke(
+        app, ["init", "--config", str(cfg), "--out", str(tmp_path)]
+    )
+    assert result.exit_code == 0
+    assert (tmp_path / "db" / "primary_session.py").exists()
+    assert not (tmp_path / "db" / "session.py").exists()
+
+
+def test_init_with_bad_config_exits_1(tmp_path: Path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("not: valid: json")
+    result = runner.invoke(
+        app, ["init", "--config", str(bad), "--out", str(tmp_path)]
+    )
+    assert result.exit_code == 1
+    assert "Error" in result.output
+
+
 def test_init_does_not_overwrite(tmp_path: Path):
     # First run writes files.
     runner.invoke(app, ["init", "--out", str(tmp_path)])
