@@ -16,3 +16,7 @@ docs/_build/
 
 # Coverage
 coverage.xml
+
+# Playground generated output
+playground/generated/
+playground/_generated/

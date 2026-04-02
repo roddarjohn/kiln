@@ -1,0 +1,34 @@
+config := "examples/project.jsonnet"
+out    := "generated"
+
+# List available recipes
+default:
+    @just --list
+
+# Nuke all generated files
+reset:
+    rm -rf {{ out }}
+
+alias r := reset
+
+# Generate everything from the project config
+generate:
+    uv run --project .. kiln generate --config {{ config }} --out {{ out }} --no-validate
+
+alias g := generate
+
+# Reset then generate
+regen: reset generate
+
+alias rg := regen
+
+# Start the dev server (hot-reload)
+serve:
+    uv run --project .. --group playground uvicorn main:app --reload
+
+alias s := serve
+
+# Reset, generate, then serve
+fresh: regen serve
+
+alias f := fresh

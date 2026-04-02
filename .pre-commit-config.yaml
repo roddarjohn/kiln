@@ -29,3 +29,9 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: https://github.com/google/go-jsonnet
+    rev: v0.20.0
+    hooks:
+      - id: jsonnet-format
+        args: [--indent, "2", --string-style, "d", --in-place]
