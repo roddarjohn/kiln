@@ -1,0 +1,21 @@
+repository:
+  name: kiln
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  delete_branch_on_merge: true
+
+branches:
+  - name: main
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+      required_status_checks:
+        strict: true
+        contexts:
+          - lint
+          - test
+      enforce_admins: false
+      required_linear_history: true

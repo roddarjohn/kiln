@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a bug in kiln
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Run `kiln ...`
+        2. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please provide:
+        - kiln version (`kiln --version`)
+        - Python version (e.g. `python --version`)
+      placeholder: |
+        - kiln: 0.1.0
+        - Python: 3.12.7
+    validations:
+      required: true

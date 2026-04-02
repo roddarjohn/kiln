@@ -1,0 +1,20 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: SKIP=ruff,ruff-format uvx pre-commit run --all-files
+      - run: uv run --group lint ruff check
+      - run: uv run --group lint ruff format --check
+      - run: uv run --group lint ty check src/

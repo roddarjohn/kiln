@@ -1,0 +1,113 @@
+[project]
+name = "kiln"
+version = "0.1.0"
+description = "CLI for autogenerating files from templates"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Rodda John", email = "roddarjohn@protonmail.com" }]
+requires-python = ">=3.12"
+keywords = ["cli", "templates", "code-generation", "scaffolding"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+  "typer>=0.24.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/roddarjohn/kiln"
+Repository = "https://github.com/roddarjohn/kiln"
+Changelog = "https://github.com/roddarjohn/kiln/blob/main/CHANGELOG.md"
+Issues = "https://github.com/roddarjohn/kiln/issues"
+
+[project.scripts]
+kiln = "kiln.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "coverage[toml]>=7.0",
+  "tox>=4.49.1",
+  "tox-uv>=1.33.2",
+]
+lint = ["ruff>=0.15.5", "ty>=0.0.20"]
+
+[tool.ruff]
+line-length = 80
+exclude = ["docs"]
+
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  # Conflicts with formatter
+  "COM812",
+  "ISC001",
+  # Docstring convention (use D211 + D212)
+  "D203",
+  "D213",
+  # Only enforce docstrings on public classes, functions, and methods
+  "D100", # missing docstring in public module
+  "D104", # missing docstring in public package
+  # Not applicable to this project
+  "AIR",
+  "DJ",
+  "FAST",
+  "NPY",
+  "PD",
+  "INT",
+  "CPY",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = [
+  "INP001",  # scripts/ doesn't need __init__.py
+  "T201",    # print is fine in scripts
+  "S603",    # subprocess calls use trusted, hardcoded commands
+  "S607",    # partial paths (git, uv) are intentional
+  "PLW1510", # check=False is intentional for fallible builds
+]
+"tests/**" = [
+  "S101",    # assert is fine in tests
+  "ANN",     # no annotations required in tests
+  "D",       # no docstrings required in tests
+  "PLR2004", # magic numbers are fine in test assertions
+  "PLC0415", # local imports acceptable in test methods
+  "RUF059",  # unpacked dummy variables are fine in tests
+  "SLF001",  # testing private methods is fine in tests
+]
+
+[tool.ty.analysis]
+allowed-unresolved-imports = []
+
+[tool.coverage.run]
+source = ["kiln"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]
+
+[tool.pytest.ini_options]
+addopts = ""
+
+[tool.tox]
+requires = ["tox-uv>=1"]
+env_list = ["3.12", "3.13", "3.14"]
+
+[tool.tox.env_run_base]
+dependency_groups = ["dev"]
+commands = [["pytest", "{posargs:}"]]

@@ -1,0 +1,11 @@
+# Emacs
+*~
+\#*
+
+# Python
+**/__pycache__/*
+.tox/
+.coverage
+
+# Claude Code
+.claude/worktrees/

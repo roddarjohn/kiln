@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv*)",
+      "Bash(just*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "just lint >&2 && just type-check >&2"
+          }
+        ]
+      }
+    ]
+  }
+}
