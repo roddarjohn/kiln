@@ -17,9 +17,9 @@ import sqlalchemy.dialects.postgresql as pg
 from sqlalchemy.ext.asyncio import AsyncSession
 
 {% if has_auth %}
-from {{ module }}.auth.dependencies import get_current_user
+from auth.dependencies import get_current_user
 {% endif %}
-from {{ module }}.{{ session_module }} import {{ get_db_fn }}
+from {{ session_module }} import {{ get_db_fn }}
 
 router = APIRouter(prefix="/{{ slug }}", tags=["{{ slug }}"])
 DB = Annotated[AsyncSession, Depends({{ get_db_fn }})]

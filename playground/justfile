@@ -13,7 +13,7 @@ alias r := reset
 
 # Generate everything from the project config
 generate:
-    uv run --project .. kiln generate --config {{ config }} --out {{ out }}
+    uv run --project .. kiln generate --config {{ config }} --out {{ out }} --no-validate
 
 alias g := generate
 
@@ -21,3 +21,14 @@ alias g := generate
 regen: reset generate
 
 alias rg := regen
+
+# Start the dev server (hot-reload)
+serve:
+    uv run --project .. --group playground uvicorn main:app --reload
+
+alias s := serve
+
+# Reset, generate, then serve
+fresh: regen serve
+
+alias f := fresh

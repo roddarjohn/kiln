@@ -46,7 +46,7 @@ local timestamps = [
         field.str("body"),
         field.bool("published"),
         field.uuid("author_id", foreign_key="authors.id"),
-        field.json("metadata", nullable=true),
+        field.json("meta", nullable=true),
       ] + timestamps,
       crud: crud.full({}),
     },

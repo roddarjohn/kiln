@@ -3,7 +3,7 @@
 import warnings
 from typing import List, Literal  # noqa: UP035
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Pydantic v2 warns when a field name shadows a deprecated attribute on
 # BaseModel.  ``schema`` shadows the deprecated v1-compat ``BaseModel.schema()``
@@ -50,6 +50,19 @@ class AuthConfig(BaseModel):
     """
 
 
+# SQLAlchemy / pgcraft attribute names that must not be used as column names.
+# Using these would shadow class-level attributes that the ORM relies on.
+_RESERVED_COLUMN_NAMES: frozenset[str] = frozenset(
+    {
+        "metadata",  # SQLAlchemy MetaData object on the base class
+        "table",  # pgcraft sets cls.table after pipeline runs
+        "ctx",  # pgcraft sets cls.ctx after pipeline runs
+        "query",  # SQLAlchemy legacy Session.query shim
+        "registry",  # pgcraft internal
+    }
+)
+
+
 class FieldConfig(BaseModel):
     """A single field on a pgcraft model."""
 
@@ -63,6 +76,19 @@ class FieldConfig(BaseModel):
     auto_now_add: bool = False
     auto_now: bool = False
     index: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def name_not_reserved(cls, v: str) -> str:
+        """Reject field names that clash with SQLAlchemy/pgcraft internals."""
+        if v in _RESERVED_COLUMN_NAMES:
+            msg = (
+                f"Field name '{v}' is reserved by SQLAlchemy/pgcraft and "
+                f"cannot be used as a column attribute name. "
+                f"Choose a different name (e.g. '{v}_data' or 'extra_{v}')."
+            )
+            raise ValueError(msg)
+        return v
 
 
 class CrudConfig(BaseModel):

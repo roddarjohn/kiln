@@ -18,11 +18,14 @@ import sqlalchemy.dialects.postgresql as pg
 from pgcraft import PGCraftForeignKey
 {% endif %}
 from {{ factory_module }} import {{ factory_class }}
+{% if pk_plugin_import %}
+{{ pk_plugin_import }}
+{% endif %}
 {% if has_postgrest %}
 from pgcraft.extensions.postgrest import PostgRESTPlugin
 {% endif %}
 
-from {{ module }}.db.base import Base
+from db.base import Base
 
 
 class {{ model.name }}(Base):

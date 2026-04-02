@@ -44,6 +44,8 @@ playground = [
   "sqlalchemy[asyncio]>=2.0",
   "asyncpg>=0.29",
   "pgcraft",
+  "uvicorn[standard]>=0.30",
+  "pyjwt>=2.0",
 ]
 docs = [
   "myst-parser>=4.0",

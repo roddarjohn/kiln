@@ -15,9 +15,9 @@ from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 {% if has_auth %}
-from {{ module }}.auth.dependencies import get_current_user
+from auth.dependencies import get_current_user
 {% endif %}
-from {{ module }}.{{ session_module }} import {{ get_db_fn }}
+from {{ session_module }} import {{ get_db_fn }}
 from ..models.{{ model_lower }} import {{ model.name }}
 from ..schemas.{{ model_lower }} import {{ model.name }}Create, {{ model.name }}Update, {{ model.name }}Response
 

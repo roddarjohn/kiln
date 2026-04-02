@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators._helpers import PGCRAFT_FACTORIES, column_def, type_imports
+from kiln.generators._helpers import (
+    PGCRAFT_FACTORIES,
+    PGCRAFT_PK_PLUGINS,
+    column_def,
+    type_imports,
+)
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -74,39 +79,61 @@ def _render_model(model: ModelConfig, module: str) -> str:
 
     """
     fields = model.fields
+    pk_field = next((f for f in fields if f.primary_key), None)
+    non_pk_fields = [f for f in fields if not f.primary_key]
+
     factory_class, factory_module = PGCRAFT_FACTORIES[model.pgcraft_type]
     has_postgrest = "postgrest" in model.pgcraft_plugins
-    has_fk = any(f.foreign_key for f in fields)
+    has_fk = any(f.foreign_key for f in non_pk_fields)
 
+    # Resolve the PK plugin and build the __pgcraft__ list.
     pgcraft_items = [factory_class]
+    pk_plugin_import: str | None = None
+    if pk_field is not None:
+        pk_plugin_class, pk_plugin_module = PGCRAFT_PK_PLUGINS.get(
+            pk_field.type, ("SerialPKPlugin", "pgcraft.plugins.pk")
+        )
+        pk_args = (
+            f'column_name="{pk_field.name}"' if pk_field.name != "id" else ""
+        )
+        if pk_args:
+            plugin_call = f"{pk_plugin_class}({pk_args})"
+        else:
+            plugin_call = f"{pk_plugin_class}()"
+        pgcraft_items.append(plugin_call)
+        pk_plugin_import = f"from {pk_plugin_module} import {pk_plugin_class}"
     if has_postgrest:
         pgcraft_items.append("PostgRESTPlugin()")
 
     sa_names = ["Column"]
-    if any(f.type in ("str", "email") for f in fields):
+    if any(f.type in ("str", "email") for f in non_pk_fields):
         sa_names.append("String")
-    if any(f.type == "int" for f in fields):
+    if any(f.type == "int" for f in non_pk_fields):
         sa_names.append("Integer")
-    if any(f.type == "float" for f in fields):
+    if any(f.type == "float" for f in non_pk_fields):
         sa_names.append("Float")
-    if any(f.type == "bool" for f in fields):
+    if any(f.type == "bool" for f in non_pk_fields):
         sa_names.append("Boolean")
-    if any(f.auto_now_add or f.auto_now for f in fields):
+    if any(f.auto_now_add or f.auto_now for f in non_pk_fields):
         sa_names.append("func")
 
     tmpl = env.get_template("fastapi/model.py.j2")
     return tmpl.render(
         model=model,
         module=module,
-        imports=type_imports([f.type for f in fields]),
+        imports=type_imports([f.type for f in non_pk_fields]),
         needs_pg=any(
-            f.type in ("uuid", "datetime", "date", "json") for f in fields
+            f.type in ("uuid", "datetime", "date", "json")
+            for f in non_pk_fields
         ),
         sa_imports=", ".join(sa_names),
         has_fk=has_fk,
         has_postgrest=has_postgrest,
+        pk_plugin_import=pk_plugin_import,
         factory_class=factory_class,
         factory_module=factory_module,
         pgcraft_list=", ".join(pgcraft_items),
-        columns=[{"name": f.name, "coldef": column_def(f)} for f in fields],
+        columns=[
+            {"name": f.name, "coldef": column_def(f)} for f in non_pk_fields
+        ],
     )

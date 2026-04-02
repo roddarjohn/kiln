@@ -401,6 +401,26 @@ def test_column_def_foreign_key():
     assert "nullable=True" in result
 
 
+def test_column_def_foreign_key_three_part_strips_schema():
+    """Three-part schema.table.column refs are converted to table.column.
+
+    pgcraft resolves FKs via its dimension registry using two-part
+    'table.column' references; three-part refs bypass the registry and
+    reference the raw SQLAlchemy table name (e.g. 'products_raw'), not
+    the logical name ('products').
+    """
+    from kiln.generators._helpers import column_def
+
+    f = FieldConfig(
+        name="product_id",
+        type="uuid",
+        foreign_key="inventory.products.id",
+        nullable=False,
+    )
+    result = column_def(f)
+    assert 'PGCraftForeignKey("products.id")' in result
+
+
 def test_column_def_auto_now_add_and_auto_now():
     from kiln.generators._helpers import column_def
 

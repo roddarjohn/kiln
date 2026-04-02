@@ -65,6 +65,12 @@ SA_INSTANCE_TYPES: dict[str, str] = {
     "json": "pg.JSONB()",
 }
 
+# (plugin_class_name, import_module) for each PK field type.
+PGCRAFT_PK_PLUGINS: dict[str, tuple[str, str]] = {
+    "uuid": ("UUIDV4PKPlugin", "pgcraft.plugins.pk"),
+    "int": ("SerialPKPlugin", "pgcraft.plugins.pk"),
+}
+
 # (factory_class_name, import_module) for each pgcraft_type value.
 PGCRAFT_FACTORIES: dict[str, tuple[str, str]] = {
     "simple": (
@@ -172,6 +178,29 @@ def pg_sql_type(field_type: FieldType) -> str:
     return PG_SQL_TYPES[field_type]
 
 
+def _to_pgcraft_fk_ref(foreign_key: str) -> str:
+    """Convert a FK reference string to pgcraft's two-part dimension format.
+
+    pgcraft's dimension registry uses ``"table.column"`` references.
+    Config values may be fully qualified (``"schema.table.column"``), in
+    which case the schema prefix is stripped so that pgcraft can resolve
+    the dimension to the correct underlying ``_raw`` table via the registry.
+
+    Args:
+        foreign_key: The ``foreign_key`` string from ``FieldConfig``.
+
+    Returns:
+        A two-part ``"dimension.column"`` string suitable for
+        ``PGCraftForeignKey``.
+
+    """
+    parts = foreign_key.split(".")
+    if len(parts) == 3:  # noqa: PLR2004
+        # schema.table.column → table.column (dimension ref)
+        return f"{parts[1]}.{parts[2]}"
+    return foreign_key
+
+
 def column_def(field: FieldConfig) -> str:
     """Return the ``Column(...)`` constructor call string for *field*.
 
@@ -189,7 +218,8 @@ def column_def(field: FieldConfig) -> str:
     """
     args: list[str] = [SA_TYPES[field.type]]
     if field.foreign_key:
-        args.append(f'PGCraftForeignKey("{field.foreign_key}")')
+        fk_ref = _to_pgcraft_fk_ref(field.foreign_key)
+        args.append(f'PGCraftForeignKey("{fk_ref}")')
     if field.primary_key:
         args.append("primary_key=True")
         if field.type == "uuid":
