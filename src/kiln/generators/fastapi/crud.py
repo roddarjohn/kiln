@@ -361,27 +361,25 @@ def _list_route(
 ) -> list[str]:
     name = model.name
     lower = name.lower()
-    auth = _auth_param("list", crud, has_auth=has_auth)
-    sig = [
-        f"    db: DB,{auth}",
-    ]
+    needs_auth = has_auth and "list" in crud.require_auth
+    sig: list[str] = ["    db: DB,"]
+    if needs_auth:
+        sig.append("    _: CurrentUser,")
     if paginated:
-        sig += ["    offset: int = 0", "    limit: int = 100"]
-    body = [
-        "    result = await db.execute(",
-        f"        select({name})",
-    ]
+        sig += ["    offset: int = 0,", "    limit: int = 100,"]
+    select_call = f"        select({name})"
     if paginated:
-        body[-1] += ".offset(offset).limit(limit)"
-    body.append("    )")
-    body.append(f"    return list(result.scalars().all())")
+        select_call += ".offset(offset).limit(limit)"
     return [
         f'@router.get("/", response_model=list[{name}Response])',
         f"async def list_{lower}(",
         *sig,
         f") -> list[{name}]:",
         f'    """List {name} records."""',
-        *body,
+        "    result = await db.execute(",
+        f"{select_call}",
+        "    )",
+        "    return list(result.scalars().all())",
     ]
 
 

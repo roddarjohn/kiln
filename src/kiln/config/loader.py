@@ -47,7 +47,7 @@ def load(config_path: Path) -> KilnConfig:
 
 def _import_callback(
     importing_dir: str, import_path: str
-) -> tuple[str, str]:
+) -> tuple[str, bytes]:
     """Resolve import paths during Jsonnet evaluation.
 
     Maps ``kiln/...`` imports to the bundled stdlib directory;
@@ -64,7 +64,7 @@ def _import_callback(
         target = _STDLIB_DIR / import_path[len("kiln/"):]
     else:
         target = Path(importing_dir) / import_path
-    return str(target), target.read_text()
+    return str(target), target.read_bytes()
 
 
 def _evaluate_jsonnet(path: Path) -> str:

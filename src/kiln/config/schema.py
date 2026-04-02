@@ -59,7 +59,7 @@ class CrudConfig(BaseModel):
     delete: bool = True
     list: bool = True
     paginated: bool = True
-    require_auth: list[CrudOp] = []  # noqa: RUF012
+    require_auth: List[CrudOp] = []  # noqa: RUF012
 
 
 class ModelConfig(BaseModel):
