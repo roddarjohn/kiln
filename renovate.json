@@ -30,6 +30,10 @@
       "groupName": "dev dependencies"
     },
     {
+      "matchDepTypes": ["docs"],
+      "groupName": "docs dependencies"
+    },
+    {
       "matchDepTypes": ["lint"],
       "groupName": "lint dependencies"
     }
