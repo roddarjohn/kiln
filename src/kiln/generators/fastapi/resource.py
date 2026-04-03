@@ -357,7 +357,20 @@ def _build_ctx(
     # create/update response: unified Resource when available.
     response_schema = f"{model_name}Resource" if has_resource_schema else None
 
-    uses_utils = op_get["enabled"]
+    # get_object_from_query_or_404: GET always; UPDATE with response (pre-check)
+    needs_get_or_404 = op_get["enabled"] or (
+        op_update["enabled"] and has_resource_schema
+    )
+    # assert_rowcount: UPDATE without response; DELETE
+    needs_assert_rowcount = op_delete["enabled"] or (
+        op_update["enabled"] and not has_resource_schema
+    )
+    utils_imports: list[str] = []
+    if needs_get_or_404:
+        utils_imports.append("get_object_from_query_or_404")
+    if needs_assert_rowcount:
+        utils_imports.append("assert_rowcount")
+
     utils_module = prefix_import(pkg, "utils")
     schema_module = prefix_import(pkg, app, "schemas", model_lower)
     serializer_module = prefix_import(pkg, app, "serializers", model_lower)
@@ -387,7 +400,7 @@ def _build_ctx(
         "schema_module": schema_module,
         "serializer_module": serializer_module,
         "utils_module": utils_module,
-        "uses_utils": uses_utils,
+        "utils_imports": utils_imports,
         "schema_names": schema_names,
         "sqlalchemy_imports": sa_ops,
         "action_imports": act_imports,
