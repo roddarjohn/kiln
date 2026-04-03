@@ -1,0 +1,10 @@
+
+class {{ model_name }}Page(BaseModel):
+    """Paginated response for {{ model_name }} lists."""
+
+    items: list[{{ item_type }}]
+{% if mode == "keyset" %}
+    next_cursor: str | None = None
+{% elif mode == "offset" %}
+    total: int
+{% endif %}

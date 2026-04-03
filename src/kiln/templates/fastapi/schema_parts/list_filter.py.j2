@@ -1,0 +1,7 @@
+
+class {{ model_name }}ListFilter(BaseModel):
+    """Query parameters for filtering {{ model_name }} lists."""
+
+{% for field in filter_fields %}
+    {{ field.param_name }}: {{ field.py_type }} | None = None
+{% endfor %}

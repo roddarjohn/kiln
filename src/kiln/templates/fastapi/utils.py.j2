@@ -8,7 +8,99 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import Select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+
+#: Mapping from operator suffix to SQLAlchemy column method or
+#: comparison.  Used by :func:`apply_filters` to build WHERE
+#: clauses from a Pydantic filter schema.
+_FILTER_OPS: dict[str, str] = {
+    "eq": "__eq__",
+    "neq": "__ne__",
+    "gt": "__gt__",
+    "gte": "__ge__",
+    "lt": "__lt__",
+    "lte": "__le__",
+    "contains": "contains",
+    "starts_with": "startswith",
+    "in": "in_",
+}
+
+#: Operators that are called as column methods (e.g.
+#: ``col.contains(val)``) rather than dunder comparisons.
+_METHOD_OPS = {"contains", "startswith", "in_"}
+
+
+def apply_filters(
+    stmt: Select,
+    filters: BaseModel,
+    model: type,
+    *,
+    logic: str = "and",
+) -> Select:
+    """Build WHERE clauses from a Pydantic filter model.
+
+    Filter field names follow the convention
+    ``{column}_{operator}`` (e.g. ``name_contains``,
+    ``age_gt``).  A field without an operator suffix is treated
+    as ``eq``.  Only fields whose value is not ``None`` are
+    applied.
+
+    Args:
+        stmt: The SQLAlchemy SELECT statement to filter.
+        filters: A Pydantic model whose non-None fields
+            describe filter conditions.
+        model: The SQLAlchemy model class providing columns.
+        logic: ``"and"`` (default) or ``"or"`` — how to combine
+            the individual clauses.
+
+    Returns:
+        The statement with WHERE clauses applied.
+
+    """
+    clauses = []
+    for name, value in filters.model_dump(
+        exclude_none=True
+    ).items():
+        col_name, op_method = _parse_filter_field(name)
+        col = getattr(model, col_name)
+        if op_method in _METHOD_OPS:
+            clauses.append(getattr(col, op_method)(value))
+        else:
+            clauses.append(getattr(col, op_method)(value))
+    if not clauses:
+        return stmt
+    combiner = and_ if logic == "and" else or_
+    return stmt.where(combiner(*clauses))
+
+
+def _parse_filter_field(
+    name: str,
+) -> tuple[str, str]:
+    """Derive column name and operator from a filter field name.
+
+    Tries suffixes longest-first so ``starts_with`` is matched
+    before ``with``.
+
+    Args:
+        name: The Pydantic field name, e.g. ``"age_gt"`` or
+            ``"name_starts_with"``.
+
+    Returns:
+        ``(column_name, sqlalchemy_method)`` tuple.
+
+    """
+    for suffix, method in sorted(
+        _FILTER_OPS.items(),
+        key=lambda kv: len(kv[0]),
+        reverse=True,
+    ):
+        if name.endswith(f"_{suffix}"):
+            col = name[: -(len(suffix) + 1)]
+            return col, method
+    # No suffix → equality
+    return name, "__eq__"
 
 
 async def get_object_from_query_or_404(

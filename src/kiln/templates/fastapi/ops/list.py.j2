@@ -1,14 +1,24 @@
-@router.get("/", response_model={% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}list{% endif %})
+@router.get("/", response_model={{ response_model }})
 async def list_{{ model_lower }}(
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if has_auth and requires_auth %}
     current_user: Annotated[dict, Depends(get_current_user)],
 {% endif %}
-) -> {% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}object{% endif %}:
+{% for param in extra_params %}
+    {{ param }}
+{% endfor %}
+) -> {{ return_type }}:
     """List {{ model_name }} records."""
-    result = await db.execute(select({{ model_name }}))
-{% if has_resource_schema %}
+    stmt = select({{ model_name }})
+{% for modifier in query_modifiers %}
+    {{ modifier }}
+{% endfor %}
+{% if result_expression %}
+    {{ result_expression }}
+{% elif has_resource_schema %}
+    result = await db.execute(stmt)
     return [to_{{ model_lower }}_resource(obj) for obj in result.scalars()]
 {% else %}
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 {% endif %}
