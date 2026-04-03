@@ -124,8 +124,17 @@ class GeneratorRegistry:
         files: list[GeneratedFile] = []
         files.extend(ScaffoldGenerator().generate(config))
         for app_ref in config.apps:
+            ops = (
+                app_ref.config.operations
+                if app_ref.config.operations is not None
+                else config.operations
+            )
             app_config = app_ref.config.model_copy(
-                update={"auth": config.auth, "databases": config.databases}
+                update={
+                    "auth": config.auth,
+                    "databases": config.databases,
+                    "operations": ops,
+                }
             )
             files.extend(self._run_app_generators(app_config))
         proj_router = ProjectRouterGenerator()

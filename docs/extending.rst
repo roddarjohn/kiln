@@ -31,17 +31,17 @@ A generator is any class that satisfies the
            return "typescript_client"
 
        def can_generate(self, config: KilnConfig) -> bool:
-           # Only run when models with CRUD are present
-           return any(m.crud is not None for m in config.models)
+           # Only run when resources with operations are present
+           return any(r.operations for r in config.resources)
 
        def generate(self, config: KilnConfig) -> list[GeneratedFile]:
            files = []
-           for model in config.models:
-               if model.crud is None:
+           for resource in config.resources:
+               if not resource.operations:
                    continue
                files.append(GeneratedFile(
-                   path=f"client/{model.name.lower()}.ts",
-                   content=_render_ts_client(model),
+                   path=f"client/{resource.model.split('.')[-1].lower()}.ts",
+                   content=_render_ts_client(resource),
                ))
            return files
 
@@ -83,7 +83,9 @@ list, create, update, delete) is a separate
 :class:`~kiln.generators.fastapi.operations.Operation` that contributes
 schema classes and route handlers to the generated files.
 
-You can add, remove, or replace operations to customise the output.
+Operations are discovered via the ``kiln.operations`` entry-point group,
+using the same mechanism as generators.  You can add custom operations
+by registering them in your package's ``pyproject.toml``.
 
 Adding a custom operation
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -93,15 +95,9 @@ Create a class that satisfies the
 
 .. code-block:: python
 
-   from kiln.generators.fastapi.operations import (
-       Operation,
-       SharedContext,
-       default_operations,
-   )
-   from kiln.generators.fastapi.pipeline import ResourcePipeline
-   from kiln.generators.fastapi.resource import ResourceGenerator
+   from kiln.config.schema import OperationConfig, ResourceConfig
+   from kiln.generators.fastapi.operations import SharedContext
    from kiln.generators.base import FileSpec
-   from kiln.config.schema import ResourceConfig
 
 
    class BulkCreateOperation:
@@ -109,23 +105,27 @@ Create a class that satisfies the
 
        name = "bulk_create"
 
-       def enabled(self, resource: ResourceConfig) -> bool:
-           return resource.create is not False
+       def validate(self, op_config: OperationConfig) -> None:
+           max_items = op_config.options.get("max_items", 100)
+           if max_items < 1:
+               raise ValueError("max_items must be >= 1")
 
        def contribute(
            self,
            specs: dict[str, FileSpec],
            resource: ResourceConfig,
            ctx: SharedContext,
+           op_config: OperationConfig,
        ) -> None:
            schema = specs["schema"]
            route = specs["route"]
+           max_items = op_config.options.get("max_items", 100)
 
            # Add a BulkCreateRequest schema class
            schema.imports.add_from("pydantic", "BaseModel")
            snippet = f'''
    class {ctx.model.pascal}BulkCreateRequest(BaseModel):
-       """Bulk create request."""
+       """Bulk create request (max {max_items} items)."""
 
        items: list[{ctx.model.suffixed("CreateRequest")}]
    '''
@@ -154,79 +154,102 @@ Create a class that satisfies the
    '''
            route.context["route_handlers"].append(handler)
 
-Then wire it into a custom pipeline:
-
-.. code-block:: python
-
-   pipeline = ResourcePipeline(
-       operations=[
-           *default_operations(),
-           BulkCreateOperation(),
-       ]
-   )
-   gen = ResourceGenerator(pipeline=pipeline)
-
-Removing or replacing operations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To remove an operation, filter it out of the default list:
-
-.. code-block:: python
-
-   ops = [
-       op for op in default_operations()
-       if op.name != "delete"
-   ]
-   pipeline = ResourcePipeline(operations=ops)
-
-To replace one, swap it in-place:
-
-.. code-block:: python
-
-   ops = default_operations()
-   ops = [
-       MyCustomGetOperation() if op.name == "get" else op
-       for op in ops
-   ]
-   pipeline = ResourcePipeline(operations=ops)
-
-Using a custom pipeline with entry points
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To distribute a custom pipeline as a package, wrap it in a
-:class:`~kiln.generators.base.Generator`:
-
-.. code-block:: python
-
-   class MyResourceGenerator:
-       @property
-       def name(self) -> str:
-           return "resources"  # replaces the built-in one
-
-       def can_generate(self, config):
-           return bool(config.resources)
-
-       def generate(self, config):
-           pipeline = ResourcePipeline(
-               operations=[
-                   *default_operations(),
-                   BulkCreateOperation(),
-               ]
-           )
-           files = []
-           for resource in config.resources:
-               files.extend(pipeline.build(resource, config))
-           return files
-
-Register it the same way as any other generator:
+Register it as an entry point:
 
 .. code-block:: toml
 
-   [project.entry-points."kiln.generators"]
-   resources = "my_package:MyResourceGenerator"
+   [project.entry-points."kiln.operations"]
+   bulk_create = "my_package.ops:BulkCreateOperation"
 
-Because it uses the same ``name`` (``"resources"``), it replaces the
-built-in generator.
+Then use it in your config:
+
+.. code-block:: jsonnet
+
+   {
+     resources: [{
+       model: "myapp.models.Article",
+       operations: [
+         "get", "list", "create", "update", "delete",
+         { name: "bulk_create", max_items: 50 },
+       ],
+     }],
+   }
+
+Configuring operations
+~~~~~~~~~~~~~~~~~~~~~~
+
+Operations are configured at three levels, with more specific levels
+overriding more general ones:
+
+1. **Project-level** — ``operations`` on the top-level ``KilnConfig``
+   sets the default for all apps.
+2. **App-level** — ``operations`` on an app's ``KilnConfig`` overrides
+   the project default.
+3. **Resource-level** — ``operations`` on a ``ResourceConfig`` overrides
+   the app default.
+
+When a resource does not specify ``operations``, it inherits from its
+parent config.  Use Jsonnet array concatenation to extend rather than
+replace:
+
+.. code-block:: jsonnet
+
+   // Project-level defaults
+   {
+     operations: ["get", "list", "create", "update", "delete"],
+
+     apps: [{
+       config: {
+         module: "blog",
+         resources: [{
+           model: "blog.models.Article",
+           // Override: only get and list, plus a custom action
+           operations: [
+             "get", "list",
+             { name: "publish", fn: "blog.actions.publish" },
+           ],
+         }],
+       },
+       prefix: "/blog",
+     }],
+   }
+
+Each operation entry can be:
+
+* A **string** — built-in operation name, e.g. ``"get"``.
+* An **object** with ``name`` — operation with options:
+
+  .. code-block:: jsonnet
+
+     { name: "create", fields: [...], require_auth: true }
+
+* An **action** — object with ``name`` and ``fn``:
+
+  .. code-block:: jsonnet
+
+     { name: "publish", fn: "blog.actions.publish", params: [...] }
+
+* A **custom operation** — object with ``class``:
+
+  .. code-block:: jsonnet
+
+     { name: "bulk_create", "class": "my_pkg.BulkCreateOp", max: 100 }
+
+Operation validation
+~~~~~~~~~~~~~~~~~~~~
+
+Each operation can validate its configuration in the ``validate()``
+method, which runs before any ``contribute()`` methods.  This ensures
+all configuration errors are reported before generation begins:
+
+.. code-block:: python
+
+   class BulkCreateOperation:
+       name = "bulk_create"
+
+       def validate(self, op_config: OperationConfig) -> None:
+           if "max_items" not in op_config.options:
+               raise ValueError("bulk_create requires 'max_items'")
 
 How operations work
 ~~~~~~~~~~~~~~~~~~~
@@ -249,9 +272,9 @@ After all operations run, the pipeline automatically wires cross-file
 imports: every spec's exports are made available to every other spec
 via ``from module import ...`` lines.
 
-The ``SetupOperation`` (first in ``default_operations()``) creates the
-base ``"schema"`` and ``"route"`` specs.  Custom operations that add
-new file types should create their own specs in ``contribute()``.
+The ``SetupOperation`` (always run internally) creates the base
+``"schema"`` and ``"route"`` specs.  Custom operations that add new
+file types should create their own specs in ``contribute()``.
 
 Testing a custom generator
 --------------------------

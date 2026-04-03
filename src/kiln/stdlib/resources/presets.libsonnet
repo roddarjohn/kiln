@@ -7,26 +7,23 @@
 //
 //   resources: [
 //     resource.full("myapp.models.Article", pk="id", pk_type="uuid") + {
-//       create: { fields: [{ name: "title", type: "str" }] },
+//       operations: super.operations + [
+//         resource.action("publish", "myapp.actions.publish"),
+//       ],
 //     },
 //     resource.read_only("myapp.models.Tag"),
 //   ],
 
 {
   // All CRUD operations enabled; all ops use runtime inspection (all columns).
-  // Override individual operations to restrict fields.
+  // Override individual operations or extend with actions.
   full(model, pk="id", pk_type="uuid", db_key=null, require_auth=true):: {
     model: model,
     pk: pk,
     pk_type: pk_type,
     [if db_key != null then "db_key"]: db_key,
     require_auth: require_auth,
-    get: true,
-    list: true,
-    create: true,
-    update: true,
-    delete: true,
-    actions: [],
+    operations: ["get", "list", "create", "update", "delete"],
   },
 
   // Read-only: get and list only, no mutations.
@@ -36,12 +33,7 @@
     pk_type: pk_type,
     [if db_key != null then "db_key"]: db_key,
     require_auth: require_auth,
-    get: true,
-    list: true,
-    create: false,
-    update: false,
-    delete: false,
-    actions: [],
+    operations: ["get", "list"],
   },
 
   // Write-only: create, update, delete — no read/list endpoints.
@@ -51,21 +43,16 @@
     pk_type: pk_type,
     [if db_key != null then "db_key"]: db_key,
     require_auth: require_auth,
-    get: false,
-    list: false,
-    create: true,
-    update: true,
-    delete: true,
-    actions: [],
+    operations: ["create", "update", "delete"],
   },
 
-  // Shorthand for an action entry in the actions list.
+  // Shorthand for an action entry in the operations list.
   // fn is a dotted Python import path, e.g. "myapp.actions.publish".
   // The callable receives (pk, db=db, **params).
   action(name, fn, params=[], require_auth=true):: {
     name: name,
     fn: fn,
-    params: params,
-    require_auth: require_auth,
+    [if std.length(params) > 0 then "params"]: params,
+    [if require_auth != true then "require_auth"]: require_auth,
   },
 }

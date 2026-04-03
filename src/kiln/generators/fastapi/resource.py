@@ -27,16 +27,9 @@ class ResourceGenerator:
 
     Generated files are always overwritten on re-generation.
 
-    The pipeline can be customised by passing a
-    :class:`~kiln.generators.fastapi.pipeline.ResourcePipeline`
-    with a different set of operations.
+    Operations are resolved from the config's ``operations`` field
+    via entry-point discovery.
     """
-
-    def __init__(  # noqa: D107
-        self,
-        pipeline: ResourcePipeline | None = None,
-    ) -> None:
-        self.pipeline = pipeline or ResourcePipeline()
 
     @property
     def name(self) -> str:
@@ -63,7 +56,8 @@ class ResourceGenerator:
             instances per resource.
 
         """
+        pipeline = ResourcePipeline()
         files: list[GeneratedFile] = []
         for resource in config.resources:
-            files.extend(self.pipeline.build(resource, config))
+            files.extend(pipeline.build(resource, config))
         return files

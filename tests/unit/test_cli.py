@@ -51,11 +51,19 @@ def test_generate_writes_app_files(tmp_path: Path):
             "resources": [
                 {
                     "model": "myapp.models.Post",
-                    "get": True,
-                    "list": True,
-                    "create": {"fields": [{"name": "title", "type": "str"}]},
-                    "update": {"fields": [{"name": "title", "type": "str"}]},
-                    "delete": True,
+                    "operations": [
+                        "get",
+                        "list",
+                        {
+                            "name": "create",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                        {
+                            "name": "update",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                        "delete",
+                    ],
                 }
             ],
         },
@@ -86,7 +94,7 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
     assert result.exit_code == 0
     assert (out / "db" / "base.py").exists()
     assert (out / "db" / "primary_session.py").exists()
-    assert (out / "auth" / "dependencies.py").exists()  # scaffold not prefixed
+    assert (out / "auth" / "dependencies.py").exists()
 
 
 def test_generate_overwrites_on_rerun(tmp_path: Path):
@@ -117,8 +125,7 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
         "resources": [
             {
                 "model": "blog.models.Article",
-                "get": True,
-                "list": True,
+                "operations": ["get", "list"],
             }
         ],
     }
@@ -127,8 +134,7 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
         "resources": [
             {
                 "model": "inventory.models.Product",
-                "get": True,
-                "list": True,
+                "operations": ["get", "list"],
             }
         ],
     }
@@ -145,7 +151,8 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     )
     out = tmp_path / "out"
     result = runner.invoke(
-        app, ["generate", "--config", str(project_cfg), "--out", str(out)]
+        app,
+        ["generate", "--config", str(project_cfg), "--out", str(out)],
     )
     assert result.exit_code == 0
     assert (out / "db" / "primary_session.py").exists()
