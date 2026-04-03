@@ -2,23 +2,30 @@ import ast
 
 import pytest
 
-from kiln.config.schema import OperationConfig, ResourceConfig
+from kiln.config.schema import FieldSpec, OperationConfig, ResourceConfig
 from kiln.generators._helpers import ImportCollector, Name
 from kiln.generators.base import FileSpec
 from kiln.generators.fastapi.list_extensions import (
-    DEFAULT_OPERATORS,
     FilterConfig,
     OrderConfig,
     PaginateConfig,
     contribute_filters,
     contribute_ordering,
     contribute_pagination,
+    contribute_search_request,
 )
 from kiln.generators.fastapi.operations import ListOperation, SharedContext
 
 # -------------------------------------------------------------------
 # Fixtures
 # -------------------------------------------------------------------
+
+LIST_FIELDS = [
+    FieldSpec(name="id", type="uuid"),
+    FieldSpec(name="email", type="email"),
+    FieldSpec(name="age", type="int"),
+    FieldSpec(name="active", type="bool"),
+]
 
 
 @pytest.fixture
@@ -119,106 +126,96 @@ def specs(schema_spec, route_spec):
 
 
 class TestContributeFilters:
-    def test_adds_filter_schema(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "email", "type": "str"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        assert "UserListFilter" in specs["schema"].exports
+    def test_marks_post_search(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        ext = specs["route"].context["list_extensions"]
+        assert ext["http_method"] == "post"
+        assert ext["route_path"] == "/search"
 
-    def test_adds_filter_schema_snippet(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "age", "type": "int"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        classes = specs["schema"].context["schema_classes"]
-        assert len(classes) == 1
-        assert "UserListFilter" in classes[0]
-
-    def test_default_str_operators(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "name", "type": "str"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        snippet = specs["schema"].context["schema_classes"][0]
-        for op in DEFAULT_OPERATORS["str"]:
-            if op == "eq":
-                assert "name:" in snippet
-            else:
-                assert f"name_{op}:" in snippet
-
-    def test_custom_operators(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[
-                {
-                    "name": "status",
-                    "type": "str",
-                    "operators": ["eq", "in"],
-                }
-            ],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        snippet = specs["schema"].context["schema_classes"][0]
-        assert "status:" in snippet
-        assert "status_in:" in snippet
-        assert "status_contains" not in snippet
-
-    def test_adds_extra_params(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "age", "type": "int"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
+    def test_adds_body_param(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
         ext = specs["route"].context["list_extensions"]
         assert len(ext["extra_params"]) == 1
-        assert "UserListFilter" in ext["extra_params"][0]
+        assert "UserSearchRequest" in ext["extra_params"][0]
 
     def test_adds_query_modifier(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "age", "type": "int"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
+        config = FilterConfig(fields=["age"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
         ext = specs["route"].context["list_extensions"]
         assert len(ext["query_modifiers"]) == 1
         assert "apply_filters" in ext["query_modifiers"][0]
 
-    def test_imports_apply_filters_from_utils(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "age", "type": "int"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
+    def test_allowed_fields_in_modifier(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email", "age"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        ext = specs["route"].context["list_extensions"]
+        modifier = ext["query_modifiers"][0]
+        assert '"email"' in modifier
+        assert '"age"' in modifier
+
+    def test_imports_apply_filters(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
         lines = "\n".join(specs["route"].imports.lines())
         assert "apply_filters" in lines
 
-    def test_uuid_field_adds_import(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "ref_id", "type": "uuid"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        lines = "\n".join(specs["schema"].imports.lines())
-        assert "uuid" in lines
+    def test_auto_derives_fields_from_list_fields(self, specs, shared_ctx):
+        config = FilterConfig()
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        ext = specs["route"].context["list_extensions"]
+        modifier = ext["query_modifiers"][0]
+        for f in LIST_FIELDS:
+            assert f'"{f.name}"' in modifier
 
-    def test_bool_field_eq_only(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[{"name": "active", "type": "bool"}],
-        )
-        contribute_filters(specs, shared_ctx, config)
-        snippet = specs["schema"].context["schema_classes"][0]
-        assert "active:" in snippet
-        assert "active_gt" not in snippet
+    def test_empty_allowed_when_no_fields(self, specs, shared_ctx):
+        config = FilterConfig()
+        contribute_filters(specs, shared_ctx, config, None)
+        ext = specs["route"].context["list_extensions"]
+        modifier = ext["query_modifiers"][0]
+        assert "allowed_fields={}," in modifier
 
-    def test_in_operator_uses_list_type(self, specs, shared_ctx):
-        config = FilterConfig(
-            fields=[
-                {
-                    "name": "status",
-                    "type": "str",
-                    "operators": ["in"],
-                }
-            ],
-        )
-        contribute_filters(specs, shared_ctx, config)
+
+# -------------------------------------------------------------------
+# contribute_search_request
+# -------------------------------------------------------------------
+
+
+class TestContributeSearchRequest:
+    def test_adds_search_request_export(self, specs, shared_ctx):
+        contribute_search_request(specs, shared_ctx, None, None)
+        assert "UserSearchRequest" in specs["schema"].exports
+
+    def test_schema_has_filter_field(self, specs, shared_ctx):
+        contribute_search_request(specs, shared_ctx, None, None)
         snippet = specs["schema"].context["schema_classes"][0]
-        assert "list[str]" in snippet
+        assert "filter:" in snippet
+
+    def test_with_ordering(self, specs, shared_ctx):
+        ordering = OrderConfig(
+            fields=[FieldSpec(name="name", type="str")],
+        )
+        contribute_search_request(specs, shared_ctx, ordering, None)
+        snippet = specs["schema"].context["schema_classes"][0]
+        assert "sort_by:" in snippet
+        assert "sort_dir:" in snippet
+
+    def test_with_keyset_pagination(self, specs, shared_ctx):
+        pagination = PaginateConfig(mode="keyset", default_page_size=25)
+        contribute_search_request(specs, shared_ctx, None, pagination)
+        snippet = specs["schema"].context["schema_classes"][0]
+        assert "cursor:" in snippet
+        assert "page_size:" in snippet
+        assert "25" in snippet
+
+    def test_with_offset_pagination(self, specs, shared_ctx):
+        pagination = PaginateConfig(mode="offset", default_page_size=10)
+        contribute_search_request(specs, shared_ctx, None, pagination)
+        snippet = specs["schema"].context["schema_classes"][0]
+        assert "offset:" in snippet
+        assert "limit:" in snippet
+        assert "10" in snippet
 
 
 # -------------------------------------------------------------------
@@ -242,7 +239,7 @@ class TestContributeOrdering:
         assert "created_at" in snippet
         assert "name" in snippet
 
-    def test_adds_sort_params(self, specs, shared_ctx):
+    def test_adds_sort_params_no_search_body(self, specs, shared_ctx):
         config = OrderConfig(
             fields=[{"name": "created_at", "type": "datetime"}],
             default="created_at",
@@ -256,6 +253,20 @@ class TestContributeOrdering:
         assert "sort_dir" in params[1]
         assert '"desc"' in params[1]
 
+    def test_reads_from_body_when_search(self, specs, shared_ctx):
+        ext = specs["route"].context["list_extensions"]
+        ext["http_method"] = "post"
+        config = OrderConfig(
+            fields=[{"name": "name", "type": "str"}],
+            default="name",
+        )
+        contribute_ordering(specs, shared_ctx, config)
+        modifiers = "\n".join(ext["query_modifiers"])
+        assert "body.sort_by" in modifiers
+        assert "body.sort_dir" in modifiers
+        # No extra query params added
+        assert len(ext["extra_params"]) == 0
+
     def test_adds_order_by_modifiers(self, specs, shared_ctx):
         config = OrderConfig(
             fields=[{"name": "created_at", "type": "datetime"}],
@@ -263,8 +274,7 @@ class TestContributeOrdering:
         )
         contribute_ordering(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
-        modifiers = ext["query_modifiers"]
-        combined = "\n".join(modifiers)
+        combined = "\n".join(ext["query_modifiers"])
         assert "sort_col" in combined
         assert "order_by" in combined
         assert "User.created_at" in combined
@@ -294,7 +304,7 @@ class TestContributeOrdering:
         lines = "\n".join(specs["schema"].imports.lines())
         assert "Enum" in lines
 
-    def test_adds_literal_import(self, specs, shared_ctx):
+    def test_adds_literal_import_no_search(self, specs, shared_ctx):
         config = OrderConfig(
             fields=[{"name": "name", "type": "str"}],
         )
@@ -342,6 +352,17 @@ class TestContributePaginationKeyset:
             "page_size" in p and "25" in p and "Query" in p for p in params
         )
         assert any("le=100" in p for p in params)
+
+    def test_reads_from_body_when_search(self, specs, shared_ctx):
+        ext = specs["route"].context["list_extensions"]
+        ext["http_method"] = "post"
+        config = PaginateConfig(mode="keyset")
+        contribute_pagination(specs, shared_ctx, config)
+        # No query params added
+        assert len(ext["extra_params"]) == 0
+        modifiers = "\n".join(ext["query_modifiers"])
+        assert "body.cursor" in modifiers
+        assert "body.page_size" in modifiers
 
     def test_adds_cursor_query_modifiers(self, specs, shared_ctx):
         config = PaginateConfig(
@@ -415,6 +436,16 @@ class TestContributePaginationOffset:
         assert any("offset" in p and "ge=0" in p for p in params)
         assert any("limit" in p and "10" in p and "le=50" in p for p in params)
 
+    def test_reads_from_body_when_search(self, specs, shared_ctx):
+        ext = specs["route"].context["list_extensions"]
+        ext["http_method"] = "post"
+        config = PaginateConfig(mode="offset")
+        contribute_pagination(specs, shared_ctx, config)
+        assert len(ext["extra_params"]) == 0
+        expr = ext["result_expression"]
+        assert "body.offset" in expr
+        assert "body.limit" in expr
+
     def test_offset_result_expression(self, specs, shared_ctx):
         config = PaginateConfig(mode="offset")
         contribute_pagination(specs, shared_ctx, config)
@@ -443,7 +474,7 @@ class TestListOperationWithExtensions:
         opts = ListOperation.Options(**oc.options)
         ListOperation().contribute(specs, resource, shared_ctx, oc, opts)
 
-    def test_combined_handler_has_all_params(self, specs, resource, shared_ctx):
+    def test_combined_handler_post_search(self, specs, resource, shared_ctx):
         self._contribute(
             specs,
             resource,
@@ -452,11 +483,7 @@ class TestListOperationWithExtensions:
                 {"name": "id", "type": "uuid"},
                 {"name": "email", "type": "email"},
             ],
-            filters={
-                "fields": [
-                    {"name": "email", "type": "str", "operators": ["eq"]}
-                ]
-            },
+            filters={"fields": ["email"]},
             ordering={
                 "fields": [{"name": "created_at", "type": "datetime"}],
                 "default": "created_at",
@@ -472,10 +499,9 @@ class TestListOperationWithExtensions:
         handlers = specs["route"].context["route_handlers"]
         assert len(handlers) == 1
         handler = handlers[0]
-        assert "filters:" in handler
-        assert "sort_by:" in handler
-        assert "cursor:" in handler
-        assert "page_size:" in handler
+        assert 'router.post("/search"' in handler
+        assert "body:" in handler
+        assert "UserSearchRequest" in handler
 
     def test_combined_handler_response_model(self, specs, resource, shared_ctx):
         self._contribute(
@@ -500,11 +526,7 @@ class TestListOperationWithExtensions:
                 {"name": "id", "type": "uuid"},
                 {"name": "email", "type": "email"},
             ],
-            filters={
-                "fields": [
-                    {"name": "email", "type": "str", "operators": ["eq"]}
-                ]
-            },
+            filters={"fields": ["email"]},
             ordering={
                 "fields": [{"name": "created_at", "type": "datetime"}],
                 "default": "created_at",
@@ -526,11 +548,7 @@ class TestListOperationWithExtensions:
                 {"name": "id", "type": "uuid"},
                 {"name": "email", "type": "email"},
             ],
-            filters={
-                "fields": [
-                    {"name": "email", "type": "str", "operators": ["eq"]}
-                ]
-            },
+            filters={"fields": ["email"]},
             ordering={
                 "fields": [{"name": "created_at", "type": "datetime"}],
             },
@@ -541,6 +559,35 @@ class TestListOperationWithExtensions:
         schema_spec.imports.add_from("pydantic", "BaseModel")
         generated = schema_spec.render()
         ast.parse(generated.content)
+
+    def test_search_request_includes_sort_and_pagination(
+        self, specs, resource, shared_ctx
+    ):
+        self._contribute(
+            specs,
+            resource,
+            shared_ctx,
+            fields=[
+                {"name": "id", "type": "uuid"},
+                {"name": "email", "type": "email"},
+            ],
+            filters={},
+            ordering={
+                "fields": [{"name": "name", "type": "str"}],
+            },
+            pagination={
+                "mode": "keyset",
+                "default_page_size": 30,
+            },
+        )
+        assert "UserSearchRequest" in specs["schema"].exports
+        classes = specs["schema"].context["schema_classes"]
+        search_req = [c for c in classes if "SearchRequest" in c]
+        assert len(search_req) == 1
+        snippet = search_req[0]
+        assert "sort_by:" in snippet
+        assert "cursor:" in snippet
+        assert "30" in snippet
 
 
 # -------------------------------------------------------------------
@@ -570,7 +617,22 @@ class TestBackwardCompat:
         # No extension-related content
         assert "cursor" not in handler
         assert "sort_by" not in handler
-        assert "filters" not in handler
+        assert "body:" not in handler
+
+    def test_list_without_extensions_uses_get(
+        self, specs, resource, shared_ctx
+    ):
+        oc = OperationConfig(
+            name="list",
+            fields=[
+                {"name": "id", "type": "uuid"},
+                {"name": "email", "type": "email"},
+            ],
+        )
+        opts = ListOperation.Options(**oc.options)
+        ListOperation().contribute(specs, resource, shared_ctx, oc, opts)
+        handler = specs["route"].context["route_handlers"][0]
+        assert 'router.get("/"' in handler
 
     def test_list_without_extensions_valid_python(
         self, specs, resource, shared_ctx
