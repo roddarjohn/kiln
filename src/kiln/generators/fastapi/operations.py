@@ -54,6 +54,7 @@ from kiln.generators.fastapi.list_extensions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from kiln.config.schema import (
@@ -225,7 +226,7 @@ def introspect_action_fn(
     fn = _import_callable(fn_dotted)
     model_cls = _import_callable(model_class_path)
     hints = _resolve_hints(fn, fn_dotted)
-    sig = inspect.signature(fn)  # type: ignore[arg-type]
+    sig = inspect.signature(fn)
 
     is_object_action = False
     model_param_name: str | None = None
@@ -262,7 +263,7 @@ def introspect_action_fn(
     )
 
 
-def _import_callable(dotted: str) -> object:
+def _import_callable(dotted: str) -> Callable[..., object]:
     """Import a name from a dotted path."""
     mod_path, _, attr = dotted.rpartition(".")
     if not mod_path:
