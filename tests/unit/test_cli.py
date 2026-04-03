@@ -163,27 +163,17 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_write_files_skips_no_overwrite(tmp_path: Path):
-    f = GeneratedFile(path="foo.py", content="# original", overwrite=False)
-    _write_files([f], tmp_path)
-    (tmp_path / "foo.py").write_text("# modified")
-    written, skipped = _write_files([f], tmp_path)
-    assert written == 0
-    assert skipped == 1
-
-
-def test_write_files_overwrites_by_default(tmp_path: Path):
+def test_write_files_always_overwrites(tmp_path: Path):
     f = GeneratedFile(path="bar.py", content="# v1")
     _write_files([f], tmp_path)
     f2 = GeneratedFile(path="bar.py", content="# v2")
-    written, skipped = _write_files([f2], tmp_path)
+    written = _write_files([f2], tmp_path)
     assert written == 1
-    assert skipped == 0
     assert (tmp_path / "bar.py").read_text() == "# v2"
 
 
 def test_write_files_creates_subdirs(tmp_path: Path):
     f = GeneratedFile(path="a/b/c.py", content="x")
-    written, _ = _write_files([f], tmp_path)
+    written = _write_files([f], tmp_path)
     assert written == 1
     assert (tmp_path / "a" / "b" / "c.py").exists()

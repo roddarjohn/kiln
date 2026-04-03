@@ -49,6 +49,7 @@ playground = [
   "pgcraft",
   "uvicorn[standard]>=0.30",
   "pyjwt>=2.0",
+  "alembic>=1.18.4",
 ]
 docs = [
   "myst-parser>=4.0",

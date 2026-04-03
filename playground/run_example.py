@@ -12,7 +12,7 @@ Usage::
     uv run --group playground python playground/run_example.py examples/blog.jsonnet
 
 The generated/ directory is created fresh on each run.
-Files with ``overwrite=False`` (pgcraft stubs) are only written once.
+All files are always overwritten on each run.
 """
 
 from __future__ import annotations
@@ -44,18 +44,14 @@ def run(config_path: Path) -> None:
     files = registry.run(config)
 
     written = 0
-    skipped = 0
     for f in files:
         target = out / f.path
-        if target.exists() and not f.overwrite:
-            skipped += 1
-            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f.content)
         written += 1
         print(f"  wrote  {f.path}")
 
-    print(f"\n{written} file(s) written, {skipped} stub(s) skipped.")
+    print(f"\n{written} file(s) written.")
     print(f"Output: {out}\n")
 
 

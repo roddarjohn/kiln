@@ -98,14 +98,10 @@ def full_config(simple_resource) -> KilnConfig:
 # ---------------------------------------------------------------------------
 
 
-def test_generated_file_defaults():
+def test_generated_file():
     f = GeneratedFile(path="foo.py", content="# hi")
-    assert f.overwrite is True
-
-
-def test_generated_file_no_overwrite():
-    f = GeneratedFile(path="stub.py", content="# stub", overwrite=False)
-    assert f.overwrite is False
+    assert f.path == "foo.py"
+    assert f.content == "# hi"
 
 
 def test_generator_protocol():
@@ -132,12 +128,6 @@ def test_scaffold_with_auth_generates_deps():
     files = ScaffoldGenerator().generate(cfg)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
-
-
-def test_scaffold_all_files_overwriteable():
-    cfg = KilnConfig(auth=AuthConfig())
-    for f in ScaffoldGenerator().generate(cfg):
-        assert f.overwrite is True, f"{f.path} should have overwrite=True"
 
 
 def test_scaffold_auth_deps_valid_python():
@@ -467,12 +457,10 @@ def test_registry_write_files(full_config, tmp_path: Path):
     from kiln.cli import _write_files
 
     files = GeneratorRegistry.default().run(full_config)
-    written, skipped = _write_files(files, tmp_path)
+    written = _write_files(files, tmp_path)
     assert written > 0
-    assert skipped == 0
-    written2, skipped2 = _write_files(files, tmp_path)
+    written2 = _write_files(files, tmp_path)
     assert written2 == written
-    assert skipped2 == 0
 
 
 # ---------------------------------------------------------------------------

@@ -152,6 +152,12 @@ class KilnConfig(BaseModel):
 
     version: str = "1"
     module: str = "app"
+    package_prefix: str = "_generated"
+    """Directory prefix prepended to all generated file paths and Python
+    import paths.  Defaults to ``"_generated"`` so generated code lives
+    at ``_generated/{module}/`` and is imported as
+    ``_generated.{module}.routes.article``.  Set to ``""`` to disable.
+    """
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = []
     resources: list[ResourceConfig] = []

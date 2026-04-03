@@ -68,16 +68,19 @@ def _op_ctx(
     for code generation.  When it is the boolean ``True``, the endpoint is
     enabled but no schema is generated (``has_schema=False``).
     """
-    has_schema = isinstance(op_value, FieldsConfig)
-    if has_schema:
-        fields: list[FieldSpec] = op_value.fields
-    else:
-        fields = []
+    if isinstance(op_value, FieldsConfig):
+        return {
+            "enabled": True,
+            "has_schema": True,
+            "fields": _field_dicts(op_value.fields),
+            "sa_columns": _sa_columns(op_value.fields, model_name),
+            "requires_auth": _op_requires_auth(require_auth, op_name),
+        }
     return {
         "enabled": True,
-        "has_schema": has_schema,
-        "fields": _field_dicts(fields),
-        "sa_columns": _sa_columns(fields, model_name),
+        "has_schema": False,
+        "fields": [],
+        "sa_columns": [],
         "requires_auth": _op_requires_auth(require_auth, op_name),
     }
 
