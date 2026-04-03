@@ -9,11 +9,14 @@ These are imported at generation time by
 from __future__ import annotations
 
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
 
 class StubModel:
     """Fake SQLAlchemy model for testing."""
+
+
+class AsyncSession:
+    """Fake AsyncSession so stubs don't need sqlalchemy."""
 
 
 class StubRequest(BaseModel):
