@@ -125,17 +125,13 @@ async def update_{{ model_lower }}(
 ) -> {% if response_schema %}{{ response_schema }}{% else %}None{% endif %}:
     """Update a {{ model_name }}."""
 {% if response_schema %}
-    await get_object_from_query_or_404(
-        db,
-        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
-        detail="{{ model_name }} not found",
-    )
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
         .values({% if op_update.has_schema %}**body.model_dump(exclude_unset=True){% endif %})
         .returning({{ model_name }})
     )
+    assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()
     return to_{{ model_lower }}_resource(result.scalars().one())
 {% else %}

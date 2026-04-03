@@ -357,14 +357,8 @@ def _build_ctx(
     # create/update response: unified Resource when available.
     response_schema = f"{model_name}Resource" if has_resource_schema else None
 
-    # get_object_from_query_or_404: GET always; UPDATE with response (pre-check)
-    needs_get_or_404 = op_get["enabled"] or (
-        op_update["enabled"] and has_resource_schema
-    )
-    # assert_rowcount: UPDATE without response; DELETE
-    needs_assert_rowcount = op_delete["enabled"] or (
-        op_update["enabled"] and not has_resource_schema
-    )
+    needs_get_or_404 = op_get["enabled"]
+    needs_assert_rowcount = op_update["enabled"] or op_delete["enabled"]
     utils_imports: list[str] = []
     if needs_get_or_404:
         utils_imports.append("get_object_from_query_or_404")
