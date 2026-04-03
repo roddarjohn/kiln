@@ -34,14 +34,9 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
-          // Filtering: search by sku/name (string ops) and active (bool eq)
+          // Filtering: search by sku/name/unit_price/active
           filters: {
-            fields: [
-              { name: "sku", type: "str", operators: ["eq", "contains", "starts_with"] },
-              { name: "name", type: "str", operators: ["eq", "contains"] },
-              { name: "unit_price", type: "float" },
-              { name: "active", type: "bool" },
-            ],
+            fields: ["sku", "name", "unit_price", "active"],
           },
           // Ordering: sort by name or unit_price
           ordering: {

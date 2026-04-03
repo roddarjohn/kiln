@@ -36,12 +36,9 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "slug", type: "str" },
             { name: "published", type: "bool" },
           ],
-          // Filtering: search by title and filter by published status
+          // Filtering: search by title and published status
           filters: {
-            fields: [
-              { name: "title", type: "str", operators: ["eq", "contains"] },
-              { name: "published", type: "bool" },
-            ],
+            fields: ["title", "published"],
           },
           // Ordering: sort by title
           ordering: {

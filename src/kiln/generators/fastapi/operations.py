@@ -48,6 +48,7 @@ from kiln.generators.fastapi.list_extensions import (
     contribute_filters,
     contribute_ordering,
     contribute_pagination,
+    contribute_search_request,
 )
 
 if TYPE_CHECKING:
@@ -557,6 +558,15 @@ class ListOperation:
             contribute_ordering(specs, ctx, options.ordering)
         if options.pagination:
             contribute_pagination(specs, ctx, options.pagination)
+
+        # Render SearchRequest schema after all extensions
+        if options.filters:
+            contribute_search_request(
+                specs,
+                ctx,
+                options.ordering,
+                options.pagination,
+            )
 
         # Route contribution
         self._contribute_route(specs, resource, ctx, op_config)
