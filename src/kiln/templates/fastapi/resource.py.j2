@@ -8,7 +8,7 @@ from __future__ import annotations
 {% for imp in pk_imports %}
 {{ imp }}
 {% endfor %}
-from typing import Annotated{% if serializers %}, Any{% endif %}
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import {{ sqlalchemy_imports | join(", ") }}
@@ -20,6 +20,9 @@ from {{ session_module }} import {{ get_db_fn }}
 from {{ model_module }} import {{ model_name }}
 {% if uses_utils %}
 from {{ utils_module }} import get_object_from_query_or_404
+{% endif %}
+{% if has_resource_schema %}
+from {{ serializer_module }} import to_{{ model_lower }}_resource
 {% endif %}
 {% for imp in action_imports %}
 {{ imp }}
@@ -34,74 +37,46 @@ from {{ schema_module }} import (
 
 router = APIRouter(prefix="{{ route_prefix }}", tags=["{{ model_name | lower }}"])
 
-{% if serializers %}
-# ---------------------------------------------------------------------------
-# Serializers
-# ---------------------------------------------------------------------------
-
-{% for s in serializers %}
-def {{ s.name }}(obj: Any) -> {{ s.schema_class }}:
-    """Construct :class:`{{ s.schema_class }}` from an ORM object or query row."""
-    return {{ s.schema_class }}(
-{% for f in s.fields %}
-        {{ f.name }}=obj.{{ f.name }},
-{% endfor %}
-    )
-
-
-{% endfor %}
-{% endif %}
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 {% if op_get.enabled %}
-@router.get("/{{ '{' }}{{ pk_name }}{{ '}' }}"{% if op_get.has_schema %}, response_model={{ model_name }}GetResponse{% endif %})
+@router.get("/{{ '{' }}{{ pk_name }}{{ '}' }}"{% if has_resource_schema %}, response_model={{ model_name }}Resource{% endif %})
 async def get_{{ model_lower }}(
     {{ pk_name }}: {{ pk_py_type }},
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if has_auth and op_get.requires_auth %}
     current_user: Annotated[dict, Depends(get_current_user)],
 {% endif %}
-) -> {% if op_get.has_schema %}{{ model_name }}GetResponse{% else %}object{% endif %}:
+) -> {% if has_resource_schema %}{{ model_name }}Resource{% else %}object{% endif %}:
     """Get a {{ model_name }} by {{ pk_name }}."""
-{% if op_get.has_schema %}
-    row = await get_object_from_query_or_404(
+    obj = await get_object_from_query_or_404(
         db,
-        select({{ op_get.sa_columns | join(", ") }})
-        .where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
-    return _to_{{ model_lower }}_get(row)
+{% if has_resource_schema %}
+    return to_{{ model_lower }}_resource(obj)
 {% else %}
-    result = await db.execute(
-        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-    )
-    obj = result.scalar_one_or_none()
-    if obj is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="{{ model_name }} not found",
-        )
     return obj
 {% endif %}
 
 
 {% endif %}
 {% if op_list.enabled %}
-@router.get("/", response_model={% if op_list.has_schema %}list[{{ model_name }}ListResponse]{% else %}list{% endif %})
+@router.get("/", response_model={% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}list{% endif %})
 async def list_{{ model_lower }}(
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if has_auth and op_list.requires_auth %}
     current_user: Annotated[dict, Depends(get_current_user)],
 {% endif %}
-) -> {% if op_list.has_schema %}list[{{ model_name }}ListResponse]{% else %}object{% endif %}:
+) -> {% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}object{% endif %}:
     """List {{ model_name }} records."""
-{% if op_list.has_schema %}
-    result = await db.execute(select({{ op_list.sa_columns | join(", ") }}))
-    return [_to_{{ model_lower }}_list(row) for row in result]
-{% else %}
     result = await db.execute(select({{ model_name }}))
+{% if has_resource_schema %}
+    return [to_{{ model_lower }}_resource(obj) for obj in result.scalars()]
+{% else %}
     return list(result.scalars().all())
 {% endif %}
 
@@ -123,10 +98,10 @@ async def create_{{ model_lower }}(
     result = await db.execute(
         insert({{ model_name }})
         .values({% if op_create.has_schema %}**body.model_dump(){% endif %})
-        .returning({{ op_get.sa_columns | join(", ") }})
+        .returning({{ model_name }})
     )
     await db.commit()
-    return _to_{{ model_lower }}_get(result.one())
+    return to_{{ model_lower }}_resource(result.scalars().one())
 {% else %}
     await db.execute(
         insert({{ model_name }}).values({% if op_create.has_schema %}**body.model_dump(){% endif %})
@@ -154,16 +129,16 @@ async def update_{{ model_lower }}(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
         .values({% if op_update.has_schema %}**body.model_dump(exclude_unset=True){% endif %})
-        .returning({{ op_get.sa_columns | join(", ") }})
+        .returning({{ model_name }})
     )
     await db.commit()
-    row = result.one_or_none()
-    if row is None:
+    obj = result.scalars().one_or_none()
+    if obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="{{ model_name }} not found",
         )
-    return _to_{{ model_lower }}_get(row)
+    return to_{{ model_lower }}_resource(obj)
 {% else %}
     result = await db.execute(
         update({{ model_name }})

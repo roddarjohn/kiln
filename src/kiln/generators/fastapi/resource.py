@@ -47,20 +47,10 @@ def _field_dicts(fields: list[FieldSpec]) -> list[dict[str, str]]:
     return [{"name": f.name, "py_type": PYTHON_TYPES[f.type]} for f in fields]
 
 
-def _sa_columns(fields: list[FieldSpec], model_name: str) -> list[str]:
-    """Return column expression strings for a specific-fields select.
-
-    Each entry is rendered verbatim into the generated
-    ``select(...)`` call, e.g. ``["User.id", "User.email"]``.
-    """
-    return [f"{model_name}.{f.name}" for f in fields]
-
-
 def _op_ctx(
     op_value: bool | FieldsConfig,  # noqa: FBT001
     op_name: str,
     require_auth: Sequence[str] | bool,  # noqa: FBT001
-    model_name: str,
 ) -> dict:
     """Build the template context dict for a single CRUD operation.
 
@@ -74,14 +64,12 @@ def _op_ctx(
             "enabled": True,
             "has_schema": True,
             "fields": _field_dicts(op_value.fields),
-            "sa_columns": _sa_columns(op_value.fields, model_name),
             "requires_auth": _op_requires_auth(require_auth, op_name),
         }
     return {
         "enabled": True,
         "has_schema": False,
         "fields": [],
-        "sa_columns": [],
         "requires_auth": _op_requires_auth(require_auth, op_name),
     }
 
@@ -91,7 +79,6 @@ def _disabled_op() -> dict:
         "enabled": False,
         "has_schema": False,
         "fields": [],
-        "sa_columns": [],
         "requires_auth": False,
     }
 
@@ -100,13 +87,12 @@ def _build_op_ctx(
     resource: ResourceConfig,
     op_name: str,
     require_auth: Sequence[str] | bool,  # noqa: FBT001
-    model_name: str,
 ) -> dict:
     """Return the op context for *op_name*, dispatching to disabled/enabled."""
     op_value = getattr(resource, op_name)
     if op_value is False:
         return _disabled_op()
-    return _op_ctx(op_value, op_name, require_auth, model_name)
+    return _op_ctx(op_value, op_name, require_auth)
 
 
 def _collect_schema_types(
@@ -134,7 +120,10 @@ def _collect_schema_types(
 
 
 def _collect_schema_names(
-    model_name: str, ops: dict[str, dict], action_ctxs: list[dict]
+    model_name: str,
+    ops: dict[str, dict],
+    action_ctxs: list[dict],
+    has_resource_schema: bool,  # noqa: FBT001
 ) -> list[str]:
     """Collect names exported from the schema module for route imports.
 
@@ -142,16 +131,15 @@ def _collect_schema_names(
         model_name: PascalCase model class name.
         ops: Mapping of op name → op context dict (get/list/create/update).
         action_ctxs: Rendered action context dicts.
+        has_resource_schema: Whether a unified Resource schema is generated.
 
     Returns:
         List of class name strings to import from the schema module.
 
     """
     names: list[str] = []
-    if ops["get"]["enabled"] and ops["get"]["has_schema"]:
-        names.append(f"{model_name}GetResponse")
-    if ops["list"]["enabled"] and ops["list"]["has_schema"]:
-        names.append(f"{model_name}ListResponse")
+    if has_resource_schema:
+        names.append(f"{model_name}Resource")
     if ops["create"]["enabled"] and ops["create"]["has_schema"]:
         names.append(f"{model_name}CreateRequest")
     if ops["update"]["enabled"] and ops["update"]["has_schema"]:
@@ -178,16 +166,16 @@ def _action_ctx(action: ActionConfig) -> dict:
 
 
 class ResourceGenerator:
-    """Produces one schema file and one route file per resource in config.
+    """Produces schema, serializer, and route files per resource in config.
 
-    For each resource two files are emitted:
+    For each resource up to three files are emitted:
 
-    * ``{module}/schemas/{model}.py`` — explicit Pydantic request/response
-      schemas with named fields.
+    * ``{module}/schemas/{model}.py`` — Pydantic request/response schemas.
+    * ``{module}/serializers/{model}.py`` — serializer function that converts
+      an ORM model instance to the resource schema (only when a resource schema
+      is generated).
     * ``{module}/routes/{model}.py`` — async FastAPI route handlers using
-      raw SQLAlchemy Core statements (``select``, ``insert``, ``update``,
-      ``delete``).  Routes import schemas from the schema module and return
-      schema instances via generated serializer functions.
+      SQLAlchemy ``select``, ``insert``, ``update``, ``delete``.
 
     Generated files are always overwritten on re-generation.
     """
@@ -207,15 +195,14 @@ class ResourceGenerator:
         return bool(config.resources)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Generate one schema file and one route file per resource.
+        """Generate schema, serializer, and route files per resource.
 
         Args:
             config: The validated kiln configuration.
 
         Returns:
-            Two :class:`~kiln.generators.base.GeneratedFile` instances per
-            resource — a schema file under ``{module}/schemas/`` and a route
-            file under ``{module}/routes/``.
+            Up to three :class:`~kiln.generators.base.GeneratedFile` instances
+            per resource — schema, optional serializer, and routes.
 
         """
         app = config.module
@@ -233,6 +220,13 @@ class ResourceGenerator:
                     content=_render_schema(ctx),
                 )
             )
+            if ctx["has_resource_schema"]:
+                files.append(
+                    GeneratedFile(
+                        path=f"{app}/serializers/{model_lower}.py",
+                        content=_render_serializer(ctx),
+                    )
+                )
             files.append(
                 GeneratedFile(
                     path=f"{app}/routes/{model_lower}.py",
@@ -294,44 +288,6 @@ def _action_imports(action_ctxs: list[dict]) -> list[str]:
     ]
 
 
-def _serializer_ctxs(
-    model_name: str, model_lower: str, op_get: dict, op_list: dict
-) -> list[dict]:
-    """Build context dicts for the route file's serializer functions.
-
-    A serializer is a small helper that explicitly constructs a schema
-    instance from an ORM object or SQLAlchemy ``Row``.
-
-    Args:
-        model_name: PascalCase model class name.
-        model_lower: Lowercase model name used in function names.
-        op_get: Rendered get op context.
-        op_list: Rendered list op context.
-
-    Returns:
-        List of dicts consumed by the serializer section of the route template.
-
-    """
-    serializers = []
-    if op_get["enabled"] and op_get["has_schema"]:
-        serializers.append(
-            {
-                "name": f"_to_{model_lower}_get",
-                "schema_class": f"{model_name}GetResponse",
-                "fields": op_get["fields"],
-            }
-        )
-    if op_list["enabled"] and op_list["has_schema"]:
-        serializers.append(
-            {
-                "name": f"_to_{model_lower}_list",
-                "schema_class": f"{model_name}ListResponse",
-                "fields": op_list["fields"],
-            }
-        )
-    return serializers
-
-
 def _build_ctx(
     resource: ResourceConfig,
     config: KilnConfig,
@@ -359,20 +315,26 @@ def _build_ctx(
     route_prefix = resource.route_prefix or f"/{model_lower}s"
     require_auth = resource.require_auth
 
-    op_get = _build_op_ctx(resource, "get", require_auth, model_name)
-    op_list = _build_op_ctx(resource, "list", require_auth, model_name)
-    op_create = _build_op_ctx(resource, "create", require_auth, model_name)
-    op_update = _build_op_ctx(resource, "update", require_auth, model_name)
+    op_get = _build_op_ctx(resource, "get", require_auth)
+    op_list = _build_op_ctx(resource, "list", require_auth)
+    op_create = _build_op_ctx(resource, "create", require_auth)
+    op_update = _build_op_ctx(resource, "update", require_auth)
     op_delete = {
         "enabled": resource.delete,
         "has_schema": False,
         "requires_auth": _op_requires_auth(require_auth, "delete"),
         "fields": [],
-        "sa_columns": [],
     }
 
     action_ctxs = [_action_ctx(a) for a in resource.actions]
     has_actions = bool(action_ctxs)
+
+    has_resource_schema = (op_get["enabled"] and op_get["has_schema"]) or (
+        op_list["enabled"] and op_list["has_schema"]
+    )
+    resource_fields = (
+        op_get["fields"] if op_get["has_schema"] else op_list["fields"]
+    )
 
     read_write_ops = {
         "get": op_get,
@@ -382,27 +344,23 @@ def _build_ctx(
     }
     schema_types = _collect_schema_types(resource, read_write_ops)
     schema_names = _collect_schema_names(
-        model_name, read_write_ops, action_ctxs
+        model_name, read_write_ops, action_ctxs, has_resource_schema
     )
 
     pk_types: list[str] = [resource.pk_type]
 
-    serializers = _serializer_ctxs(model_name, model_lower, op_get, op_list)
     sa_ops = _sqlalchemy_imports(
         op_get, op_list, op_create, op_update, op_delete
     )
     act_imports = _action_imports(action_ctxs)
 
-    # Response schema for create/update: reuse the get schema when available.
-    response_schema = (
-        f"{model_name}GetResponse"
-        if op_get["enabled"] and op_get["has_schema"]
-        else None
-    )
+    # create/update response: unified Resource when available.
+    response_schema = f"{model_name}Resource" if has_resource_schema else None
 
-    uses_utils = op_get["enabled"] and op_get["has_schema"]
-    utils_module = prefix_import(pkg, app, "utils")
+    uses_utils = op_get["enabled"]
+    utils_module = prefix_import(pkg, "utils")
     schema_module = prefix_import(pkg, app, "schemas", model_lower)
+    serializer_module = prefix_import(pkg, app, "serializers", model_lower)
 
     return {
         "model_name": model_name,
@@ -423,12 +381,14 @@ def _build_ctx(
         "op_delete": op_delete,
         "actions": action_ctxs,
         "has_actions": has_actions,
+        "has_resource_schema": has_resource_schema,
+        "resource_fields": resource_fields,
         "response_schema": response_schema,
         "schema_module": schema_module,
+        "serializer_module": serializer_module,
         "utils_module": utils_module,
         "uses_utils": uses_utils,
         "schema_names": schema_names,
-        "serializers": serializers,
         "sqlalchemy_imports": sa_ops,
         "action_imports": act_imports,
     }
@@ -445,6 +405,20 @@ def _render_schema(ctx: dict) -> str:
 
     """
     tmpl = env.get_template("fastapi/schema.py.j2")
+    return tmpl.render(**ctx)
+
+
+def _render_serializer(ctx: dict) -> str:
+    """Render the serializer file for a resource.
+
+    Args:
+        ctx: The shared template context from :func:`_build_ctx`.
+
+    Returns:
+        Python source string for the serializer module.
+
+    """
+    tmpl = env.get_template("fastapi/serializer.py.j2")
     return tmpl.render(**ctx)
 
 

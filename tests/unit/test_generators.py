@@ -168,6 +168,8 @@ def test_resource_generator_output_paths(full_config):
     paths = {f.path for f in files}
     assert "myapp/routes/user.py" in paths
     assert "myapp/schemas/user.py" in paths
+    # list=FieldsConfig → has_resource_schema → serializer emitted
+    assert "myapp/serializers/user.py" in paths
 
 
 def test_resource_generator_valid_python(full_config):
@@ -176,20 +178,19 @@ def test_resource_generator_valid_python(full_config):
 
 
 def test_resource_generator_no_build_schema(full_config):
-    """get=True generates no schema (no _build_schema, no dynamic class)."""
+    """No dynamic _build_schema; no GetResponse or ListResponse classes."""
     files = ResourceGenerator().generate(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
     assert "_build_schema" not in schema.content
-    assert "UserGetResponse = _build_schema" not in schema.content
-    # get=True → no explicit schema class either
     assert "class UserGetResponse" not in schema.content
+    assert "class UserListResponse" not in schema.content
 
 
 def test_resource_generator_specific_fields_static_class(full_config):
     files = ResourceGenerator().generate(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
-    # list has specific fields → explicit static Pydantic class
-    assert "class UserListResponse(BaseModel):" in schema.content
+    # list has specific fields → unified Resource schema
+    assert "class UserResource(BaseModel):" in schema.content
     assert "id: uuid.UUID" in schema.content
 
 
@@ -214,15 +215,20 @@ def test_resource_generator_route_imports_from_schema(full_config):
     # import path uses package_prefix even though file path does not
 
 
-def test_resource_generator_serializer_functions(full_config):
-    """Explicit-field ops get serializer helpers in the route file."""
+def test_resource_generator_serializer_file(full_config):
+    """list=FieldsConfig produces a serializer file with to_user_resource."""
     files = ResourceGenerator().generate(full_config)
+    serializer = next(f for f in files if "serializers/user.py" in f.path)
+    assert "def to_user_resource" in serializer.content
+    assert "-> UserResource:" in serializer.content
+    assert "return UserResource(" in serializer.content
+    # route imports the serializer function, not inlines it
     route = next(f for f in files if "routes/user.py" in f.path)
-    # list=FieldsConfig → _to_user_list serializer
-    assert "def _to_user_list(obj: Any) -> UserListResponse:" in route.content
-    assert "return UserListResponse(" in route.content
-    # get=True → no serializer for get
-    assert "def _to_user_get" not in route.content
+    assert (
+        "from _generated.myapp.serializers.user import to_user_resource"
+        in route.content
+    )
+    assert "def _to_user" not in route.content
 
 
 def test_resource_generator_route_uses_insert(full_config):
@@ -357,8 +363,8 @@ def test_resource_generator_int_pk():
     assert "id: int" in route.content
 
 
-def test_resource_generator_specific_select_columns():
-    """list with specific fields uses per-column select, not select(Model)."""
+def test_resource_generator_always_select_model():
+    """Routes always use select(Model), never per-column select."""
     r = ResourceConfig(
         model="myapp.models.User",
         list=FieldsConfig(
@@ -371,16 +377,8 @@ def test_resource_generator_specific_select_columns():
     cfg = KilnConfig(resources=[r])
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
-    assert "select(User.id, User.email)" in route.content
-
-
-def test_resource_generator_all_fields_select_model():
-    """list=True uses select(Model), not per-column select."""
-    r = ResourceConfig(model="myapp.models.User", list=True)
-    cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
-    route = next(f for f in files if "routes/user.py" in f.path)
     assert "select(User)" in route.content
+    assert "select(User.id" not in route.content
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +433,7 @@ def test_utils_generator_cannot_generate_empty():
 
 def test_utils_generator_output_path(full_config):
     (f,) = UtilsGenerator().generate(full_config)
-    assert f.path == "myapp/utils.py"
+    assert f.path == "utils.py"
 
 
 def test_utils_generator_valid_python(full_config):
@@ -448,29 +446,17 @@ def test_utils_generator_contains_helper(full_config):
     assert "get_object_from_query_or_404" in f.content
 
 
-def test_resource_generator_uses_utils_for_get_with_schema():
-    """GET route with has_schema uses get_object_from_query_or_404."""
-    r = ResourceConfig(
-        model="myapp.models.User",
-        get=FieldsConfig(fields=[FieldSpec(name="id", type="uuid")]),
-    )
+def test_resource_generator_uses_utils_for_all_get_routes():
+    """All GET routes use get_object_from_query_or_404 from root utils."""
+    r = ResourceConfig(model="myapp.models.User", get=True)
     cfg = KilnConfig(module="myapp", resources=[r])
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "get_object_from_query_or_404" in route.content
     assert (
-        "from _generated.myapp.utils import get_object_from_query_or_404"
+        "from _generated.utils import get_object_from_query_or_404"
         in route.content
     )
-
-
-def test_resource_generator_no_utils_for_get_without_schema():
-    """GET route with get=True (no schema) does NOT import utils."""
-    r = ResourceConfig(model="myapp.models.User", get=True)
-    cfg = KilnConfig(module="myapp", resources=[r])
-    files = ResourceGenerator().generate(cfg)
-    route = next(f for f in files if f.path.endswith("routes/user.py"))
-    assert "get_object_from_query_or_404" not in route.content
 
 
 # ---------------------------------------------------------------------------

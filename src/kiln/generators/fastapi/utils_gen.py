@@ -12,10 +12,10 @@ if TYPE_CHECKING:
 
 
 class UtilsGenerator:
-    """Produces ``{prefix}/{module}/utils.py`` with shared route helpers.
+    """Produces a root-level ``utils.py`` with shared route helpers.
 
     Currently generates ``get_object_from_query_or_404``, a small async
-    helper used by GET routes that have explicit field schemas.
+    helper used by all GET routes.
     """
 
     @property
@@ -32,7 +32,7 @@ class UtilsGenerator:
         """
         return bool(config.resources)
 
-    def generate(self, config: KilnConfig) -> list[GeneratedFile]:
+    def generate(self, config: KilnConfig) -> list[GeneratedFile]:  # noqa: ARG002
         """Generate the shared utils file.
 
         Args:
@@ -40,13 +40,13 @@ class UtilsGenerator:
 
         Returns:
             A single :class:`~kiln.generators.base.GeneratedFile` at
-            ``{prefix}/{module}/utils.py``.
+            ``utils.py``.
 
         """
         tmpl = env.get_template("fastapi/utils.py.j2")
         return [
             GeneratedFile(
-                path=f"{config.module}/utils.py",
+                path="utils.py",
                 content=tmpl.render(),
             )
         ]

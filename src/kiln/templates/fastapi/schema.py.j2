@@ -14,20 +14,11 @@ from pydantic import BaseModel
 # Response / request schemas
 # ---------------------------------------------------------------------------
 
-{% if op_get.enabled and op_get.has_schema %}
-class {{ model_name }}GetResponse(BaseModel):
-    """Response schema for GET {{ route_prefix }}/{pk}."""
+{% if has_resource_schema %}
+class {{ model_name }}Resource(BaseModel):
+    """Resource schema for {{ model_name }}."""
 
-{% for f in op_get.fields %}
-    {{ f.name }}: {{ f.py_type }}
-{% endfor %}
-
-{% endif %}
-{% if op_list.enabled and op_list.has_schema %}
-class {{ model_name }}ListResponse(BaseModel):
-    """Response schema for GET {{ route_prefix }}."""
-
-{% for f in op_list.fields %}
+{% for f in resource_fields %}
     {{ f.name }}: {{ f.py_type }}
 {% endfor %}
 
