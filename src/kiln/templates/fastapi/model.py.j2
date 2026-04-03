@@ -21,9 +21,9 @@ from {{ factory_module }} import {{ factory_class }}
 {% if pk_plugin_import %}
 {{ pk_plugin_import }}
 {% endif %}
-{% if has_postgrest %}
-from pgcraft.extensions.postgrest import PostgRESTPlugin
-{% endif %}
+{% for imp in extra_plugin_imports %}
+{{ imp }}
+{% endfor %}
 
 from db.base import Base
 

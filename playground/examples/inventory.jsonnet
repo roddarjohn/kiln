@@ -7,6 +7,7 @@
 local auth = import "kiln/auth/jwt.libsonnet";
 local crud = import "kiln/crud/presets.libsonnet";
 local field = import "kiln/models/fields.libsonnet";
+local factories = import "kiln/pgcraft/factories.libsonnet";
 
 {
   version: "1",
@@ -19,7 +20,7 @@ local field = import "kiln/models/fields.libsonnet";
       name: "Product",
       table: "products",
       schema: "inventory",
-      pgcraft_type: "simple",
+      pgcraft_type: factories.simple,
       fields: [
         field.uuid("id", primary_key=true),
         field.str("sku", unique=true),
@@ -29,15 +30,12 @@ local field = import "kiln/models/fields.libsonnet";
         field.json("attributes", nullable=true),
         field.datetime("created_at", auto_now_add=true),
       ],
-      crud: crud.full({ require_auth: ["create", "update", "delete"] }),
     },
-
     {
-      // Append-only ledger of stock movements.
       name: "StockMovement",
       table: "stock_movements",
       schema: "inventory",
-      pgcraft_type: "append_only",
+      pgcraft_type: factories.append_only,
       fields: [
         field.uuid("id", primary_key=true),
         field.uuid("product_id", foreign_key="inventory.products.id"),
@@ -46,21 +44,13 @@ local field = import "kiln/models/fields.libsonnet";
         field.date("movement_date"),
         field.datetime("recorded_at", auto_now_add=true),
       ],
-      // Write-only: create movements, no update/delete (append-only).
-      crud: crud.no_list({ require_auth: ["create"] }),
     },
   ],
 
-  // Parameterised function view with POST — returns stock levels per product
-  // within a date range.
   views: [
     {
       name: "stock_levels_by_date",
-      model: "StockMovement",
-      description: "Aggregate stock levels per product for a date range.",
       schema: "inventory",
-      http_method: "GET",
-      require_auth: true,
       parameters: [
         { name: "start_date", type: "date" },
         { name: "end_date", type: "date" },
@@ -71,5 +61,11 @@ local field = import "kiln/models/fields.libsonnet";
         { name: "net_quantity", type: "int" },
       ],
     },
+  ],
+
+  routes: [
+    { type: "crud", model: "Product", crud: crud.full({ require_auth: ["create", "update", "delete"] }) },
+    { type: "crud", model: "StockMovement", crud: crud.no_list({ require_auth: ["create"] }) },
+    { type: "view", view: "stock_levels_by_date", require_auth: true, http_method: "GET" },
   ],
 }

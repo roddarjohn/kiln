@@ -93,6 +93,10 @@ ignore = [
   "S603",    # subprocess calls use trusted, hardcoded commands
   "S607",    # partial paths (git, uv) are intentional
   "PLW1510", # check=False is intentional for fallible builds
+  "PLC0415", # local imports acceptable in discovery functions
+  "S112",    # try/except/continue is intentional for plugin discovery
+  "ANN401",  # Any is acceptable for Python value serialisation helpers
+  "PLR0911", # multiple returns fine in type-dispatch helpers
 ]
 "tests/**" = [
   "S101",    # assert is fine in tests

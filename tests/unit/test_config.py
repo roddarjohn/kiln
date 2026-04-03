@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from kiln.config.loader import load
 from kiln.config.schema import (
+    ActionRouteConfig,
     AuthConfig,
     CrudConfig,
+    CRUDRouteConfig,
     FieldConfig,
     KilnConfig,
     ModelConfig,
-    ViewModel,
+    ViewColumn,
+    ViewConfig,
     ViewParam,
+    ViewRouteConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -28,6 +31,7 @@ def test_kiln_config_defaults():
     assert cfg.auth is None
     assert cfg.models == []
     assert cfg.views == []
+    assert cfg.routes == []
 
 
 def test_auth_config_defaults():
@@ -45,6 +49,15 @@ def test_field_config_primary_key():
     assert f.exclude_from_api is False
 
 
+def test_field_config_primary_key_dotted_path():
+    f = FieldConfig(
+        name="id",
+        type="uuid",
+        primary_key="pgcraft.plugins.pk.UUIDV7PKPlugin",
+    )
+    assert f.primary_key == "pgcraft.plugins.pk.UUIDV7PKPlugin"
+
+
 def test_model_config_schema_default():
     m = ModelConfig(
         name="User",
@@ -52,7 +65,27 @@ def test_model_config_schema_default():
         fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
     )
     assert m.schema == "public"
-    assert m.pgcraft_type == "simple"
+    assert m.pgcraft_type == "pgcraft.factory.dimension.simple.PGCraftSimple"
+
+
+def test_model_config_no_crud_field():
+    """ModelConfig no longer has a crud field."""
+    m = ModelConfig(
+        name="User",
+        table="users",
+        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
+    )
+    assert not hasattr(m, "crud")
+
+
+def test_model_config_no_db_key_field():
+    """ModelConfig no longer has a db_key field."""
+    m = ModelConfig(
+        name="User",
+        table="users",
+        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
+    )
+    assert not hasattr(m, "db_key")
 
 
 def test_crud_config_defaults():
@@ -62,19 +95,70 @@ def test_crud_config_defaults():
     assert c.require_auth == []
 
 
-def test_view_model_is_parameterised():
-    v = ViewModel(
+def test_view_config_is_parameterised():
+    v = ViewConfig(
         name="summary",
-        model="Post",
         parameters=[ViewParam(name="start_date", type="date")],
         returns=[],
     )
     assert v.parameters != []
 
 
-def test_view_model_non_parameterised():
-    v = ViewModel(name="stats", model="User", returns=[])
+def test_view_config_non_parameterised():
+    v = ViewConfig(name="stats", returns=[])
     assert v.parameters == []
+
+
+def test_view_config_no_http_fields():
+    """ViewConfig is a DB-layer model — no HTTP config fields."""
+    v = ViewConfig(name="stats", returns=[])
+    assert not hasattr(v, "require_auth")
+    assert not hasattr(v, "http_method")
+    assert not hasattr(v, "query_fn")
+
+
+def test_crud_route_config():
+    r = CRUDRouteConfig(model="User", crud=CrudConfig())
+    assert r.type == "crud"
+    assert r.model == "User"
+    assert r.db_key is None
+
+
+def test_view_route_config_defaults():
+    r = ViewRouteConfig(view="my_view")
+    assert r.type == "view"
+    assert r.http_method == "GET"
+    assert r.require_auth is True
+    assert r.description == ""
+
+
+def test_action_route_config():
+    r = ActionRouteConfig(
+        name="publish_article",
+        fn="public.publish_article",
+        params=[ViewParam(name="article_id", type="uuid")],
+        returns=[ViewColumn(name="status", type="str")],
+    )
+    assert r.type == "action"
+    assert r.fn == "public.publish_article"
+
+
+def test_route_config_discriminated_union():
+    """Routes list uses a discriminated union on the 'type' field."""
+    cfg = KilnConfig(
+        routes=[
+            {"type": "crud", "model": "User", "crud": {}},
+            {"type": "view", "view": "my_view"},
+            {
+                "type": "action",
+                "name": "do_thing",
+                "fn": "public.do_thing",
+            },
+        ]
+    )
+    assert isinstance(cfg.routes[0], CRUDRouteConfig)
+    assert isinstance(cfg.routes[1], ViewRouteConfig)
+    assert isinstance(cfg.routes[2], ActionRouteConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +180,8 @@ def test_load_json(tmp_path: Path):
     }
     cfg_file = tmp_path / "kiln.json"
     cfg_file.write_text(json.dumps(data))
+    from kiln.config.loader import load
+
     cfg = load(cfg_file)
     assert cfg.module == "myapp"
     assert len(cfg.models) == 1
@@ -103,6 +189,8 @@ def test_load_json(tmp_path: Path):
 
 
 def test_load_unsupported_extension(tmp_path: Path):
+    from kiln.config.loader import load
+
     bad = tmp_path / "kiln.yaml"
     bad.write_text("version: '1'")
     with pytest.raises(ValueError, match="Unsupported"):
@@ -110,6 +198,8 @@ def test_load_unsupported_extension(tmp_path: Path):
 
 
 def test_load_jsonnet(tmp_path: Path):
+    from kiln.config.loader import load
+
     # Minimal inline jsonnet (no kiln/ stdlib imports needed).
     jsonnet_src = '{ module: "jsonnet_app", models: [] }'
     cfg_file = tmp_path / "kiln.jsonnet"
@@ -119,6 +209,8 @@ def test_load_jsonnet(tmp_path: Path):
 
 
 def test_load_jsonnet_relative_import(tmp_path: Path):
+    from kiln.config.loader import load
+
     # Tests the non-kiln/ branch of _import_callback.
     helper = tmp_path / "helper.libsonnet"
     helper.write_text('{ mod: "helper_app" }')
@@ -130,6 +222,8 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
 
 
 def test_load_validation_error(tmp_path: Path):
+    from kiln.config.loader import load
+
     # missing required 'fields' on model
     data = {
         "models": [{"name": "Bad", "table": "bad"}],

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from kiln.config.loader import load
-from kiln.generators.fastapi.views import ViewGenerator
 from kiln.generators.registry import GeneratorRegistry
 
 if TYPE_CHECKING:
@@ -37,13 +36,13 @@ def generate(
         Path,
         typer.Option("--out", "-o", help="Output root directory."),
     ],
-    no_validate: Annotated[  # noqa: FBT002
+    no_validate: Annotated[  # noqa: ARG001,FBT002
         bool,
         typer.Option(
             "--no-validate",
             help=(
-                "Skip validation that query_fn modules exist on the Python "
-                "path.  Useful when generating before the app code is written."
+                "Deprecated — validation is no longer performed. "
+                "Accepted for backwards compatibility but has no effect."
             ),
         ),
     ] = False,
@@ -65,17 +64,12 @@ def generate(
         typer.echo(f"Error loading config: {exc}", err=True)
         raise typer.Exit(1) from exc
 
-    if no_validate:
-        ViewGenerator.skip_validation = True
-
     try:
         registry = GeneratorRegistry.default()
         files = registry.run(cfg)
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
-    finally:
-        ViewGenerator.skip_validation = False
 
     written, _skipped = _write_files(files, out)
     typer.echo(f"Generated {written} file(s).")

@@ -56,9 +56,9 @@ def test_generate_writes_app_files(tmp_path: Path):
                         {"name": "id", "type": "uuid", "primary_key": True},
                         {"name": "title", "type": "str"},
                     ],
-                    "crud": {},
                 }
             ],
+            "routes": [{"type": "crud", "model": "Post", "crud": {}}],
         },
     )
     out = tmp_path / "out"
@@ -109,7 +109,8 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
     assert sentinel.read_text() != "# modified"
 
 
-def test_generate_no_validate_skips_query_fn_check(tmp_path: Path):
+def test_generate_no_validate_flag_accepted(tmp_path: Path):
+    """--no-validate is accepted for backwards compatibility."""
     cfg = _write_json_config(
         tmp_path,
         {
@@ -117,12 +118,10 @@ def test_generate_no_validate_skips_query_fn_check(tmp_path: Path):
             "views": [
                 {
                     "name": "my_view",
-                    "model": "Thing",
-                    "query_fn": "does.not.exist.get_query",
-                    "parameters": [],
                     "returns": [{"name": "id", "type": "uuid"}],
                 }
             ],
+            "routes": [{"type": "view", "view": "my_view"}],
         },
     )
     out = tmp_path / "out"
@@ -131,30 +130,6 @@ def test_generate_no_validate_skips_query_fn_check(tmp_path: Path):
         ["generate", "--config", str(cfg), "--out", str(out), "--no-validate"],
     )
     assert result.exit_code == 0
-
-
-def test_generate_validates_query_fn_by_default(tmp_path: Path):
-    cfg = _write_json_config(
-        tmp_path,
-        {
-            "module": "myapp",
-            "views": [
-                {
-                    "name": "my_view",
-                    "model": "Thing",
-                    "query_fn": "does.not.exist.get_query",
-                    "parameters": [],
-                    "returns": [{"name": "id", "type": "uuid"}],
-                }
-            ],
-        },
-    )
-    out = tmp_path / "out"
-    result = runner.invoke(
-        app, ["generate", "--config", str(cfg), "--out", str(out)]
-    )
-    assert result.exit_code == 1
-    assert "query_fn" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +150,9 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
                         "fields": [
                             {"name": "id", "type": "uuid", "primary_key": True}
                         ],
-                        "crud": {},
                     }
                 ],
+                "routes": [{"type": "crud", "model": "Article", "crud": {}}],
             }
         )
     )
@@ -193,9 +168,9 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
                         "fields": [
                             {"name": "id", "type": "uuid", "primary_key": True}
                         ],
-                        "crud": {},
                     }
                 ],
+                "routes": [{"type": "crud", "model": "Product", "crud": {}}],
             }
         )
     )

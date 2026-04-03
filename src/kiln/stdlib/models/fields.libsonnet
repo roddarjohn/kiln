@@ -1,6 +1,16 @@
 // kiln stdlib — field definition helpers
+//
 // Usage: local field = import 'kiln/models/fields.libsonnet';
 //        field.uuid("id", primary_key=true)
+//
+// primary_key accepts:
+//   false                                  — not a primary key (default)
+//   true                                   — PK with the default plugin for this type
+//   "pgcraft.plugins.pk.UUIDV7PKPlugin"    — PK with a specific plugin (dotted path)
+//
+// See kiln/pgcraft/plugins.libsonnet for named aliases:
+//   local plugins = import 'kiln/pgcraft/plugins.libsonnet';
+//   field.uuid("id", primary_key=plugins.pk.uuid_v7)
 {
   _base(name, type, extra={}):: { name: name, type: type } + extra,
 

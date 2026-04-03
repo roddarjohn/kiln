@@ -34,8 +34,7 @@ class RouterGenerator:
             config: The validated kiln configuration.
 
         """
-        has_crud = any(m.crud is not None for m in config.models)
-        return has_crud or bool(config.views)
+        return bool(config.routes)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
         """Generate the aggregating router file.
@@ -66,15 +65,27 @@ def _render_router(config: KilnConfig) -> str:
         Python source string.
 
     """
-    crud_models = [m for m in config.models if m.crud is not None]
+    from kiln.config.schema import (  # noqa: PLC0415
+        ActionRouteConfig,
+        CRUDRouteConfig,
+        ViewRouteConfig,
+    )
+
+    route_names: list[str] = []
+    for r in config.routes:
+        if isinstance(r, CRUDRouteConfig):
+            route_names.append(r.model.lower())
+        elif isinstance(r, ViewRouteConfig):
+            route_names.append(r.view)
+        elif isinstance(r, ActionRouteConfig):
+            route_names.append(r.name)
+
+    routes = [
+        {"module_name": name, "alias": f"{name}_router"} for name in route_names
+    ]
+
     tmpl = env.get_template("fastapi/router.py.j2")
     return tmpl.render(
         module=config.module,
-        crud_models=[
-            {"lower": m.name.lower(), "alias": f"{m.name.lower()}_router"}
-            for m in crud_models
-        ],
-        views=[
-            {"name": v.name, "alias": f"{v.name}_router"} for v in config.views
-        ],
+        routes=routes,
     )

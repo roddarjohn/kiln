@@ -14,7 +14,10 @@ from kiln.generators._helpers import (
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from kiln.config.schema import (
+        CRUDRouteConfig,
         KilnConfig,
         ModelConfig,
     )
@@ -39,53 +42,59 @@ class CRUDGenerator:
         return "crud"
 
     def can_generate(self, config: KilnConfig) -> bool:
-        """Return True when any model has a crud config.
+        """Return True when any route is a CRUDRouteConfig.
 
         Args:
             config: The validated kiln configuration.
 
         """
-        return any(m.crud is not None for m in config.models)
+        # Import at runtime to avoid circular imports at module load time
+        from kiln.config.schema import CRUDRouteConfig  # noqa: PLC0415
+
+        return any(isinstance(r, CRUDRouteConfig) for r in config.routes)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Generate one route file per model that has a crud config.
+        """Generate one route file per CRUD route config.
 
         Args:
             config: The validated kiln configuration.
 
         Returns:
             One :class:`~kiln.generators.base.GeneratedFile` per
-            qualifying model, written to
+            qualifying route, written to
             ``api/routes/<name_lower>.py``.
 
         """
+        from kiln.config.schema import CRUDRouteConfig  # noqa: PLC0415
+
         has_auth = config.auth is not None
         app = config.module
+        model_map = {m.name: m for m in config.models}
         files: list[GeneratedFile] = [
             GeneratedFile(path=f"{app}/schemas/__init__.py", content=""),
         ]
-        for m in config.models:
-            if m.crud is None:
+        for route in config.routes:
+            if not isinstance(route, CRUDRouteConfig):
                 continue
+            model = model_map[route.model]
             session_module, get_db_fn = resolve_db_session(
-                m.db_key, config.databases
+                route.db_key, config.databases
             )
             files.append(
                 GeneratedFile(
-                    path=f"{app}/schemas/{m.name.lower()}.py",
-                    content=_render_schemas(m),
+                    path=f"{app}/schemas/{model.name.lower()}.py",
+                    content=_render_schemas(model),
                 )
             )
+            ctx = {
+                "has_auth": has_auth,
+                "session_module": session_module,
+                "get_db_fn": get_db_fn,
+            }
             files.append(
                 GeneratedFile(
-                    path=f"{app}/routes/{m.name.lower()}.py",
-                    content=_render_crud(
-                        m,
-                        config.module,
-                        has_auth=has_auth,
-                        session_module=session_module,
-                        get_db_fn=get_db_fn,
-                    ),
+                    path=f"{app}/routes/{model.name.lower()}.py",
+                    content=_render_crud(model, route, config.module, ctx),
                 )
             )
         return files
@@ -156,30 +165,23 @@ def _render_schemas(model: ModelConfig) -> str:
 
 def _render_crud(
     model: ModelConfig,
+    route: CRUDRouteConfig,
     module: str,
-    *,
-    has_auth: bool,
-    session_module: str,
-    get_db_fn: str,
+    ctx: Mapping[str, object],
 ) -> str:
     """Render the CRUD route file for *model*.
 
     Args:
-        model: The model configuration.  ``model.crud`` must not be None.
+        model: The model configuration.
+        route: The CRUD route configuration supplying ``crud`` settings.
         module: Root module name for generated import paths.
-        has_auth: Whether the project has an auth config.
-        session_module: Dotted sub-path to the session module, e.g.
-            ``"db.primary_session"``.
-        get_db_fn: Name of the dependency function, e.g. ``"get_primary_db"``.
+        ctx: Rendering context with keys ``has_auth``, ``session_module``,
+            and ``get_db_fn``.
 
     Returns:
         Python source string.
 
     """
-    crud = model.crud
-    if crud is None:
-        msg = f"_render_crud called on model '{model.name}' with no crud config"
-        raise ValueError(msg)
     pk = _pk(model)
     tmpl = env.get_template("fastapi/crud_routes.py.j2")
     return tmpl.render(
@@ -187,9 +189,9 @@ def _render_crud(
         model_lower=model.name.lower(),
         module=module,
         imports=type_imports([pk.type]),
-        has_auth=has_auth,
+        has_auth=ctx["has_auth"],
         pk={"name": pk.name, "py_type": PYTHON_TYPES[pk.type]},
-        crud=crud,
-        session_module=session_module,
-        get_db_fn=get_db_fn,
+        crud=route.crud,
+        session_module=ctx["session_module"],
+        get_db_fn=ctx["get_db_fn"],
     )

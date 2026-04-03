@@ -9,13 +9,15 @@ from kiln.config.schema import (
     AppRef,
     AuthConfig,
     CrudConfig,
+    CRUDRouteConfig,
     DatabaseConfig,
     FieldConfig,
     KilnConfig,
     ModelConfig,
     ViewColumn,
-    ViewModel,
+    ViewConfig,
     ViewParam,
+    ViewRouteConfig,
 )
 from kiln.generators.base import GeneratedFile, Generator
 from kiln.generators.fastapi.crud import CRUDGenerator
@@ -37,7 +39,7 @@ def simple_model() -> ModelConfig:
         name="User",
         table="users",
         schema="public",
-        pgcraft_type="simple",
+        pgcraft_type="pgcraft.factory.dimension.simple.PGCraftSimple",
         fields=[
             FieldConfig(name="id", type="uuid", primary_key=True),
             FieldConfig(name="email", type="email", unique=True),
@@ -46,16 +48,13 @@ def simple_model() -> ModelConfig:
             ),
             FieldConfig(name="created_at", type="datetime", auto_now_add=True),
         ],
-        crud=CrudConfig(require_auth=["update", "delete"]),
     )
 
 
 @pytest.fixture
-def parameterised_view() -> ViewModel:
-    return ViewModel(
+def parameterised_view() -> ViewConfig:
+    return ViewConfig(
         name="summarize_posts_by_user",
-        model="Post",
-        description="Count posts per user.",
         schema="public",
         parameters=[
             ViewParam(name="start_date", type="date"),
@@ -65,24 +64,19 @@ def parameterised_view() -> ViewModel:
             ViewColumn(name="user_id", type="uuid"),
             ViewColumn(name="post_count", type="int"),
         ],
-        require_auth=True,
     )
 
 
 @pytest.fixture
-def plain_view() -> ViewModel:
-    return ViewModel(
+def plain_view() -> ViewConfig:
+    return ViewConfig(
         name="active_users",
-        model="User",
         schema="public",
         parameters=[],
         returns=[
             ViewColumn(name="id", type="uuid"),
             ViewColumn(name="email", type="str"),
         ],
-        require_auth=False,
-        # file exists on disk — passes validation
-        query_fn="tests.unit.test_generators.get_query",
     )
 
 
@@ -93,6 +87,13 @@ def full_config(simple_model, parameterised_view) -> KilnConfig:
         auth=AuthConfig(),
         models=[simple_model],
         views=[parameterised_view],
+        routes=[
+            CRUDRouteConfig(
+                model="User",
+                crud=CrudConfig(require_auth=["update", "delete"]),
+            ),
+            ViewRouteConfig(view="summarize_posts_by_user"),
+        ],
     )
 
 
@@ -198,13 +199,15 @@ def test_model_generator_postgrest_plugin():
     m = ModelConfig(
         name="Item",
         table="items",
-        pgcraft_plugins=["postgrest"],
+        pgcraft_plugins=["pgcraft.extensions.postgrest.PostgRESTPlugin"],
         fields=[FieldConfig(name="id", type="int", primary_key=True)],
     )
     cfg = KilnConfig(models=[m])
     files = PGCraftModelGenerator().generate(cfg)
     model_file = next(f for f in files if f.path == "app/models/item.py")
     assert "PostgRESTPlugin" in model_file.content
+    expected_import = "from pgcraft.extensions.postgrest import PostgRESTPlugin"
+    assert expected_import in model_file.content
 
 
 # ---------------------------------------------------------------------------
@@ -236,17 +239,22 @@ def test_view_route_valid_python(full_config):
         ast.parse(f.content)
 
 
-def test_plain_view_route_uses_query_fn(plain_view):
-    cfg = KilnConfig(views=[plain_view])
+def test_plain_view_route_uses_text_query(plain_view):
+    cfg = KilnConfig(
+        views=[plain_view],
+        routes=[ViewRouteConfig(view="active_users", require_auth=False)],
+    )
     files = ViewGenerator().generate(cfg)
     route = next(f for f in files if "routes/" in f.path)
-    assert "get_query" in route.content
-    assert "get_query()" in route.content
+    assert "text(" in route.content
     assert "table_valued" not in route.content
 
 
 def test_function_view_route_uses_table_valued(parameterised_view):
-    cfg = KilnConfig(views=[parameterised_view])
+    cfg = KilnConfig(
+        views=[parameterised_view],
+        routes=[ViewRouteConfig(view="summarize_posts_by_user")],
+    )
     files = ViewGenerator().generate(cfg)
     route = next(f for f in files if "routes/" in f.path)
     assert "table_valued" in route.content
@@ -290,7 +298,10 @@ def test_crud_generator_includes_auth(full_config):
 
 
 def test_crud_generator_no_auth_when_unconfigured(simple_model):
-    cfg = KilnConfig(models=[simple_model])  # no auth config
+    cfg = KilnConfig(
+        models=[simple_model],
+        routes=[CRUDRouteConfig(model="User", crud=CrudConfig())],
+    )
     files = CRUDGenerator().generate(cfg)
     routes = next(f for f in files if "routes/user.py" in f.path)
     assert "get_current_user" not in routes.content
@@ -441,41 +452,6 @@ def test_type_imports_json_and_date():
 
 
 # ---------------------------------------------------------------------------
-# ViewGenerator — validation and missing query_fn
-# ---------------------------------------------------------------------------
-
-
-def test_view_generator_validation_error_missing_file():
-    view = ViewModel(
-        name="my_view",
-        model="Thing",
-        query_fn="totally.missing.module.get_query",
-        parameters=[],
-        returns=[ViewColumn(name="id", type="uuid")],
-    )
-    cfg = KilnConfig(views=[view])
-    with pytest.raises(ValueError, match="query_fn modules could not be found"):
-        ViewGenerator().generate(cfg)
-
-
-def test_view_generator_plain_missing_query_fn_raises():
-    view = ViewModel(
-        name="bad_view",
-        model="Thing",
-        query_fn=None,
-        parameters=[],
-        returns=[ViewColumn(name="id", type="uuid")],
-    )
-    cfg = KilnConfig(views=[view])
-    ViewGenerator.skip_validation = True
-    try:
-        with pytest.raises(ValueError, match=r"missing.*query_fn"):
-            ViewGenerator().generate(cfg)
-    finally:
-        ViewGenerator.skip_validation = False
-
-
-# ---------------------------------------------------------------------------
 # Multi-database support
 # ---------------------------------------------------------------------------
 
@@ -537,13 +513,16 @@ def test_crud_route_uses_named_db_session():
         name="Report",
         table="reports",
         fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-        crud=CrudConfig(),
-        db_key="analytics",
     )
     cfg = KilnConfig(
         module="myapp",
         databases=[db_primary, db_analytics],
         models=[model],
+        routes=[
+            CRUDRouteConfig(
+                model="Report", crud=CrudConfig(), db_key="analytics"
+            )
+        ],
     )
     files = CRUDGenerator().generate(cfg)
     route = next(f for f in files if "routes/report.py" in f.path)
@@ -553,16 +532,22 @@ def test_crud_route_uses_named_db_session():
 
 def test_view_route_uses_named_db_session():
     db = DatabaseConfig(key="primary", url_env="DATABASE_URL", default=True)
-    view = ViewModel(
+    view = ViewConfig(
         name="active_users",
-        model="User",
         parameters=[],
         returns=[ViewColumn(name="id", type="uuid")],
-        require_auth=False,
-        query_fn="tests.unit.test_generators.get_query",
-        db_key="primary",
     )
-    cfg = KilnConfig(databases=[db], views=[view])
+    cfg = KilnConfig(
+        databases=[db],
+        views=[view],
+        routes=[
+            ViewRouteConfig(
+                view="active_users",
+                require_auth=False,
+                db_key="primary",
+            )
+        ],
+    )
     files = ViewGenerator().generate(cfg)
     route = next(f for f in files if "routes/" in f.path)
     assert "db.primary_session" in route.content
@@ -684,9 +669,9 @@ def test_registry_project_mode_generates_scaffold_and_apps():
                 name="Article",
                 table="articles",
                 fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-                crud=CrudConfig(),
             )
         ],
+        routes=[CRUDRouteConfig(model="Article", crud=CrudConfig())],
     )
     cfg = KilnConfig(
         auth=AuthConfig(),

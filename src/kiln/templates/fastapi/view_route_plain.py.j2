@@ -12,15 +12,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 {% if has_auth %}
 from auth.dependencies import get_current_user
 {% endif %}
 from {{ session_module }} import {{ get_db_fn }}
-# {{ query_fn_name }} is defined in {{ query_fn_module }} — write this yourself.
-# It must return a SQLAlchemy select() expression for the {{ view.name }} view.
-from {{ query_fn_module }} import {{ query_fn_name }}
 
 router = APIRouter(prefix="/{{ slug }}", tags=["{{ slug }}"])
 DB = Annotated[AsyncSession, Depends({{ get_db_fn }})]
@@ -39,6 +37,11 @@ class {{ result_class }}(BaseModel):
     model_config = {"from_attributes": True}
 
 
+_QUERY = text(
+    "SELECT {{ col_names_sql }} FROM {{ view.schema }}.{{ view.name }}"
+)
+
+
 @router.{{ method }}("/", response_model=list[{{ result_class }}])
 async def get_{{ view.name }}(
     db: DB,
@@ -47,7 +50,7 @@ async def get_{{ view.name }}(
 {% endif %}
 ) -> list[{{ result_class }}]:
     """{{ description }}"""
-    result = await db.execute({{ query_fn_name }}())
+    result = await db.execute(_QUERY)
     return [
         {{ result_class }}.model_validate(dict(r._mapping)) for r in result.all()
     ]

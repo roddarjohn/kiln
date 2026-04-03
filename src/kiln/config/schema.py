@@ -1,9 +1,9 @@
 """Pydantic models for kiln configuration."""
 
 import warnings
-from typing import List, Literal  # noqa: UP035
+from typing import Annotated, Any, List, Literal  # noqa: UP035
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # Pydantic v2 warns when a field name shadows a deprecated attribute on
 # BaseModel.  ``schema`` shadows the deprecated v1-compat ``BaseModel.schema()``
@@ -68,7 +68,11 @@ class FieldConfig(BaseModel):
 
     name: str
     type: FieldType
-    primary_key: bool = False
+    primary_key: bool | str = False
+    """``False`` — not a primary key.  ``True`` — PK using the default plugin
+    for this field type.  A dotted import path string (e.g.
+    ``"pgcraft.plugins.pk.UUIDV7PKPlugin"``) — PK using that specific plugin.
+    """
     unique: bool = False
     nullable: bool = False
     foreign_key: str | None = None
@@ -117,17 +121,44 @@ class DatabaseConfig(BaseModel):
     default: bool = False
 
 
+class PluginRef(BaseModel):
+    """A pgcraft plugin with constructor arguments.
+
+    Used in ``pgcraft_plugins`` when the plugin requires configuration.
+    ``path`` is a dotted import path; ``args`` is a mapping of keyword
+    arguments passed verbatim to the plugin constructor.
+
+    Example::
+
+        { "path": "pgcraft.extensions.postgrest.plugin.PostgRESTPlugin",
+          "args": { "grants": ["select", "insert"] } }
+
+    """
+
+    path: str
+    args: dict[str, Any] = {}
+
+
 class ModelConfig(BaseModel):
     """A pgcraft declarative model definition."""
 
     name: str
     table: str
     schema: str = "public"
-    pgcraft_type: Literal["simple", "append_only", "ledger", "eav"] = "simple"
-    pgcraft_plugins: list[str] = []
+    pgcraft_type: str = "pgcraft.factory.dimension.simple.PGCraftSimple"
+    """Dotted import path to the pgcraft factory class, e.g.
+    ``"pgcraft.factory.dimension.simple.PGCraftSimple"``.  The stdlib
+    ``kiln/pgcraft/factories.libsonnet`` provides named aliases.
+    """
+    pgcraft_plugins: list[str | PluginRef] = []
+    """Additional pgcraft plugins to include in ``__pgcraft__``.
+
+    Each entry is either a dotted import path string (for no-arg plugins)
+    or a :class:`PluginRef` object with ``path`` and ``args`` (for plugins
+    that require constructor arguments).  The stdlib
+    ``kiln/pgcraft/plugins.libsonnet`` provides named helpers for both forms.
+    """
     fields: list[FieldConfig]
-    crud: CrudConfig | None = None
-    db_key: str | None = None
 
 
 class ViewParam(BaseModel):
@@ -144,31 +175,58 @@ class ViewColumn(BaseModel):
     type: FieldType
 
 
-class ViewModel(BaseModel):
-    """A database view or function exposed as a FastAPI endpoint.
-
-    When ``parameters`` is empty the route calls ``query_fn()`` to
-    obtain a SQLAlchemy ``select()`` expression — the developer writes
-    and owns that function.  When ``parameters`` is non-empty the route
-    calls the named set-returning function via
-    ``func.<schema>.<name>(params).table_valued(cols)``.
-    """
+class ViewConfig(BaseModel):
+    """A database view or set-returning function."""
 
     name: str
-    model: str
-    description: str = ""
     schema: str = "public"
     parameters: list[ViewParam] = []
     returns: list[ViewColumn]
-    require_auth: bool = True
-    http_method: Literal["GET", "POST"] = "GET"
-    query_fn: str | None = None
     db_key: str | None = None
-    """Dotted import path to a zero-argument function returning a
-    SQLAlchemy ``select()`` expression, e.g.
-    ``"app.db.views.published_articles.get_query"``.
-    Required for non-parameterised views; unused for function views.
-    """
+
+
+# ---------------------------------------------------------------------------
+# Route config classes
+# ---------------------------------------------------------------------------
+
+
+class CRUDRouteConfig(BaseModel):
+    """CRUD routes for a model."""
+
+    type: Literal["crud"] = "crud"
+    model: str
+    crud: CrudConfig
+    db_key: str | None = None
+
+
+class ViewRouteConfig(BaseModel):
+    """Route exposing a database view or set-returning function."""
+
+    type: Literal["view"] = "view"
+    view: str
+    http_method: Literal["GET", "POST"] = "GET"
+    require_auth: bool = True
+    description: str = ""
+    db_key: str | None = None
+
+
+class ActionRouteConfig(BaseModel):
+    """Mutation route (POST) calling a database function."""
+
+    type: Literal["action"] = "action"
+    name: str
+    fn: str  # "schema.function_name"
+    params: list[ViewParam] = []
+    returns: list[ViewColumn] = []
+    require_auth: bool = True
+    description: str = ""
+    db_key: str | None = None
+
+
+RouteConfig = Annotated[
+    CRUDRouteConfig | ViewRouteConfig | ActionRouteConfig,
+    Field(discriminator="type"),
+]
 
 
 class KilnConfig(BaseModel):
@@ -185,7 +243,8 @@ class KilnConfig(BaseModel):
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = []
     models: list[ModelConfig] = []
-    views: list[ViewModel] = []
+    views: list[ViewConfig] = []
+    routes: list[RouteConfig] = []
     apps: list["AppRef"] = []
 
 

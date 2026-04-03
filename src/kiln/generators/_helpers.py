@@ -65,31 +65,67 @@ SA_INSTANCE_TYPES: dict[str, str] = {
     "json": "pg.JSONB()",
 }
 
-# (plugin_class_name, import_module) for each PK field type.
-PGCRAFT_PK_PLUGINS: dict[str, tuple[str, str]] = {
-    "uuid": ("UUIDV4PKPlugin", "pgcraft.plugins.pk"),
-    "int": ("SerialPKPlugin", "pgcraft.plugins.pk"),
+# Default PK plugin dotted paths used when primary_key=True.
+# Keyed by FieldType; users can override with a dotted path string.
+_DEFAULT_PK_PLUGINS: dict[str, str] = {
+    "uuid": "pgcraft.plugins.pk.UUIDV4PKPlugin",
+    "int": "pgcraft.plugins.pk.SerialPKPlugin",
 }
 
-# (factory_class_name, import_module) for each pgcraft_type value.
-PGCRAFT_FACTORIES: dict[str, tuple[str, str]] = {
-    "simple": (
-        "PGCraftSimple",
-        "pgcraft.factory.dimension.simple",
-    ),
-    "append_only": (
-        "PGCraftAppendOnly",
-        "pgcraft.factory.dimension.append_only",
-    ),
-    "ledger": (
-        "PGCraftLedger",
-        "pgcraft.factory.ledger",
-    ),
-    "eav": (
-        "PGCraftEAV",
-        "pgcraft.factory.dimension.eav",
-    ),
-}
+
+def split_dotted_class(dotted_path: str) -> tuple[str, str]:
+    """Split a dotted import path into ``(module, class_name)``.
+
+    Args:
+        dotted_path: A fully-qualified class path such as
+            ``"pgcraft.factory.dimension.simple.PGCraftSimple"``.
+
+    Returns:
+        A ``(module, class_name)`` tuple, e.g.
+        ``("pgcraft.factory.dimension.simple", "PGCraftSimple")``.
+
+    Raises:
+        ValueError: If *dotted_path* contains fewer than two parts.
+
+    """
+    if "." not in dotted_path:
+        msg = (
+            f"'{dotted_path}' is not a valid dotted import path. "
+            f"Expected 'module.ClassName', e.g. "
+            f"'pgcraft.factory.dimension.simple.PGCraftSimple'."
+        )
+        raise ValueError(msg)
+    module, _, class_name = dotted_path.rpartition(".")
+    return module, class_name
+
+
+def resolve_pk_plugin(field_type: str, primary_key: bool | str) -> str:  # noqa: FBT001
+    """Return the dotted import path for the PK plugin.
+
+    Args:
+        field_type: The :data:`FieldType` of the primary-key field.
+        primary_key: ``True`` to use the default plugin for
+            *field_type*, or a dotted import path string to use that
+            specific plugin class.
+
+    Returns:
+        Dotted import path to the PK plugin class.
+
+    Raises:
+        ValueError: When *primary_key* is ``True`` but *field_type*
+            has no default PK plugin registered.
+
+    """
+    if isinstance(primary_key, str):
+        return primary_key
+    if field_type not in _DEFAULT_PK_PLUGINS:
+        msg = (
+            f"No default PK plugin for field type '{field_type}'. "
+            f"Pass a dotted import path as primary_key, e.g. "
+            f"primary_key='pgcraft.plugins.pk.SerialPKPlugin'."
+        )
+        raise ValueError(msg)
+    return _DEFAULT_PK_PLUGINS[field_type]
 
 
 def type_imports(field_types: list[str]) -> list[str]:

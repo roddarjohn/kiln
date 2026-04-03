@@ -6,15 +6,30 @@ from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
 from kiln.generators._helpers import (
-    PGCRAFT_FACTORIES,
-    PGCRAFT_PK_PLUGINS,
     column_def,
+    resolve_pk_plugin,
+    split_dotted_class,
     type_imports,
 )
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig, ModelConfig
+
+from typing import Any
+
+
+def _py_literal(value: Any) -> str:  # noqa: ANN401
+    """Convert a JSON-compatible value to a Python literal string.
+
+    Args:
+        value: A JSON-compatible value (str, int, float, bool, None, list).
+
+    Returns:
+        Python source representation, e.g. ``'"api"'`` or ``'["select"]'``.
+
+    """
+    return repr(value)
 
 
 class PGCraftModelGenerator:
@@ -50,7 +65,7 @@ class PGCraftModelGenerator:
 
         Returns:
             One :class:`~kiln.generators.base.GeneratedFile` per
-            model, written to ``db/models/<name_lower>.py``.
+            model, written to ``{module}/models/<name_lower>.py``.
 
         """
         app = config.module
@@ -82,28 +97,39 @@ def _render_model(model: ModelConfig, module: str) -> str:
     pk_field = next((f for f in fields if f.primary_key), None)
     non_pk_fields = [f for f in fields if not f.primary_key]
 
-    factory_class, factory_module = PGCRAFT_FACTORIES[model.pgcraft_type]
-    has_postgrest = "postgrest" in model.pgcraft_plugins
+    factory_module, factory_class = split_dotted_class(model.pgcraft_type)
     has_fk = any(f.foreign_key for f in non_pk_fields)
 
     # Resolve the PK plugin and build the __pgcraft__ list.
     pgcraft_items = [factory_class]
     pk_plugin_import: str | None = None
     if pk_field is not None:
-        pk_plugin_class, pk_plugin_module = PGCRAFT_PK_PLUGINS.get(
-            pk_field.type, ("SerialPKPlugin", "pgcraft.plugins.pk")
-        )
+        pk_plugin_path = resolve_pk_plugin(pk_field.type, pk_field.primary_key)
+        pk_plugin_module, pk_plugin_class = split_dotted_class(pk_plugin_path)
         pk_args = (
             f'column_name="{pk_field.name}"' if pk_field.name != "id" else ""
         )
-        if pk_args:
-            plugin_call = f"{pk_plugin_class}({pk_args})"
-        else:
-            plugin_call = f"{pk_plugin_class}()"
+        plugin_call = (
+            f"{pk_plugin_class}({pk_args})"
+            if pk_args
+            else f"{pk_plugin_class}()"
+        )
         pgcraft_items.append(plugin_call)
         pk_plugin_import = f"from {pk_plugin_module} import {pk_plugin_class}"
-    if has_postgrest:
-        pgcraft_items.append("PostgRESTPlugin()")
+
+    # Additional plugins — strings or PluginRef objects.
+    extra_plugin_imports: list[str] = []
+    for plugin in model.pgcraft_plugins:
+        path = plugin if isinstance(plugin, str) else plugin.path
+        plugin_mod, plugin_cls = split_dotted_class(path)
+        extra_plugin_imports.append(f"from {plugin_mod} import {plugin_cls}")
+        if isinstance(plugin, str) or not plugin.args:
+            pgcraft_items.append(f"{plugin_cls}()")
+        else:
+            kwargs = ", ".join(
+                f"{k}={_py_literal(v)}" for k, v in plugin.args.items()
+            )
+            pgcraft_items.append(f"{plugin_cls}({kwargs})")
 
     sa_names = ["Column"]
     if any(f.type in ("str", "email") for f in non_pk_fields):
@@ -128,8 +154,8 @@ def _render_model(model: ModelConfig, module: str) -> str:
         ),
         sa_imports=", ".join(sa_names),
         has_fk=has_fk,
-        has_postgrest=has_postgrest,
         pk_plugin_import=pk_plugin_import,
+        extra_plugin_imports=extra_plugin_imports,
         factory_class=factory_class,
         factory_module=factory_module,
         pgcraft_list=", ".join(pgcraft_items),
