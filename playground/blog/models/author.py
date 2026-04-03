@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM model for Author."""
+"""ORM model for Author."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ class Author(Base):
     """Blog author with optional bio."""
 
     __tablename__ = "authors"
+    __table_args__ = {"schema": "public"}
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120), nullable=False)

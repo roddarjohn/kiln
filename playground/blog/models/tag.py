@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM model for Tag."""
+"""ORM model for Tag."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ class Tag(Base):
     """Content tag with an integer primary key."""
 
     __tablename__ = "tags"
+    __table_args__ = {"schema": "public"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
