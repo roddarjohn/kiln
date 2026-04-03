@@ -224,9 +224,6 @@ class SetupOperation:
         # Schema spec
         specs["schema"] = _make_schema_spec(ctx.model, app, pkg)
 
-        # Route spec
-        specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
-
         # Serializer spec (only when resource schema exists)
         if ctx.has_resource_schema:
             specs["serializer"] = _make_serializer_spec(
@@ -236,6 +233,9 @@ class SetupOperation:
                 pkg,
                 resource,
             )
+
+        # Route spec
+        specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
 
 
 class GetOperation:

@@ -112,34 +112,31 @@ Create a class that satisfies the
        def enabled(self, resource: ResourceConfig) -> bool:
            return resource.create is not False
 
-       def contribute_schema(
+       def contribute(
            self,
-           spec: FileSpec,
+           specs: dict[str, FileSpec],
            resource: ResourceConfig,
            ctx: SharedContext,
        ) -> None:
+           schema = specs["schema"]
+           route = specs["route"]
+
            # Add a BulkCreateRequest schema class
-           spec.imports.add_from("pydantic", "BaseModel")
+           schema.imports.add_from("pydantic", "BaseModel")
            snippet = f'''
    class {ctx.model.pascal}BulkCreateRequest(BaseModel):
        """Bulk create request."""
 
        items: list[{ctx.model.suffixed("CreateRequest")}]
    '''
-           spec.context["schema_classes"].append(snippet)
-           spec.exports.append(
+           schema.context["schema_classes"].append(snippet)
+           schema.exports.append(
                ctx.model.suffixed("BulkCreateRequest")
            )
 
-       def contribute_route(
-           self,
-           spec: FileSpec,
-           resource: ResourceConfig,
-           ctx: SharedContext,
-       ) -> None:
            # Add a POST /bulk route handler
-           spec.imports.add_from("sqlalchemy", "insert")
-           spec.imports.add_from(
+           route.imports.add_from("sqlalchemy", "insert")
+           route.imports.add_from(
                ctx.model_module, ctx.model.pascal
            )
            handler = f'''
@@ -155,7 +152,7 @@ Create a class that satisfies the
            await db.execute(stmt)
        await db.commit()
    '''
-           spec.context["route_handlers"].append(handler)
+           route.context["route_handlers"].append(handler)
 
 Then wire it into a custom pipeline:
 
@@ -234,18 +231,27 @@ built-in generator.
 How operations work
 ~~~~~~~~~~~~~~~~~~~
 
-Each operation receives two :class:`~kiln.generators.base.FileSpec`
-objects — one for the **schema** file and one for the **route** file.
-Operations mutate these specs by:
+Each operation receives a ``specs: dict[str, FileSpec]`` bag.
+Built-in keys are ``"schema"``, ``"route"``, and optionally
+``"serializer"`` — but extensions can add any key they like
+(e.g. ``"test"``, ``"client"``).
 
+Operations mutate specs by:
+
+- Looking up specs by key: ``schema = specs["schema"]``
 - Adding imports via ``spec.imports.add_from("module", "name")``
-- Appending schema classes to ``spec.context["schema_classes"]``
-- Appending route handlers to ``spec.context["route_handlers"]``
+- Appending content to context lists (e.g.
+  ``spec.context["schema_classes"]``)
 - Registering export names in ``spec.exports``
+- Creating entirely new specs: ``specs["myfile"] = FileSpec(...)``
 
 After all operations run, the pipeline automatically wires cross-file
-imports: the route file imports everything the schema file exports, and
-the serializer (if present) imports the ``Resource`` class.
+imports: every spec's exports are made available to every other spec
+via ``from module import ...`` lines.
+
+The ``SetupOperation`` (first in ``default_operations()``) creates the
+base ``"schema"`` and ``"route"`` specs.  Custom operations that add
+new file types should create their own specs in ``contribute()``.
 
 Testing a custom generator
 --------------------------

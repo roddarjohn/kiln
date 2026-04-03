@@ -94,22 +94,21 @@ class ResourcePipeline:
 
 
 def _wire_imports(specs: dict[str, FileSpec]) -> None:
-    """Wire cross-file imports between all specs.
+    """Wire cross-file imports between specs.
 
-    For every pair of specs, if one spec has exports,
-    every *other* spec gets an import line for those
-    exports.  The ``"serializer"`` spec is special-cased:
-    it only imports the ``Resource`` class from the schema,
-    not all schema exports.
+    Each spec can import from specs that appear **before** it
+    in insertion order.  This avoids circular imports — the
+    first spec (typically ``"schema"``) never receives wired
+    imports.
+
+    The ``"serializer"`` spec is special-cased: it only
+    imports the ``Resource`` class, not all schema exports.
     """
     spec_list = list(specs.items())
-    for src_key, src_spec in spec_list:
-        if not src_spec.exports:
-            continue
-        for dst_key, dst_spec in spec_list:
-            if dst_key == src_key:
+    for i, (dst_key, dst_spec) in enumerate(spec_list):
+        for _src_key, src_spec in spec_list[:i]:
+            if not src_spec.exports:
                 continue
-            # Serializer only needs the Resource class
             if dst_key == "serializer":
                 resource_cls = dst_spec.context["model_name"] + "Resource"
                 if resource_cls in src_spec.exports:
