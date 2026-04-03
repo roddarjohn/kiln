@@ -66,6 +66,7 @@ def _op_ctx(
             "fields": _field_dicts(op_value.fields),
             "requires_auth": _op_requires_auth(require_auth, op_name),
         }
+
     return {
         "enabled": True,
         "has_schema": False,
@@ -90,8 +91,10 @@ def _build_op_ctx(
 ) -> dict:
     """Return the op context for *op_name*, dispatching to disabled/enabled."""
     op_value = getattr(resource, op_name)
+
     if op_value is False:
         return _disabled_op()
+
     return _op_ctx(op_value, op_name, require_auth)
 
 

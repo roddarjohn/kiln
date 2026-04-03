@@ -2,24 +2,25 @@
 //
 // Consumer Python models are defined in inventory/models.py (not generated).
 //
-// Run with:
-//   uv run --group playground python playground/run_example.py examples/inventory.jsonnet
+// Demonstrates:
+//   - Full CRUD with specific fields and per-operation auth
+//   - Create-only (append-only pattern) with date field and action
+//   - write_only preset with route_prefix, db_key, and email/json/datetime fields
+//   - Actions with and without params, with and without auth
 
-local auth = import "kiln/auth/jwt.libsonnet";
 local resource = import "kiln/resources/presets.libsonnet";
 
 {
   version: "1",
   module: "inventory",
 
-  auth: auth.jwt({ secret_env: "INVENTORY_JWT_SECRET" }),
-
   resources: [
-    // Products: full CRUD, mutations require auth
+    // Products: full CRUD, mutations require auth, explicit route prefix
     {
       model: "inventory.models.Product",
       pk: "id",
       pk_type: "uuid",
+      route_prefix: "/products",
       require_auth: ["create", "update", "delete"],
 
       get: true,
@@ -48,10 +49,29 @@ local resource = import "kiln/resources/presets.libsonnet";
         ],
       },
       delete: true,
-      actions: [],
+
+      actions: [
+        // Parameterised action, requires auth
+        resource.action(
+          name="stock_levels_by_date",
+          fn="inventory.queries.stock_levels_by_date",
+          params=[
+            { name: "start_date", type: "date" },
+            { name: "end_date", type: "date" },
+          ],
+          require_auth=true,
+        ),
+        // No-param action, no auth — demonstrates both booleans
+        resource.action(
+          name="ping",
+          fn="inventory.actions.ping_product",
+          params=[],
+          require_auth=false,
+        ),
+      ],
     },
 
-    // StockMovements: create-only (append-only pattern), with a postgres action
+    // StockMovements: create-only (append-only pattern)
     {
       model: "inventory.models.StockMovement",
       pk: "id",
@@ -70,16 +90,41 @@ local resource = import "kiln/resources/presets.libsonnet";
       },
       update: false,
       delete: false,
+      actions: [],
+    },
 
+    // EventLog: write_only (create/update/delete, no reads) backed by
+    // PGCraftAppendOnly — the analytics DB keeps the full attribute history.
+    // Demonstrates: write_only preset, route_prefix, db_key, email/json/datetime
+    //               fields, require_auth: true, and a no-param no-auth action.
+    resource.write_only(
+      "inventory.models.EventLog",
+      pk="id",
+      pk_type="uuid",
+      db_key="analytics",
+      require_auth=true,
+    ) + {
+      route_prefix: "/event-logs",
+      create: {
+        fields: [
+          { name: "event_type", type: "str" },
+          { name: "actor_email", type: "email" },
+          { name: "payload", type: "json" },
+          { name: "occurred_at", type: "datetime" },
+        ],
+      },
+      update: {
+        fields: [
+          { name: "event_type", type: "str" },
+          { name: "payload", type: "json" },
+        ],
+      },
       actions: [
         resource.action(
-          name="stock_levels_by_date",
-          fn="inventory.queries.stock_levels_by_date",
-          params=[
-            { name: "start_date", type: "date" },
-            { name: "end_date", type: "date" },
-          ],
-          require_auth=true,
+          name="ping",
+          fn="inventory.actions.ping_event_log",
+          params=[],
+          require_auth=false,
         ),
       ],
     },

@@ -6,7 +6,8 @@ import uuid
 from datetime import date
 
 from pgcraft import PGCraftForeignKey
-from sqlalchemy import Boolean, Date, Float, Integer, String
+from pgcraft.factory import PGCraftAppendOnly
+from sqlalchemy import Boolean, Column, Date, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base
@@ -46,3 +47,23 @@ class StockMovement(Base):
     movement_date: Mapped[date] = mapped_column(Date, nullable=False)
 
     product: Mapped[Product] = relationship("Product", back_populates="movements")
+
+
+class EventLog(Base):
+    """Append-only event log using SCD Type 2 semantics.
+
+    Uses ``PGCraftAppendOnly`` so each write appends a new attributes
+    row, preserving full history.  The ``event_logs`` view always
+    reflects the latest state of each entry.
+
+    Raw ``Column`` instances (not ``mapped_column``) are required here
+    so that pgcraft's plugin pipeline can collect and register them.
+    """
+
+    __tablename__ = "event_logs"
+    __table_args__ = {"schema": "public"}
+    __pgcraft__ = {"factory": PGCraftAppendOnly}
+
+    event_type = Column(String(80), nullable=False)
+    actor_email = Column(String(254), nullable=False)
+    payload = Column(Text, nullable=True)
