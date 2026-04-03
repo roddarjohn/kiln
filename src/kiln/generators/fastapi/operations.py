@@ -942,7 +942,7 @@ class ActionOperation:
         route.imports.add_from(fn_module, fn_name.raw)
 
         # Import request / response classes.
-        if info.request_class:
+        if info.request_class and info.request_module:
             route.imports.add_from(info.request_module, info.request_class)
         route.imports.add_from(info.response_module, info.response_class)
 
