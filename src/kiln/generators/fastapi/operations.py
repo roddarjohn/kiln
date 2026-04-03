@@ -796,7 +796,9 @@ def _make_route_spec(
     spec.imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
 
     if ctx.has_auth:
-        spec.imports.add_from("auth.dependencies", "get_current_user")
+        auth_module = prefix_import(pkg, "auth", "dependencies")
+        spec.imports.add_from(auth_module, "get_current_user")
 
-    spec.imports.add_from(ctx.session_module, ctx.get_db_fn)
+    session_module = prefix_import(pkg, ctx.session_module)
+    spec.imports.add_from(session_module, ctx.get_db_fn)
     return spec

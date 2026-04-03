@@ -47,9 +47,18 @@ class ProjectRouterGenerator:
 
         """
         tmpl = env.get_template("fastapi/project_router.py.j2")
+        pkg = config.package_prefix
         content = tmpl.render(
             apps=[
-                {"module": app_ref.config.module, "prefix": app_ref.prefix}
+                {
+                    "module": (
+                        f"{pkg}.{app_ref.config.module}"
+                        if pkg
+                        else app_ref.config.module
+                    ),
+                    "alias": app_ref.config.module,
+                    "prefix": app_ref.prefix,
+                }
                 for app_ref in config.apps
             ]
         )

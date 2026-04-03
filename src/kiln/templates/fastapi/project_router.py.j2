@@ -13,10 +13,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 {% for app in apps %}
-from {{ app.module }}.routes import router as {{ app.module }}_router
+from {{ app.module }}.routes import router as {{ app.alias }}_router
 {% endfor %}
 
 router = APIRouter()
 {% for app in apps %}
-router.include_router({{ app.module }}_router, prefix="{{ app.prefix }}")
+router.include_router({{ app.alias }}_router, prefix="{{ app.prefix }}")
 {% endfor %}

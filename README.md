@@ -55,3 +55,19 @@ just docs          # build Sphinx HTML docs
 ## License
 
 See [LICENSE](LICENSE) for details.
+
+## Future
+
+- Authentication extensions
+  - e.g. different permissions
+  - e.g. permission actions
+  - e.g. filter list endpoints
+  - should be rego I'd think
+
+- enums
+
+- related models in dumps
+
+- filtering / pagination
+
+- spin up sample kiln app
