@@ -147,13 +147,30 @@ class TestContributeFilters:
         assert len(ext["query_modifiers"]) == 1
         assert "apply_filters" in ext["query_modifiers"][0]
 
-    def test_allowed_fields_in_modifier(self, specs, shared_ctx):
+    def test_no_allowed_fields_in_modifier(self, specs, shared_ctx):
+        """apply_filters no longer needs allowed_fields."""
         config = FilterConfig(fields=["email", "age"])
         contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
         ext = specs["route"].context["list_extensions"]
         modifier = ext["query_modifiers"][0]
-        assert '"email"' in modifier
-        assert '"age"' in modifier
+        assert "allowed_fields" not in modifier
+
+    def test_generates_filter_types(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email", "age"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        assert "UserFilterCondition" in specs["schema"].exports
+        assert "UserFilterExpression" in specs["schema"].exports
+        snippet = specs["schema"].context["schema_classes"][0]
+        assert "FilterCondition" in snippet
+        assert "FilterExpression" in snippet
+        assert '"email"' in snippet
+        assert '"age"' in snippet
+
+    def test_filter_condition_has_typed_fields(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        snippet = specs["schema"].context["schema_classes"][0]
+        assert 'Literal["email"]' in snippet
 
     def test_imports_apply_filters(self, specs, shared_ctx):
         config = FilterConfig(fields=["email"])
@@ -161,20 +178,26 @@ class TestContributeFilters:
         lines = "\n".join(specs["route"].imports.lines())
         assert "apply_filters" in lines
 
+    def test_adds_pydantic_imports(self, specs, shared_ctx):
+        config = FilterConfig(fields=["email"])
+        contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
+        lines = "\n".join(specs["schema"].imports.lines())
+        assert "ConfigDict" in lines
+        assert "Field" in lines
+
     def test_auto_derives_fields_from_list_fields(self, specs, shared_ctx):
         config = FilterConfig()
         contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
-        ext = specs["route"].context["list_extensions"]
-        modifier = ext["query_modifiers"][0]
+        snippet = specs["schema"].context["schema_classes"][0]
         for f in LIST_FIELDS:
-            assert f'"{f.name}"' in modifier
+            assert f'"{f.name}"' in snippet
 
     def test_empty_allowed_when_no_fields(self, specs, shared_ctx):
         config = FilterConfig()
         contribute_filters(specs, shared_ctx, config, None)
-        ext = specs["route"].context["list_extensions"]
-        modifier = ext["query_modifiers"][0]
-        assert "allowed_fields={}," in modifier
+        snippet = specs["schema"].context["schema_classes"][0]
+        # FilterCondition field should have empty Literal
+        assert "FilterCondition" in snippet
 
 
 # -------------------------------------------------------------------
@@ -198,8 +221,8 @@ class TestContributeSearchRequest:
         )
         contribute_search_request(specs, shared_ctx, ordering, None)
         snippet = specs["schema"].context["schema_classes"][0]
-        assert "sort_by:" in snippet
-        assert "sort_dir:" in snippet
+        assert "sort:" in snippet
+        assert "SortClause" in snippet
 
     def test_with_keyset_pagination(self, specs, shared_ctx):
         pagination = PaginateConfig(mode="keyset", default_page_size=25)
@@ -253,7 +276,7 @@ class TestContributeOrdering:
         assert "sort_dir" in params[1]
         assert '"desc"' in params[1]
 
-    def test_reads_from_body_when_search(self, specs, shared_ctx):
+    def test_uses_apply_ordering_with_search_body(self, specs, shared_ctx):
         ext = specs["route"].context["list_extensions"]
         ext["http_method"] = "post"
         config = OrderConfig(
@@ -262,12 +285,25 @@ class TestContributeOrdering:
         )
         contribute_ordering(specs, shared_ctx, config)
         modifiers = "\n".join(ext["query_modifiers"])
-        assert "body.sort_by" in modifiers
-        assert "body.sort_dir" in modifiers
+        assert "apply_ordering" in modifiers
+        assert "body.sort" in modifiers
         # No extra query params added
         assert len(ext["extra_params"]) == 0
 
-    def test_adds_order_by_modifiers(self, specs, shared_ctx):
+    def test_generates_sort_clause_with_search_body(self, specs, shared_ctx):
+        ext = specs["route"].context["list_extensions"]
+        ext["http_method"] = "post"
+        config = OrderConfig(
+            fields=[{"name": "name", "type": "str"}],
+        )
+        contribute_ordering(specs, shared_ctx, config)
+        assert "UserSortClause" in specs["schema"].exports
+        classes = specs["schema"].context["schema_classes"]
+        clause = [c for c in classes if "SortClause" in c]
+        assert len(clause) == 1
+        assert "UserSortField" in clause[0]
+
+    def test_adds_order_by_modifiers_no_search(self, specs, shared_ctx):
         config = OrderConfig(
             fields=[{"name": "created_at", "type": "datetime"}],
             default="created_at",
@@ -353,29 +389,24 @@ class TestContributePaginationKeyset:
         )
         assert any("le=100" in p for p in params)
 
-    def test_reads_from_body_when_search(self, specs, shared_ctx):
+    def test_uses_method_with_search_body(self, specs, shared_ctx):
         ext = specs["route"].context["list_extensions"]
         ext["http_method"] = "post"
         config = PaginateConfig(mode="keyset")
         contribute_pagination(specs, shared_ctx, config)
         # No query params added
         assert len(ext["extra_params"]) == 0
-        modifiers = "\n".join(ext["query_modifiers"])
-        assert "body.cursor" in modifiers
-        assert "body.page_size" in modifiers
+        expr = ext["result_expression"]
+        assert "apply_keyset_pagination" in expr
+        assert "body.cursor" in expr
+        assert "body.page_size" in expr
 
-    def test_adds_cursor_query_modifiers(self, specs, shared_ctx):
-        config = PaginateConfig(
-            mode="keyset",
-            cursor_field="id",
-            cursor_type="uuid",
-        )
+    def test_uses_method_without_search_body(self, specs, shared_ctx):
+        config = PaginateConfig(mode="keyset")
         contribute_pagination(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
-        combined = "\n".join(ext["query_modifiers"])
-        assert "if cursor:" in combined
-        assert "uuid.UUID(cursor)" in combined
-        assert "limit(page_size + 1)" in combined
+        expr = ext["result_expression"]
+        assert "apply_keyset_pagination" in expr
 
     def test_sets_result_expression(self, specs, shared_ctx):
         config = PaginateConfig(
@@ -398,8 +429,8 @@ class TestContributePaginationKeyset:
         )
         contribute_pagination(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
-        combined = "\n".join(ext["query_modifiers"])
-        assert "int(cursor)" in combined
+        expr = ext["result_expression"]
+        assert "int(raw_cursor)" in expr
 
     def test_no_resource_schema(self, specs, shared_ctx_no_schema):
         config = PaginateConfig(mode="keyset")
@@ -436,13 +467,14 @@ class TestContributePaginationOffset:
         assert any("offset" in p and "ge=0" in p for p in params)
         assert any("limit" in p and "10" in p and "le=50" in p for p in params)
 
-    def test_reads_from_body_when_search(self, specs, shared_ctx):
+    def test_uses_method_with_search_body(self, specs, shared_ctx):
         ext = specs["route"].context["list_extensions"]
         ext["http_method"] = "post"
         config = PaginateConfig(mode="offset")
         contribute_pagination(specs, shared_ctx, config)
         assert len(ext["extra_params"]) == 0
         expr = ext["result_expression"]
+        assert "apply_offset_pagination" in expr
         assert "body.offset" in expr
         assert "body.limit" in expr
 
@@ -451,15 +483,15 @@ class TestContributePaginationOffset:
         contribute_pagination(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
         expr = ext["result_expression"]
-        assert "count" in expr
+        assert "apply_offset_pagination" in expr
         assert "total" in expr
         assert "UserPage(" in expr
 
-    def test_offset_adds_func_import(self, specs, shared_ctx):
+    def test_offset_imports_method(self, specs, shared_ctx):
         config = PaginateConfig(mode="offset")
         contribute_pagination(specs, shared_ctx, config)
         lines = "\n".join(specs["route"].imports.lines())
-        assert "func" in lines
+        assert "apply_offset_pagination" in lines
 
 
 # -------------------------------------------------------------------
@@ -502,6 +534,27 @@ class TestListOperationWithExtensions:
         assert 'router.post("/search"' in handler
         assert "body:" in handler
         assert "UserSearchRequest" in handler
+
+    def test_combined_uses_methods(self, specs, resource, shared_ctx):
+        self._contribute(
+            specs,
+            resource,
+            shared_ctx,
+            fields=[
+                {"name": "id", "type": "uuid"},
+                {"name": "email", "type": "email"},
+            ],
+            filters={"fields": ["email"]},
+            ordering={
+                "fields": [{"name": "created_at", "type": "datetime"}],
+                "default": "created_at",
+            },
+            pagination={"mode": "keyset"},
+        )
+        handler = specs["route"].context["route_handlers"][0]
+        assert "apply_filters" in handler
+        assert "apply_ordering" in handler
+        assert "apply_keyset_pagination" in handler
 
     def test_combined_handler_response_model(self, specs, resource, shared_ctx):
         self._contribute(
@@ -585,9 +638,28 @@ class TestListOperationWithExtensions:
         search_req = [c for c in classes if "SearchRequest" in c]
         assert len(search_req) == 1
         snippet = search_req[0]
-        assert "sort_by:" in snippet
+        assert "sort:" in snippet
         assert "cursor:" in snippet
         assert "30" in snippet
+
+    def test_offset_pagination_combined(self, specs, resource, shared_ctx):
+        self._contribute(
+            specs,
+            resource,
+            shared_ctx,
+            fields=[
+                {"name": "id", "type": "uuid"},
+                {"name": "email", "type": "email"},
+            ],
+            filters={},
+            ordering={
+                "fields": [{"name": "name", "type": "str"}],
+            },
+            pagination={"mode": "offset"},
+        )
+        handler = specs["route"].context["route_handlers"][0]
+        assert "apply_offset_pagination" in handler
+        assert "apply_ordering" in handler
 
 
 # -------------------------------------------------------------------
