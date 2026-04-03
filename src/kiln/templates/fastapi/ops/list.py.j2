@@ -1,0 +1,14 @@
+@router.get("/", response_model={% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}list{% endif %})
+async def list_{{ model_lower }}(
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if has_auth and requires_auth %}
+    current_user: Annotated[dict, Depends(get_current_user)],
+{% endif %}
+) -> {% if has_resource_schema %}list[{{ model_name }}Resource]{% else %}object{% endif %}:
+    """List {{ model_name }} records."""
+    result = await db.execute(select({{ model_name }}))
+{% if has_resource_schema %}
+    return [to_{{ model_lower }}_resource(obj) for obj in result.scalars()]
+{% else %}
+    return list(result.scalars().all())
+{% endif %}

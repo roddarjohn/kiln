@@ -1,0 +1,6 @@
+class {{ model_name }}UpdateRequest(BaseModel):
+    """Request body for PATCH {{ route_prefix }}/{pk}."""
+
+{% for f in fields %}
+    {{ f.name }}: {{ f.py_type }} | None = None
+{% endfor %}

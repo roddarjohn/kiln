@@ -579,6 +579,130 @@ def test_resource_route_uses_named_db_session():
     assert "get_analytics_db" in route.content
 
 
+# ---------------------------------------------------------------------------
+# Name
+# ---------------------------------------------------------------------------
+
+
+def test_name_pascal_from_snake():
+    from kiln.generators._helpers import Name
+
+    assert Name("publish_article").pascal == "PublishArticle"
+
+
+def test_name_pascal_already_pascal():
+    from kiln.generators._helpers import Name
+
+    assert Name("Article").pascal == "Article"
+
+
+def test_name_pascal_preserves_multi_word_pascal():
+    from kiln.generators._helpers import Name
+
+    assert Name("StockMovement").pascal == "StockMovement"
+
+
+def test_name_pascal_single_lowercase():
+    from kiln.generators._helpers import Name
+
+    assert Name("publish").pascal == "Publish"
+
+
+def test_name_lower():
+    from kiln.generators._helpers import Name
+
+    assert Name("Article").lower == "article"
+
+
+def test_name_slug():
+    from kiln.generators._helpers import Name
+
+    assert Name("publish_article").slug == "publish-article"
+
+
+def test_name_suffixed():
+    from kiln.generators._helpers import Name
+
+    assert Name("Article").suffixed("CreateRequest") == "ArticleCreateRequest"
+
+
+def test_name_suffixed_from_snake():
+    from kiln.generators._helpers import Name
+
+    name = Name("publish_article")
+    assert name.suffixed("Request") == "PublishArticleRequest"
+
+
+def test_name_from_dotted():
+    from kiln.generators._helpers import Name
+
+    module, name = Name.from_dotted("myapp.models.Article")
+    assert module == "myapp.models"
+    assert name.pascal == "Article"
+    assert name.lower == "article"
+
+
+# ---------------------------------------------------------------------------
+# ImportCollector
+# ---------------------------------------------------------------------------
+
+
+def test_import_collector_bare():
+    from kiln.generators._helpers import ImportCollector
+
+    c = ImportCollector()
+    c.add("uuid")
+    assert c.lines() == ["import uuid"]
+
+
+def test_import_collector_from():
+    from kiln.generators._helpers import ImportCollector
+
+    c = ImportCollector()
+    c.add_from("datetime", "datetime", "date")
+    assert c.lines() == ["from datetime import datetime, date"]
+
+
+def test_import_collector_merges_from():
+    from kiln.generators._helpers import ImportCollector
+
+    c = ImportCollector()
+    c.add_from("datetime", "datetime")
+    c.add_from("datetime", "date")
+    assert c.lines() == ["from datetime import datetime, date"]
+
+
+def test_import_collector_deduplicates():
+    from kiln.generators._helpers import ImportCollector
+
+    c = ImportCollector()
+    c.add("uuid")
+    c.add("uuid")
+    c.add_from("datetime", "date")
+    c.add_from("datetime", "date")
+    assert c.lines() == ["import uuid", "from datetime import date"]
+
+
+def test_import_collector_mixed():
+    from kiln.generators._helpers import ImportCollector
+
+    c = ImportCollector()
+    c.add("uuid")
+    c.add_from("datetime", "datetime")
+    c.add_from("typing", "Any")
+    lines = c.lines()
+    assert lines == [
+        "import uuid",
+        "from datetime import datetime",
+        "from typing import Any",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# resolve_db_session
+# ---------------------------------------------------------------------------
+
+
 def test_resolve_db_session_no_databases():
     from kiln.generators._helpers import resolve_db_session
 
@@ -715,3 +839,672 @@ def test_registry_app_mode_generates_scaffold_when_auth_present(full_config):
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
     assert "db/base.py" in paths
+
+
+# ---------------------------------------------------------------------------
+# FileSpec
+# ---------------------------------------------------------------------------
+
+
+def test_filespec_module_with_prefix():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    spec = FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="_generated",
+        context={"model_name": "User", "schema_classes": []},
+    )
+    assert spec.module == "_generated.myapp.schemas.user"
+
+
+def test_filespec_module_without_prefix():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    spec = FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={"model_name": "User", "schema_classes": []},
+    )
+    assert spec.module == "myapp.schemas.user"
+
+
+def test_filespec_render_produces_generated_file():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    spec = FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={"model_name": "User", "schema_classes": []},
+    )
+    spec.imports.add_from("__future__", "annotations")
+    spec.imports.add_from("pydantic", "BaseModel")
+    result = spec.render()
+    assert result.path == "myapp/schemas/user.py"
+    assert "from __future__ import annotations" in result.content
+    assert "from pydantic import BaseModel" in result.content
+
+
+def test_filespec_render_empty_imports():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    spec = FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={"model_name": "User", "schema_classes": []},
+    )
+    result = spec.render()
+    assert isinstance(result, GeneratedFile)
+
+
+def test_filespec_exports_default_empty():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    spec = FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={"model_name": "User", "schema_classes": []},
+    )
+    assert spec.exports == []
+
+
+# ---------------------------------------------------------------------------
+# Operations — unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fields_resource() -> ResourceConfig:
+    """Resource with explicit fields on get, create, update."""
+    return ResourceConfig(
+        model="myapp.models.User",
+        pk="id",
+        pk_type="uuid",
+        get=FieldsConfig(
+            fields=[
+                FieldSpec(name="id", type="uuid"),
+                FieldSpec(name="email", type="email"),
+                FieldSpec(name="created_at", type="datetime"),
+            ]
+        ),
+        list=FieldsConfig(
+            fields=[
+                FieldSpec(name="id", type="uuid"),
+                FieldSpec(name="email", type="email"),
+            ]
+        ),
+        create=FieldsConfig(
+            fields=[
+                FieldSpec(name="email", type="email"),
+                FieldSpec(name="data", type="json"),
+            ]
+        ),
+        update=FieldsConfig(
+            fields=[
+                FieldSpec(name="email", type="email"),
+                FieldSpec(name="birthday", type="date"),
+            ]
+        ),
+        delete=True,
+        require_auth=True,
+    )
+
+
+@pytest.fixture
+def shared_ctx():
+    from kiln.generators._helpers import Name
+    from kiln.generators.fastapi.operations import SharedContext
+
+    return SharedContext(
+        model=Name("User"),
+        model_module="myapp.models",
+        pk_name="id",
+        pk_py_type="uuid.UUID",
+        route_prefix="/users",
+        has_auth=True,
+        get_db_fn="get_db",
+        session_module="db.session",
+        has_resource_schema=True,
+        response_schema="UserResource",
+        package_prefix="",
+    )
+
+
+@pytest.fixture
+def schema_spec():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    return FileSpec(
+        path="myapp/schemas/user.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={
+            "model_name": "User",
+            "schema_classes": [],
+        },
+    )
+
+
+@pytest.fixture
+def route_spec():
+    from kiln.generators._helpers import ImportCollector
+    from kiln.generators.base import FileSpec
+
+    return FileSpec(
+        path="myapp/routes/user.py",
+        template="fastapi/route.py.j2",
+        imports=ImportCollector(),
+        package_prefix="",
+        context={
+            "model_name": "User",
+            "model_lower": "user",
+            "route_prefix": "/users",
+            "route_handlers": [],
+            "utils_module": "utils",
+        },
+    )
+
+
+def test_get_operation_enabled():
+    from kiln.generators.fastapi.operations import GetOperation
+
+    op = GetOperation()
+    r = ResourceConfig(model="m.M", get=True)
+    assert op.enabled(r)
+
+
+def test_get_operation_disabled():
+    from kiln.generators.fastapi.operations import GetOperation
+
+    op = GetOperation()
+    r = ResourceConfig(model="m.M", get=False)
+    assert not op.enabled(r)
+
+
+def test_get_operation_contribute_schema_with_fields(
+    fields_resource, schema_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import GetOperation
+
+    op = GetOperation()
+    op.contribute_schema(schema_spec, fields_resource, shared_ctx)
+    assert "UserResource" in schema_spec.exports
+    assert len(schema_spec.context["schema_classes"]) == 1
+    # datetime field should trigger import
+    assert "datetime" in "\n".join(schema_spec.imports.lines())
+
+
+def test_get_operation_contribute_schema_no_fields(schema_spec, shared_ctx):
+    from kiln.generators.fastapi.operations import GetOperation
+
+    r = ResourceConfig(model="m.M", get=True)
+    op = GetOperation()
+    op.contribute_schema(schema_spec, r, shared_ctx)
+    assert schema_spec.exports == []
+    assert schema_spec.context["schema_classes"] == []
+
+
+def test_get_operation_contribute_route(
+    fields_resource, route_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import GetOperation
+
+    op = GetOperation()
+    op.contribute_route(route_spec, fields_resource, shared_ctx)
+    assert len(route_spec.context["route_handlers"]) == 1
+    handler = route_spec.context["route_handlers"][0]
+    assert "@router.get" in handler
+
+
+def test_list_operation_enabled():
+    from kiln.generators.fastapi.operations import ListOperation
+
+    op = ListOperation()
+    r = ResourceConfig(model="m.M", list=True)
+    assert op.enabled(r)
+
+
+def test_list_operation_disabled():
+    from kiln.generators.fastapi.operations import ListOperation
+
+    op = ListOperation()
+    r = ResourceConfig(model="m.M", list=False)
+    assert not op.enabled(r)
+
+
+def test_list_operation_contribute_schema_skips_if_resource_exists(
+    fields_resource, schema_spec, shared_ctx
+):
+    """ListOperation skips Resource schema if get already added it."""
+    from kiln.generators.fastapi.operations import (
+        GetOperation,
+        ListOperation,
+    )
+
+    GetOperation().contribute_schema(schema_spec, fields_resource, shared_ctx)
+    ListOperation().contribute_schema(schema_spec, fields_resource, shared_ctx)
+    assert schema_spec.exports.count("UserResource") == 1
+
+
+def test_list_operation_contribute_schema_when_get_has_no_fields(
+    schema_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import ListOperation
+
+    r = ResourceConfig(
+        model="m.M",
+        get=True,
+        list=FieldsConfig(fields=[FieldSpec(name="id", type="uuid")]),
+    )
+    op = ListOperation()
+    op.contribute_schema(schema_spec, r, shared_ctx)
+    assert "UserResource" in schema_spec.exports
+
+
+def test_list_operation_contribute_route(
+    fields_resource, route_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import ListOperation
+
+    op = ListOperation()
+    op.contribute_route(route_spec, fields_resource, shared_ctx)
+    assert len(route_spec.context["route_handlers"]) == 1
+
+
+def test_create_operation_enabled():
+    from kiln.generators.fastapi.operations import CreateOperation
+
+    op = CreateOperation()
+    r = ResourceConfig(
+        model="m.M",
+        create=FieldsConfig(fields=[FieldSpec(name="n", type="str")]),
+    )
+    assert op.enabled(r)
+
+
+def test_create_operation_disabled():
+    from kiln.generators.fastapi.operations import CreateOperation
+
+    op = CreateOperation()
+    r = ResourceConfig(model="m.M", create=False)
+    assert not op.enabled(r)
+
+
+def test_create_operation_contribute_schema(
+    fields_resource, schema_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import CreateOperation
+
+    op = CreateOperation()
+    op.contribute_schema(schema_spec, fields_resource, shared_ctx)
+    assert "UserCreateRequest" in schema_spec.exports
+    # json field should trigger typing.Any import
+    lines = "\n".join(schema_spec.imports.lines())
+    assert "Any" in lines
+
+
+def test_create_operation_contribute_route(
+    fields_resource, route_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import CreateOperation
+
+    op = CreateOperation()
+    op.contribute_route(route_spec, fields_resource, shared_ctx)
+    handler = route_spec.context["route_handlers"][0]
+    assert "@router.post" in handler
+
+
+def test_update_operation_contribute_schema(
+    fields_resource, schema_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import UpdateOperation
+
+    op = UpdateOperation()
+    op.contribute_schema(schema_spec, fields_resource, shared_ctx)
+    assert "UserUpdateRequest" in schema_spec.exports
+    # date field should trigger datetime.date import
+    lines = "\n".join(schema_spec.imports.lines())
+    assert "date" in lines
+
+
+def test_update_operation_contribute_route(
+    fields_resource, route_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import UpdateOperation
+
+    op = UpdateOperation()
+    op.contribute_route(route_spec, fields_resource, shared_ctx)
+    handler = route_spec.context["route_handlers"][0]
+    assert "@router.patch" in handler
+
+
+def test_delete_operation_enabled():
+    from kiln.generators.fastapi.operations import DeleteOperation
+
+    op = DeleteOperation()
+    r = ResourceConfig(model="m.M", delete=True)
+    assert op.enabled(r)
+
+
+def test_delete_operation_disabled():
+    from kiln.generators.fastapi.operations import DeleteOperation
+
+    op = DeleteOperation()
+    r = ResourceConfig(model="m.M", delete=False)
+    assert not op.enabled(r)
+
+
+def test_delete_operation_contribute_schema_is_noop(schema_spec, shared_ctx):
+    from kiln.generators.fastapi.operations import DeleteOperation
+
+    r = ResourceConfig(model="m.M", delete=True)
+    op = DeleteOperation()
+    op.contribute_schema(schema_spec, r, shared_ctx)
+    assert schema_spec.exports == []
+    assert schema_spec.context["schema_classes"] == []
+
+
+def test_delete_operation_contribute_route(
+    fields_resource, route_spec, shared_ctx
+):
+    from kiln.generators.fastapi.operations import DeleteOperation
+
+    op = DeleteOperation()
+    op.contribute_route(route_spec, fields_resource, shared_ctx)
+    handler = route_spec.context["route_handlers"][0]
+    assert "@router.delete" in handler
+
+
+def test_action_operation_enabled():
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    op = ActionOperation()
+    r = ResourceConfig(
+        model="m.M",
+        actions=[
+            ActionConfig(
+                name="publish",
+                fn="m.publish",
+                require_auth=True,
+            )
+        ],
+    )
+    assert op.enabled(r)
+
+
+def test_action_operation_disabled():
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    op = ActionOperation()
+    r = ResourceConfig(model="m.M")
+    assert not op.enabled(r)
+
+
+def test_action_operation_contribute_schema(schema_spec, shared_ctx):
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    r = ResourceConfig(
+        model="m.M",
+        actions=[
+            ActionConfig(
+                name="publish",
+                fn="m.publish",
+                params=[FieldSpec(name="notify", type="bool")],
+                require_auth=True,
+            ),
+        ],
+    )
+    op = ActionOperation()
+    op.contribute_schema(schema_spec, r, shared_ctx)
+    assert "PublishRequest" in schema_spec.exports
+    assert "ActionResponse" in schema_spec.exports
+
+
+def test_action_operation_contribute_route(route_spec, shared_ctx):
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    r = ResourceConfig(
+        model="m.M",
+        actions=[
+            ActionConfig(
+                name="publish",
+                fn="blog.actions.publish_article",
+                params=[FieldSpec(name="notify", type="bool")],
+                require_auth=True,
+            ),
+        ],
+    )
+    op = ActionOperation()
+    op.contribute_route(route_spec, r, shared_ctx)
+    handler = route_spec.context["route_handlers"][0]
+    assert "@router.post" in handler
+    assert "publish" in handler
+    # Should import the action fn
+    lines = "\n".join(route_spec.imports.lines())
+    assert "publish_article" in lines
+
+
+def test_default_operations_returns_six():
+    from kiln.generators.fastapi.operations import (
+        default_operations,
+    )
+
+    ops = default_operations()
+    assert len(ops) == 6
+    names = [op.name for op in ops]
+    assert names == [
+        "get",
+        "list",
+        "create",
+        "update",
+        "delete",
+        "actions",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# ResourcePipeline — integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_build_produces_three_files(simple_resource, full_config):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, full_config)
+    assert len(files) == 3
+    paths = [f.path for f in files]
+    assert paths[0] == "myapp/schemas/user.py"
+    assert paths[1] == "myapp/serializers/user.py"
+    assert paths[2] == "myapp/routes/user.py"
+
+
+def test_pipeline_build_no_serializer_when_no_fields():
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    r = ResourceConfig(
+        model="myapp.models.User",
+        get=True,
+        list=True,
+    )
+    cfg = KilnConfig(module="myapp")
+    pipeline = ResourcePipeline()
+    files = pipeline.build(r, cfg)
+    assert len(files) == 2
+    paths = [f.path for f in files]
+    assert "myapp/schemas/user.py" in paths
+    assert "myapp/routes/user.py" in paths
+
+
+def test_pipeline_output_is_valid_python(simple_resource, full_config):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, full_config)
+    for f in files:
+        ast.parse(f.content)
+
+
+def test_pipeline_schema_exports_wired_to_route(simple_resource, full_config):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, full_config)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "UserCreateRequest" in route_file.content
+    assert "UserUpdateRequest" in route_file.content
+
+
+def test_pipeline_serializer_wired_to_route(simple_resource, full_config):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, full_config)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "to_user_resource" in route_file.content
+
+
+def test_pipeline_with_custom_operations():
+    """Custom operations can be added to the pipeline."""
+    from kiln.generators.fastapi.operations import GetOperation
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    # Use only GetOperation — should produce fewer handlers
+    pipeline = ResourcePipeline(operations=[GetOperation()])
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    cfg = KilnConfig(module="myapp")
+    files = pipeline.build(r, cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "@router.get" in route_file.content
+    assert "@router.post" not in route_file.content
+    assert "@router.delete" not in route_file.content
+
+
+def test_pipeline_action_resource_valid_python(
+    action_resource,
+):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    cfg = KilnConfig(
+        module="blog",
+        auth=AuthConfig(),
+        resources=[action_resource],
+    )
+    pipeline = ResourcePipeline()
+    files = pipeline.build(action_resource, cfg)
+    for f in files:
+        ast.parse(f.content)
+
+
+def test_pipeline_auth_imports_when_auth_configured(
+    simple_resource, full_config
+):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, full_config)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "get_current_user" in route_file.content
+
+
+def test_pipeline_no_auth_imports_when_no_auth():
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    cfg = KilnConfig(module="myapp")
+    pipeline = ResourcePipeline()
+    files = pipeline.build(r, cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "get_current_user" not in route_file.content
+
+
+def test_pipeline_with_package_prefix(simple_resource):
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    cfg = KilnConfig(
+        module="myapp",
+        auth=AuthConfig(),
+        package_prefix="_generated",
+        resources=[simple_resource],
+    )
+    pipeline = ResourcePipeline()
+    files = pipeline.build(simple_resource, cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    # Import paths should include the prefix
+    assert "_generated." in route_file.content
+
+
+def test_pipeline_int_pk_type():
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    r = ResourceConfig(
+        model="myapp.models.Item",
+        pk="id",
+        pk_type="int",
+        get=True,
+    )
+    cfg = KilnConfig(module="myapp")
+    pipeline = ResourcePipeline()
+    files = pipeline.build(r, cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "int" in route_file.content
+    # Should not import uuid for int pk
+    assert "import uuid" not in route_file.content
+
+
+def test_pipeline_custom_route_prefix():
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    r = ResourceConfig(
+        model="myapp.models.Item",
+        get=True,
+        route_prefix="/custom-items",
+    )
+    cfg = KilnConfig(module="myapp")
+    pipeline = ResourcePipeline()
+    files = pipeline.build(r, cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "/custom-items" in route_file.content
+
+
+def test_resource_generator_delegates_to_pipeline(full_config):
+    """ResourceGenerator.generate() delegates to pipeline."""
+    gen = ResourceGenerator()
+    files = gen.generate(full_config)
+    paths = [f.path for f in files]
+    assert "myapp/schemas/user.py" in paths
+    assert "myapp/routes/user.py" in paths
+
+
+def test_resource_generator_accepts_custom_pipeline():
+    from kiln.generators.fastapi.operations import GetOperation
+    from kiln.generators.fastapi.pipeline import ResourcePipeline
+
+    pipeline = ResourcePipeline(operations=[GetOperation()])
+    gen = ResourceGenerator(pipeline=pipeline)
+    cfg = KilnConfig(
+        module="myapp",
+        resources=[
+            ResourceConfig(model="myapp.models.User", get=True),
+        ],
+    )
+    files = gen.generate(cfg)
+    route_file = next(f for f in files if "routes" in f.path)
+    assert "@router.get" in route_file.content
+    assert "@router.post" not in route_file.content

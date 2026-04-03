@@ -1,0 +1,14 @@
+@router.delete("/{{ '{' }}{{ pk_name }}{{ '}' }}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_{{ model_lower }}(
+    {{ pk_name }}: {{ pk_py_type }},
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if has_auth and requires_auth %}
+    current_user: Annotated[dict, Depends(get_current_user)],
+{% endif %}
+) -> None:
+    """Delete a {{ model_name }}."""
+    result = await db.execute(
+        delete({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
+    )
+    assert_rowcount(result, detail="{{ model_name }} not found")
+    await db.commit()

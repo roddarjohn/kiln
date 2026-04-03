@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators._helpers import split_dotted_class
+from kiln.generators._helpers import Name
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -68,8 +68,8 @@ def _render_router(config: KilnConfig) -> str:
     """
     routes = []
     for resource in config.resources:
-        _, class_name = split_dotted_class(resource.model)
-        module_name = class_name.lower()
+        _, model = Name.from_dotted(resource.model)
+        module_name = model.lower
         routes.append(
             {"module_name": module_name, "alias": f"{module_name}_router"}
         )

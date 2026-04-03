@@ -1,0 +1,14 @@
+@router.post("/{{ '{' }}{{ pk_name }}{{ '}' }}/{{ action.slug }}", response_model=ActionResponse)
+async def {{ action.handler_name }}(
+    {{ pk_name }}: {{ pk_py_type }},
+{% if action.params %}
+    body: {{ action.request_class }},
+{% endif %}
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if has_auth and action.requires_auth %}
+    current_user: Annotated[dict, Depends(get_current_user)],
+{% endif %}
+) -> ActionResponse:
+    """Execute the {{ action.name }} action on {{ model_name }}."""
+    await {{ action.fn_name }}({{ pk_name }}, db=db{% if action.params %}, **body.model_dump(){% endif %})
+    return ActionResponse()
