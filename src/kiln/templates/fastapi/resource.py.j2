@@ -10,7 +10,7 @@ from __future__ import annotations
 {% endfor %}
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import {{ sqlalchemy_imports | join(", ") }}
 from sqlalchemy.ext.asyncio import AsyncSession
 {% if has_auth %}
@@ -18,8 +18,8 @@ from auth.dependencies import get_current_user
 {% endif %}
 from {{ session_module }} import {{ get_db_fn }}
 from {{ model_module }} import {{ model_name }}
-{% if uses_utils %}
-from {{ utils_module }} import get_object_from_query_or_404
+{% if utils_imports %}
+from {{ utils_module }} import {{ utils_imports | join(", ") }}
 {% endif %}
 {% if has_resource_schema %}
 from {{ serializer_module }} import to_{{ model_lower }}_resource
@@ -125,6 +125,11 @@ async def update_{{ model_lower }}(
 ) -> {% if response_schema %}{{ response_schema }}{% else %}None{% endif %}:
     """Update a {{ model_name }}."""
 {% if response_schema %}
+    await get_object_from_query_or_404(
+        db,
+        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        detail="{{ model_name }} not found",
+    )
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
@@ -132,25 +137,15 @@ async def update_{{ model_lower }}(
         .returning({{ model_name }})
     )
     await db.commit()
-    obj = result.scalars().one_or_none()
-    if obj is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="{{ model_name }} not found",
-        )
-    return to_{{ model_lower }}_resource(obj)
+    return to_{{ model_lower }}_resource(result.scalars().one())
 {% else %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
         .values({% if op_update.has_schema %}**body.model_dump(exclude_unset=True){% endif %})
     )
+    assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="{{ model_name }} not found",
-        )
 {% endif %}
 
 
@@ -168,12 +163,8 @@ async def delete_{{ model_lower }}(
     result = await db.execute(
         delete({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
     )
+    assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="{{ model_name }} not found",
-        )
 
 
 {% endif %}
