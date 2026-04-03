@@ -28,6 +28,10 @@ coverage-ci *args:
     uv run coverage run -m pytest {{args}}
     uv run coverage xml -o coverage.xml
 
+# Re-generate src/kiln/stdlib/pgcraft/plugins.libsonnet from pgcraft introspection
+generate-pgcraft-stdlib:
+    uv run --group playground python scripts/generate_pgcraft_stdlib.py
+
 # Build HTML docs for all versions (output in docs/_build/html)
 docs:
     uv run python scripts/docs/build_versioned_docs.py

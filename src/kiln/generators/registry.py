@@ -8,18 +8,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig
     from kiln.generators.base import GeneratedFile, Generator
-from kiln.generators.fastapi.crud import CRUDGenerator
-from kiln.generators.fastapi.models import PGCraftModelGenerator
 from kiln.generators.fastapi.project_router import ProjectRouterGenerator
+from kiln.generators.fastapi.resource import ResourceGenerator
 from kiln.generators.fastapi.router import RouterGenerator
-from kiln.generators.fastapi.views import ViewGenerator
+from kiln.generators.fastapi.utils_gen import UtilsGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
 
 _BUILTIN_GENERATORS: list[type[Generator]] = [
-    PGCraftModelGenerator,
-    ViewGenerator,
-    CRUDGenerator,
+    ResourceGenerator,
     RouterGenerator,
+    UtilsGenerator,
 ]
 
 

@@ -6,23 +6,20 @@ from pathlib import Path
 import pytest
 
 from kiln.config.schema import (
+    ActionConfig,
     AppRef,
     AuthConfig,
-    CrudConfig,
     DatabaseConfig,
-    FieldConfig,
+    FieldsConfig,
+    FieldSpec,
     KilnConfig,
-    ModelConfig,
-    ViewColumn,
-    ViewModel,
-    ViewParam,
+    ResourceConfig,
 )
 from kiln.generators.base import GeneratedFile, Generator
-from kiln.generators.fastapi.crud import CRUDGenerator
-from kiln.generators.fastapi.models import PGCraftModelGenerator
 from kiln.generators.fastapi.project_router import ProjectRouterGenerator
+from kiln.generators.fastapi.resource import ResourceGenerator
 from kiln.generators.fastapi.router import RouterGenerator
-from kiln.generators.fastapi.views import ViewGenerator
+from kiln.generators.fastapi.utils_gen import UtilsGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
 from kiln.generators.registry import GeneratorRegistry
 
@@ -32,67 +29,68 @@ from kiln.generators.registry import GeneratorRegistry
 
 
 @pytest.fixture
-def simple_model() -> ModelConfig:
-    return ModelConfig(
-        name="User",
-        table="users",
-        schema="public",
-        pgcraft_type="simple",
-        fields=[
-            FieldConfig(name="id", type="uuid", primary_key=True),
-            FieldConfig(name="email", type="email", unique=True),
-            FieldConfig(
-                name="hashed_password", type="str", exclude_from_api=True
+def simple_resource() -> ResourceConfig:
+    return ResourceConfig(
+        model="myapp.models.User",
+        pk="id",
+        pk_type="uuid",
+        get=True,
+        list=FieldsConfig(
+            fields=[
+                FieldSpec(name="id", type="uuid"),
+                FieldSpec(name="email", type="email"),
+            ]
+        ),
+        create=FieldsConfig(
+            fields=[
+                FieldSpec(name="email", type="email"),
+            ]
+        ),
+        update=FieldsConfig(
+            fields=[
+                FieldSpec(name="email", type="email"),
+            ]
+        ),
+        delete=True,
+        require_auth=["update", "delete"],
+    )
+
+
+@pytest.fixture
+def action_resource() -> ResourceConfig:
+    return ResourceConfig(
+        model="blog.models.Article",
+        pk="id",
+        pk_type="uuid",
+        get=True,
+        list=True,
+        create=FieldsConfig(fields=[FieldSpec(name="title", type="str")]),
+        update=FieldsConfig(fields=[FieldSpec(name="title", type="str")]),
+        delete=True,
+        require_auth=["create", "update", "delete"],
+        actions=[
+            ActionConfig(
+                name="publish",
+                fn="blog.actions.publish_article",
+                params=[FieldSpec(name="notify", type="bool")],
+                require_auth=True,
             ),
-            FieldConfig(name="created_at", type="datetime", auto_now_add=True),
+            ActionConfig(
+                name="archive",
+                fn="blog.actions.archive_article",
+                params=[FieldSpec(name="reason", type="str")],
+                require_auth=True,
+            ),
         ],
-        crud=CrudConfig(require_auth=["update", "delete"]),
     )
 
 
 @pytest.fixture
-def parameterised_view() -> ViewModel:
-    return ViewModel(
-        name="summarize_posts_by_user",
-        model="Post",
-        description="Count posts per user.",
-        schema="public",
-        parameters=[
-            ViewParam(name="start_date", type="date"),
-            ViewParam(name="end_date", type="date"),
-        ],
-        returns=[
-            ViewColumn(name="user_id", type="uuid"),
-            ViewColumn(name="post_count", type="int"),
-        ],
-        require_auth=True,
-    )
-
-
-@pytest.fixture
-def plain_view() -> ViewModel:
-    return ViewModel(
-        name="active_users",
-        model="User",
-        schema="public",
-        parameters=[],
-        returns=[
-            ViewColumn(name="id", type="uuid"),
-            ViewColumn(name="email", type="str"),
-        ],
-        require_auth=False,
-        # file exists on disk — passes validation
-        query_fn="tests.unit.test_generators.get_query",
-    )
-
-
-@pytest.fixture
-def full_config(simple_model, parameterised_view) -> KilnConfig:
+def full_config(simple_resource) -> KilnConfig:
     return KilnConfig(
-        module="app",
+        module="myapp",
         auth=AuthConfig(),
-        models=[simple_model],
-        views=[parameterised_view],
+        resources=[simple_resource],
     )
 
 
@@ -101,20 +99,14 @@ def full_config(simple_model, parameterised_view) -> KilnConfig:
 # ---------------------------------------------------------------------------
 
 
-def test_generated_file_defaults():
+def test_generated_file():
     f = GeneratedFile(path="foo.py", content="# hi")
-    assert f.overwrite is True
-
-
-def test_generated_file_no_overwrite():
-    f = GeneratedFile(path="stub.py", content="# stub", overwrite=False)
-    assert f.overwrite is False
+    assert f.path == "foo.py"
+    assert f.content == "# hi"
 
 
 def test_generator_protocol():
-    assert isinstance(PGCraftModelGenerator(), Generator)
-    assert isinstance(CRUDGenerator(), Generator)
-    assert isinstance(ViewGenerator(), Generator)
+    assert isinstance(ResourceGenerator(), Generator)
     assert isinstance(RouterGenerator(), Generator)
 
 
@@ -129,7 +121,7 @@ def test_scaffold_generates_db_files():
     paths = {f.path for f in files}
     assert "db/base.py" in paths
     assert "db/session.py" in paths
-    assert "auth/dependencies.py" not in paths  # no auth in config
+    assert "auth/dependencies.py" not in paths
 
 
 def test_scaffold_with_auth_generates_deps():
@@ -139,17 +131,11 @@ def test_scaffold_with_auth_generates_deps():
     assert "auth/dependencies.py" in paths
 
 
-def test_scaffold_all_files_overwriteable():
-    cfg = KilnConfig(auth=AuthConfig())
-    for f in ScaffoldGenerator().generate(cfg):
-        assert f.overwrite is True, f"{f.path} should have overwrite=True"
-
-
 def test_scaffold_auth_deps_valid_python():
     cfg = KilnConfig(auth=AuthConfig())
     files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
     src = files["auth/dependencies.py"].content
-    ast.parse(src)  # raises SyntaxError if invalid
+    ast.parse(src)
 
 
 def test_scaffold_auth_deps_injection():
@@ -165,150 +151,234 @@ def test_scaffold_auth_deps_injection():
 
 
 # ---------------------------------------------------------------------------
-# PGCraftModelGenerator
+# ResourceGenerator
 # ---------------------------------------------------------------------------
 
 
-def test_model_generator_can_generate(full_config):
-    assert PGCraftModelGenerator().can_generate(full_config)
+def test_resource_generator_can_generate(full_config):
+    assert ResourceGenerator().can_generate(full_config)
 
 
-def test_model_generator_cannot_generate_empty():
-    assert not PGCraftModelGenerator().can_generate(KilnConfig())
+def test_resource_generator_cannot_generate_empty():
+    assert not ResourceGenerator().can_generate(KilnConfig())
 
 
-def test_model_generator_output_paths(full_config):
-    files = PGCraftModelGenerator().generate(full_config)
-    assert any(f.path == "app/models/user.py" for f in files)
-    assert any(f.path == "app/models/__init__.py" for f in files)
-
-
-def test_model_generator_valid_python(full_config):
-    for f in PGCraftModelGenerator().generate(full_config):
-        ast.parse(f.content)
-
-
-def test_model_generator_contains_class(full_config, simple_model):
-    files = PGCraftModelGenerator().generate(full_config)
-    model_file = next(f for f in files if f.path == "app/models/user.py")
-    assert f"class {simple_model.name}(Base):" in model_file.content
-
-
-def test_model_generator_postgrest_plugin():
-    m = ModelConfig(
-        name="Item",
-        table="items",
-        pgcraft_plugins=["postgrest"],
-        fields=[FieldConfig(name="id", type="int", primary_key=True)],
-    )
-    cfg = KilnConfig(models=[m])
-    files = PGCraftModelGenerator().generate(cfg)
-    model_file = next(f for f in files if f.path == "app/models/item.py")
-    assert "PostgRESTPlugin" in model_file.content
-
-
-# ---------------------------------------------------------------------------
-# ViewGenerator
-# ---------------------------------------------------------------------------
-
-
-def test_view_generator_produces_route(full_config, parameterised_view):
-    files = ViewGenerator().generate(full_config)
+def test_resource_generator_output_paths(full_config):
+    files = ResourceGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert f"app/routes/{parameterised_view.name}.py" in paths
+    assert "myapp/routes/user.py" in paths
+    assert "myapp/schemas/user.py" in paths
+    # list=FieldsConfig → has_resource_schema → serializer emitted
+    assert "myapp/serializers/user.py" in paths
 
 
-def test_view_generator_no_stubs(full_config):
-    files = ViewGenerator().generate(full_config)
-    assert not any("stub" in f.path for f in files)
-
-
-def test_view_route_overwrite(full_config, parameterised_view):
-    files = ViewGenerator().generate(full_config)
-    route = next(
-        f for f in files if f.path == f"app/routes/{parameterised_view.name}.py"
-    )
-    assert route.overwrite is True
-
-
-def test_view_route_valid_python(full_config):
-    for f in ViewGenerator().generate(full_config):
+def test_resource_generator_valid_python(full_config):
+    for f in ResourceGenerator().generate(full_config):
         ast.parse(f.content)
 
 
-def test_plain_view_route_uses_query_fn(plain_view):
-    cfg = KilnConfig(views=[plain_view])
-    files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if "routes/" in f.path)
-    assert "get_query" in route.content
-    assert "get_query()" in route.content
-    assert "table_valued" not in route.content
+def test_resource_generator_no_build_schema(full_config):
+    """No dynamic _build_schema; no GetResponse or ListResponse classes."""
+    files = ResourceGenerator().generate(full_config)
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "_build_schema" not in schema.content
+    assert "class UserGetResponse" not in schema.content
+    assert "class UserListResponse" not in schema.content
 
 
-def test_function_view_route_uses_table_valued(parameterised_view):
-    cfg = KilnConfig(views=[parameterised_view])
-    files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if "routes/" in f.path)
-    assert "table_valued" in route.content
-    assert "func." in route.content
+def test_resource_generator_specific_fields_static_class(full_config):
+    files = ResourceGenerator().generate(full_config)
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    # list has specific fields → unified Resource schema
+    assert "class UserResource(BaseModel):" in schema.content
+    assert "id: uuid.UUID" in schema.content
 
 
-# ---------------------------------------------------------------------------
-# CRUDGenerator
-# ---------------------------------------------------------------------------
+def test_resource_generator_create_request_class(full_config):
+    files = ResourceGenerator().generate(full_config)
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "class UserCreateRequest(BaseModel):" in schema.content
 
 
-def test_crud_generator_can_generate(full_config):
-    assert CRUDGenerator().can_generate(full_config)
+def test_resource_generator_update_request_optional_fields(full_config):
+    files = ResourceGenerator().generate(full_config)
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "class UserUpdateRequest(BaseModel):" in schema.content
+    # update fields are all optional (| None = None)
+    assert "| None = None" in schema.content
 
 
-def test_crud_generator_skips_no_crud():
-    m = ModelConfig(
-        name="X", table="x", fields=[FieldConfig(name="id", type="int")]
+def test_resource_generator_route_imports_from_schema(full_config):
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "from _generated.myapp.schemas.user import" in route.content
+    # import path uses package_prefix even though file path does not
+
+
+def test_resource_generator_serializer_file(full_config):
+    """list=FieldsConfig produces a serializer file with to_user_resource."""
+    files = ResourceGenerator().generate(full_config)
+    serializer = next(f for f in files if "serializers/user.py" in f.path)
+    assert "def to_user_resource" in serializer.content
+    assert "-> UserResource:" in serializer.content
+    assert "return UserResource(" in serializer.content
+    # route imports the serializer function, not inlines it
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert (
+        "from _generated.myapp.serializers.user import to_user_resource"
+        in route.content
     )
-    assert not CRUDGenerator().can_generate(KilnConfig(models=[m]))
+    assert "def _to_user" not in route.content
 
 
-def test_crud_generator_output_path(full_config):
-    files = CRUDGenerator().generate(full_config)
-    assert any(f.path == "app/routes/user.py" for f in files)
-    assert any(f.path == "app/schemas/user.py" for f in files)
-    assert any(f.path == "app/schemas/__init__.py" for f in files)
+def test_resource_generator_route_uses_insert(full_config):
+    """Create route uses insert() not db.add()."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "insert(User)" in route.content
+    assert "db.add(" not in route.content
 
 
-def test_crud_generator_valid_python(full_config):
-    for f in CRUDGenerator().generate(full_config):
+def test_resource_generator_route_uses_update(full_config):
+    """Update route uses update() not session ORM methods."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "update(User)" in route.content
+    assert "db.merge(" not in route.content
+
+
+def test_resource_generator_route_uses_delete(full_config):
+    """Delete route uses delete() not session ORM methods."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "delete(User)" in route.content
+
+
+def test_resource_generator_auth_injected(full_config):
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "current_user" in route.content
+    assert "get_current_user" in route.content
+    # no uppercase DB alias
+    assert "DB = " not in route.content
+
+
+def test_resource_generator_no_auth_when_unconfigured(simple_resource):
+    cfg = KilnConfig(resources=[simple_resource])  # no auth in config
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "get_current_user" not in route.content
+
+
+def test_resource_generator_delete_route_present(full_config):
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "router.delete" in route.content
+
+
+def test_resource_generator_no_delete_when_disabled():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        get=True,
+        list=True,
+        delete=False,
+    )
+    cfg = KilnConfig(resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "router.delete" not in route.content
+
+
+def test_resource_generator_route_prefix_default():
+    r = ResourceConfig(model="myapp.models.Article", get=True)
+    cfg = KilnConfig(resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/article.py" in f.path)
+    assert 'prefix="/articles"' in route.content
+
+
+def test_resource_generator_route_prefix_custom():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        route_prefix="/people",
+        get=True,
+    )
+    cfg = KilnConfig(resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert 'prefix="/people"' in route.content
+
+
+def test_resource_generator_python_action(action_resource):
+    cfg = KilnConfig(resources=[action_resource])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/article.py" in f.path)
+    schema = next(f for f in files if "schemas/article.py" in f.path)
+    assert "publish_action" in route.content
+    # top-level import, not deferred
+    assert "from blog.actions import" in route.content
+    assert "publish_article" in route.content
+    # no deferred import inside the function
+    assert "# noqa: PLC0415" not in route.content
+    # request class lives in the schema file
+    assert "class PublishRequest(BaseModel):" in schema.content
+
+
+def test_resource_generator_archive_action(action_resource):
+    cfg = KilnConfig(resources=[action_resource])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/article.py" in f.path)
+    assert "archive_action" in route.content
+    # both actions from the same module → one import line
+    assert "from blog.actions import" in route.content
+
+
+def test_resource_generator_action_response(action_resource):
+    cfg = KilnConfig(resources=[action_resource])
+    files = ResourceGenerator().generate(cfg)
+    schema = next(f for f in files if "schemas/article.py" in f.path)
+    route = next(f for f in files if "routes/article.py" in f.path)
+    assert "class ActionResponse(BaseModel):" in schema.content
+    assert "response_model=ActionResponse" in route.content
+    assert "return ActionResponse()" in route.content
+
+
+def test_resource_generator_valid_python_with_actions(action_resource):
+    cfg = KilnConfig(resources=[action_resource])
+    for f in ResourceGenerator().generate(cfg):
         ast.parse(f.content)
 
 
-def test_crud_generator_includes_auth(full_config):
-    files = CRUDGenerator().generate(full_config)
-    routes = next(f for f in files if f.path == "app/routes/user.py")
-    # update and delete require auth in fixture
-    assert "CurrentUser" in routes.content
-    assert "get_current_user" in routes.content
+def test_resource_generator_int_pk():
+    r = ResourceConfig(
+        model="blog.models.Tag",
+        pk="id",
+        pk_type="int",
+        get=True,
+        list=True,
+    )
+    cfg = KilnConfig(resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/tag.py" in f.path)
+    assert "id: int" in route.content
 
 
-def test_crud_generator_no_auth_when_unconfigured(simple_model):
-    cfg = KilnConfig(models=[simple_model])  # no auth config
-    files = CRUDGenerator().generate(cfg)
-    routes = next(f for f in files if "routes/user.py" in f.path)
-    assert "get_current_user" not in routes.content
-
-
-def test_crud_generator_schemas_present(full_config, simple_model):
-    files = CRUDGenerator().generate(full_config)
-    schema_file = next(f for f in files if f.path == "app/schemas/user.py")
-    assert f"{simple_model.name}Create" in schema_file.content
-    assert f"{simple_model.name}Update" in schema_file.content
-    assert f"{simple_model.name}Response" in schema_file.content
-
-
-def test_crud_generator_excluded_field_not_in_schema(full_config):
-    files = CRUDGenerator().generate(full_config)
-    schema_file = next(f for f in files if f.path == "app/schemas/user.py")
-    # hashed_password is exclude_from_api=True
-    assert "hashed_password" not in schema_file.content
+def test_resource_generator_always_select_model():
+    """Routes always use select(Model), never per-column select."""
+    r = ResourceConfig(
+        model="myapp.models.User",
+        list=FieldsConfig(
+            fields=[
+                FieldSpec(name="id", type="uuid"),
+                FieldSpec(name="email", type="email"),
+            ]
+        ),
+    )
+    cfg = KilnConfig(resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "select(User)" in route.content
+    assert "select(User.id" not in route.content
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +392,7 @@ def test_router_generator_can_generate(full_config):
 
 def test_router_generator_output_path(full_config):
     files = RouterGenerator().generate(full_config)
-    assert any(f.path == "app/routes/__init__.py" for f in files)
+    assert any(f.path == "myapp/routes/__init__.py" for f in files)
 
 
 def test_router_generator_valid_python(full_config):
@@ -330,10 +400,63 @@ def test_router_generator_valid_python(full_config):
     ast.parse(f.content)
 
 
-def test_router_generator_includes_all_routers(full_config):
+def test_router_generator_includes_all_resources(full_config):
     (f,) = RouterGenerator().generate(full_config)
     assert "user_router" in f.content
-    assert "summarize_posts_by_user_router" in f.content
+
+
+def test_router_generator_multiple_resources():
+    cfg = KilnConfig(
+        module="myapp",
+        resources=[
+            ResourceConfig(model="myapp.models.User", get=True),
+            ResourceConfig(model="myapp.models.Article", list=True),
+        ],
+    )
+    (f,) = RouterGenerator().generate(cfg)
+    assert "user_router" in f.content
+    assert "article_router" in f.content
+
+
+# ---------------------------------------------------------------------------
+# UtilsGenerator
+# ---------------------------------------------------------------------------
+
+
+def test_utils_generator_can_generate(full_config):
+    assert UtilsGenerator().can_generate(full_config)
+
+
+def test_utils_generator_cannot_generate_empty():
+    assert not UtilsGenerator().can_generate(KilnConfig())
+
+
+def test_utils_generator_output_path(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    assert f.path == "utils.py"
+
+
+def test_utils_generator_valid_python(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    ast.parse(f.content)
+
+
+def test_utils_generator_contains_helper(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    assert "get_object_from_query_or_404" in f.content
+
+
+def test_resource_generator_uses_utils_for_all_get_routes():
+    """All GET routes use get_object_from_query_or_404 from root utils."""
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    cfg = KilnConfig(module="myapp", resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if f.path.endswith("routes/user.py"))
+    assert "get_object_from_query_or_404" in route.content
+    assert (
+        "from _generated.utils import get_object_from_query_or_404"
+        in route.content
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +467,9 @@ def test_router_generator_includes_all_routers(full_config):
 def test_registry_default_has_builtins():
     r = GeneratorRegistry.default()
     names = set(r._generators)
-    assert "pgcraft_models" in names
-    assert "crud" in names
-    assert "views" in names
+    assert "resources" in names
     assert "router" in names
+    assert "utils" in names
 
 
 def test_registry_run_returns_files(full_config):
@@ -377,102 +499,10 @@ def test_registry_write_files(full_config, tmp_path: Path):
     from kiln.cli import _write_files
 
     files = GeneratorRegistry.default().run(full_config)
-    written, skipped = _write_files(files, tmp_path)
+    written = _write_files(files, tmp_path)
     assert written > 0
-    assert skipped == 0
-    written2, skipped2 = _write_files(files, tmp_path)
-    assert written2 == written  # all files overwritten again (none are stubs)
-    assert skipped2 == 0
-
-
-# ---------------------------------------------------------------------------
-# _helpers — column_def branches
-# ---------------------------------------------------------------------------
-
-
-def test_column_def_foreign_key():
-    from kiln.generators._helpers import column_def
-
-    f = FieldConfig(
-        name="author_id", type="uuid", foreign_key="authors.id", nullable=True
-    )
-    result = column_def(f)
-    assert 'PGCraftForeignKey("authors.id")' in result
-    assert "nullable=True" in result
-
-
-def test_column_def_foreign_key_three_part_strips_schema():
-    """Three-part schema.table.column refs are converted to table.column.
-
-    pgcraft resolves FKs via its dimension registry using two-part
-    'table.column' references; three-part refs bypass the registry and
-    reference the raw SQLAlchemy table name (e.g. 'products_raw'), not
-    the logical name ('products').
-    """
-    from kiln.generators._helpers import column_def
-
-    f = FieldConfig(
-        name="product_id",
-        type="uuid",
-        foreign_key="inventory.products.id",
-        nullable=False,
-    )
-    result = column_def(f)
-    assert 'PGCraftForeignKey("products.id")' in result
-
-
-def test_column_def_auto_now_add_and_auto_now():
-    from kiln.generators._helpers import column_def
-
-    f1 = FieldConfig(name="created_at", type="datetime", auto_now_add=True)
-    assert "server_default=func.now()" in column_def(f1)
-
-    f2 = FieldConfig(name="updated_at", type="datetime", auto_now=True)
-    assert "onupdate=func.now()" in column_def(f2)
-
-
-def test_type_imports_json_and_date():
-    from kiln.generators._helpers import type_imports
-
-    result = type_imports(["json", "date"])
-    assert "from typing import Any" in result
-    assert "from datetime import date" in result
-    assert "import uuid" not in result
-
-
-# ---------------------------------------------------------------------------
-# ViewGenerator — validation and missing query_fn
-# ---------------------------------------------------------------------------
-
-
-def test_view_generator_validation_error_missing_file():
-    view = ViewModel(
-        name="my_view",
-        model="Thing",
-        query_fn="totally.missing.module.get_query",
-        parameters=[],
-        returns=[ViewColumn(name="id", type="uuid")],
-    )
-    cfg = KilnConfig(views=[view])
-    with pytest.raises(ValueError, match="query_fn modules could not be found"):
-        ViewGenerator().generate(cfg)
-
-
-def test_view_generator_plain_missing_query_fn_raises():
-    view = ViewModel(
-        name="bad_view",
-        model="Thing",
-        query_fn=None,
-        parameters=[],
-        returns=[ViewColumn(name="id", type="uuid")],
-    )
-    cfg = KilnConfig(views=[view])
-    ViewGenerator.skip_validation = True
-    try:
-        with pytest.raises(ValueError, match=r"missing.*query_fn"):
-            ViewGenerator().generate(cfg)
-    finally:
-        ViewGenerator.skip_validation = False
+    written2 = _write_files(files, tmp_path)
+    assert written2 == written
 
 
 # ---------------------------------------------------------------------------
@@ -519,54 +549,34 @@ def test_scaffold_per_db_session_uses_correct_env_var():
     assert "get_analytics_db" in content
 
 
-def test_crud_route_uses_default_db_session(full_config):
-    files = CRUDGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
+def test_resource_route_uses_default_db_session(full_config):
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "db.session" in route.content
     assert "get_db" in route.content
 
 
-def test_crud_route_uses_named_db_session():
+def test_resource_route_uses_named_db_session():
     db_primary = DatabaseConfig(
         key="primary", url_env="DATABASE_URL", default=True
     )
     db_analytics = DatabaseConfig(
         key="analytics", url_env="ANALYTICS_DATABASE_URL"
     )
-    model = ModelConfig(
-        name="Report",
-        table="reports",
-        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-        crud=CrudConfig(),
+    r = ResourceConfig(
+        model="myapp.models.Report",
+        get=True,
         db_key="analytics",
     )
     cfg = KilnConfig(
         module="myapp",
         databases=[db_primary, db_analytics],
-        models=[model],
+        resources=[r],
     )
-    files = CRUDGenerator().generate(cfg)
+    files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if "routes/report.py" in f.path)
     assert "db.analytics_session" in route.content
     assert "get_analytics_db" in route.content
-
-
-def test_view_route_uses_named_db_session():
-    db = DatabaseConfig(key="primary", url_env="DATABASE_URL", default=True)
-    view = ViewModel(
-        name="active_users",
-        model="User",
-        parameters=[],
-        returns=[ViewColumn(name="id", type="uuid")],
-        require_auth=False,
-        query_fn="tests.unit.test_generators.get_query",
-        db_key="primary",
-    )
-    cfg = KilnConfig(databases=[db], views=[view])
-    files = ViewGenerator().generate(cfg)
-    route = next(f for f in files if "routes/" in f.path)
-    assert "db.primary_session" in route.content
-    assert "get_primary_db" in route.content
 
 
 def test_resolve_db_session_no_databases():
@@ -679,12 +689,11 @@ def test_project_router_mounts_all_apps():
 def test_registry_project_mode_generates_scaffold_and_apps():
     blog_app = KilnConfig(
         module="blog",
-        models=[
-            ModelConfig(
-                name="Article",
-                table="articles",
-                fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-                crud=CrudConfig(),
+        resources=[
+            ResourceConfig(
+                model="blog.models.Article",
+                get=True,
+                list=True,
             )
         ],
     )
@@ -697,7 +706,6 @@ def test_registry_project_mode_generates_scaffold_and_apps():
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
     assert "db/primary_session.py" in paths
-    assert "blog/models/article.py" in paths
     assert "blog/routes/article.py" in paths
     assert "routes/__init__.py" in paths
 
@@ -705,6 +713,5 @@ def test_registry_project_mode_generates_scaffold_and_apps():
 def test_registry_app_mode_generates_scaffold_when_auth_present(full_config):
     files = GeneratorRegistry.default().run(full_config)
     paths = {f.path for f in files}
-    # full_config has auth=AuthConfig(), so scaffold should run
     assert "auth/dependencies.py" in paths
     assert "db/base.py" in paths

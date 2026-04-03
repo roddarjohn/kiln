@@ -16,17 +16,11 @@ class GeneratedFile:
     Attributes:
         path: Output path relative to the ``--out`` directory.
         content: File contents as a string.
-        overwrite: Whether to replace an existing file at ``path``.
-            Set to ``False`` for stubs the user is expected to fill
-            in (e.g. pgcraft view/function definitions) so that
-            re-running ``kiln generate`` never destroys hand-written
-            SQL.
 
     """
 
     path: str
     content: str
-    overwrite: bool = True
 
 
 @runtime_checkable

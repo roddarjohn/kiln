@@ -552,6 +552,7 @@ lint = [
     { name = "ty" },
 ]
 playground = [
+    { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "pgcraft" },
@@ -587,6 +588,7 @@ lint = [
     { name = "ty", specifier = ">=0.0.20" },
 ]
 playground = [
+    { name = "alembic", specifier = ">=1.18.4" },
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pgcraft" },

@@ -21,8 +21,6 @@ class ScaffoldGenerator:
     """Generates infrastructure scaffold files from a kiln config.
 
     Call :meth:`generate` to produce ``db/`` and ``auth/`` files.
-    All files use ``overwrite=True`` — the config is the source of
-    truth and re-running is always safe.
     """
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
@@ -37,7 +35,7 @@ class ScaffoldGenerator:
 
         Returns:
             List of :class:`~kiln.generators.base.GeneratedFile`
-            objects, all with ``overwrite=True``.
+            objects.
 
         """
         db_base = env.get_template("init/db_base.py.j2").render()

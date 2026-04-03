@@ -10,23 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kiln.config.schema import DatabaseConfig, FieldConfig, FieldType
+    from kiln.config.schema import DatabaseConfig
 
-# SQLAlchemy column type constructor strings.
-# Values are written verbatim into generated Column(...) calls.
-SA_TYPES: dict[str, str] = {
-    "uuid": "pg.UUID(as_uuid=True)",
-    "str": "String",
-    "email": "String",
-    "int": "Integer",
-    "float": "Float",
-    "bool": "Boolean",
-    "datetime": "pg.TIMESTAMP(timezone=True)",
-    "date": "pg.DATE",
-    "json": "pg.JSONB",
-}
-
-# Python type annotation strings for Pydantic schemas.
+# Python type annotation strings for Pydantic schemas and route parameters.
 PYTHON_TYPES: dict[str, str] = {
     "uuid": "uuid.UUID",
     "str": "str",
@@ -39,57 +25,30 @@ PYTHON_TYPES: dict[str, str] = {
     "json": "dict[str, Any]",
 }
 
-# PostgreSQL SQL type names for function RETURNS TABLE(...) clauses.
-PG_SQL_TYPES: dict[str, str] = {
-    "uuid": "UUID",
-    "str": "TEXT",
-    "email": "TEXT",
-    "int": "INTEGER",
-    "float": "DOUBLE PRECISION",
-    "bool": "BOOLEAN",
-    "datetime": "TIMESTAMPTZ",
-    "date": "DATE",
-    "json": "JSONB",
-}
 
-# SQLAlchemy column type *instance* strings for table_valued() calls.
-SA_INSTANCE_TYPES: dict[str, str] = {
-    "uuid": "pg.UUID()",
-    "str": "String()",
-    "email": "String()",
-    "int": "Integer()",
-    "float": "Float()",
-    "bool": "Boolean()",
-    "datetime": "pg.TIMESTAMP(timezone=True)",
-    "date": "pg.DATE()",
-    "json": "pg.JSONB()",
-}
+def split_dotted_class(dotted_path: str) -> tuple[str, str]:
+    """Split a dotted import path into ``(module, class_name)``.
 
-# (plugin_class_name, import_module) for each PK field type.
-PGCRAFT_PK_PLUGINS: dict[str, tuple[str, str]] = {
-    "uuid": ("UUIDV4PKPlugin", "pgcraft.plugins.pk"),
-    "int": ("SerialPKPlugin", "pgcraft.plugins.pk"),
-}
+    Args:
+        dotted_path: A fully-qualified class path such as
+            ``"myapp.models.Article"``.
 
-# (factory_class_name, import_module) for each pgcraft_type value.
-PGCRAFT_FACTORIES: dict[str, tuple[str, str]] = {
-    "simple": (
-        "PGCraftSimple",
-        "pgcraft.factory.dimension.simple",
-    ),
-    "append_only": (
-        "PGCraftAppendOnly",
-        "pgcraft.factory.dimension.append_only",
-    ),
-    "ledger": (
-        "PGCraftLedger",
-        "pgcraft.factory.ledger",
-    ),
-    "eav": (
-        "PGCraftEAV",
-        "pgcraft.factory.dimension.eav",
-    ),
-}
+    Returns:
+        A ``(module, class_name)`` tuple, e.g.
+        ``("myapp.models", "Article")``.
+
+    Raises:
+        ValueError: If *dotted_path* contains fewer than two parts.
+
+    """
+    if "." not in dotted_path:
+        msg = (
+            f"'{dotted_path}' is not a valid dotted import path. "
+            f"Expected 'module.ClassName', e.g. 'myapp.models.Article'."
+        )
+        raise ValueError(msg)
+    module, _, class_name = dotted_path.rpartition(".")
+    return module, class_name
 
 
 def type_imports(field_types: list[str]) -> list[str]:
@@ -102,7 +61,7 @@ def type_imports(field_types: list[str]) -> list[str]:
 
     Args:
         field_types: List of :data:`FieldType` strings, e.g.
-            ``[f.type for f in model.fields]``.
+            ``[f.type for f in fields]``.
 
     Returns:
         List of import statement strings (no trailing newlines).
@@ -120,6 +79,38 @@ def type_imports(field_types: list[str]) -> list[str]:
     return lines
 
 
+def prefix_path(prefix: str, *parts: str) -> str:
+    """Build a file path under *prefix* (which may be empty).
+
+    Args:
+        prefix: Optional directory prefix, e.g. ``"_generated"``.
+        *parts: Path segments to join with ``/``.
+
+    Returns:
+        A ``/``-joined path, with *prefix* prepended when non-empty.
+
+    """
+    if prefix:
+        return "/".join([prefix, *parts])
+    return "/".join(parts)
+
+
+def prefix_import(prefix: str, *parts: str) -> str:
+    """Build a Python import path under *prefix* (which may be empty).
+
+    Args:
+        prefix: Optional package prefix, e.g. ``"_generated"``.
+        *parts: Module name segments to join with ``.``.
+
+    Returns:
+        A ``.``-joined import path, with *prefix* prepended when non-empty.
+
+    """
+    if prefix:
+        return ".".join([prefix, *parts])
+    return ".".join(parts)
+
+
 def resolve_db_session(
     db_key: str | None,
     databases: list[DatabaseConfig],
@@ -131,7 +122,7 @@ def resolve_db_session(
     configured, the default database is used when *db_key* is ``None``.
 
     Args:
-        db_key: The ``db_key`` value from a model or view config.
+        db_key: The ``db_key`` value from a resource config.
         databases: The project-level database list from ``KilnConfig``.
 
     Returns:
@@ -161,79 +152,3 @@ def resolve_db_session(
             raise ValueError(msg)
         db = matches[0]
     return (f"db.{db.key}_session", f"get_{db.key}_db")
-
-
-def sa_type(field_type: FieldType) -> str:
-    """Return the SQLAlchemy column type string for *field_type*."""
-    return SA_TYPES[field_type]
-
-
-def python_type(field_type: FieldType) -> str:
-    """Return the Python type annotation string for *field_type*."""
-    return PYTHON_TYPES[field_type]
-
-
-def pg_sql_type(field_type: FieldType) -> str:
-    """Return the PostgreSQL SQL type string for *field_type*."""
-    return PG_SQL_TYPES[field_type]
-
-
-def _to_pgcraft_fk_ref(foreign_key: str) -> str:
-    """Convert a FK reference string to pgcraft's two-part dimension format.
-
-    pgcraft's dimension registry uses ``"table.column"`` references.
-    Config values may be fully qualified (``"schema.table.column"``), in
-    which case the schema prefix is stripped so that pgcraft can resolve
-    the dimension to the correct underlying ``_raw`` table via the registry.
-
-    Args:
-        foreign_key: The ``foreign_key`` string from ``FieldConfig``.
-
-    Returns:
-        A two-part ``"dimension.column"`` string suitable for
-        ``PGCraftForeignKey``.
-
-    """
-    parts = foreign_key.split(".")
-    if len(parts) == 3:  # noqa: PLR2004
-        # schema.table.column → table.column (dimension ref)
-        return f"{parts[1]}.{parts[2]}"
-    return foreign_key
-
-
-def column_def(field: FieldConfig) -> str:
-    """Return the ``Column(...)`` constructor call string for *field*.
-
-    Produces a string suitable for direct inclusion in generated
-    SQLAlchemy model source code, e.g.::
-
-        Column(pg.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-
-    Args:
-        field: The field configuration to render.
-
-    Returns:
-        A ``Column(...)`` expression as a string.
-
-    """
-    args: list[str] = [SA_TYPES[field.type]]
-    if field.foreign_key:
-        fk_ref = _to_pgcraft_fk_ref(field.foreign_key)
-        args.append(f'PGCraftForeignKey("{fk_ref}")')
-    if field.primary_key:
-        args.append("primary_key=True")
-        if field.type == "uuid":
-            args.append("default=uuid.uuid4")
-    if field.unique:
-        args.append("unique=True")
-    if field.nullable:
-        args.append("nullable=True")
-    elif not field.primary_key:
-        args.append("nullable=False")
-    if field.auto_now_add:
-        args.append("server_default=func.now()")
-    if field.auto_now:
-        args.append("onupdate=func.now()")
-    if field.index:
-        args.append("index=True")
-    return f"Column({', '.join(args)})"

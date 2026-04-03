@@ -1,9 +1,11 @@
 """Pydantic models for kiln configuration."""
 
+from __future__ import annotations
+
 import warnings
 from typing import List, Literal  # noqa: UP035
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 # Pydantic v2 warns when a field name shadows a deprecated attribute on
 # BaseModel.  ``schema`` shadows the deprecated v1-compat ``BaseModel.schema()``
@@ -27,8 +29,6 @@ FieldType = Literal[
     "json",
 ]
 
-CrudOp = Literal["create", "read", "update", "delete", "list"]
-
 
 class AuthConfig(BaseModel):
     """JWT authentication configuration."""
@@ -50,59 +50,6 @@ class AuthConfig(BaseModel):
     """
 
 
-# SQLAlchemy / pgcraft attribute names that must not be used as column names.
-# Using these would shadow class-level attributes that the ORM relies on.
-_RESERVED_COLUMN_NAMES: frozenset[str] = frozenset(
-    {
-        "metadata",  # SQLAlchemy MetaData object on the base class
-        "table",  # pgcraft sets cls.table after pipeline runs
-        "ctx",  # pgcraft sets cls.ctx after pipeline runs
-        "query",  # SQLAlchemy legacy Session.query shim
-        "registry",  # pgcraft internal
-    }
-)
-
-
-class FieldConfig(BaseModel):
-    """A single field on a pgcraft model."""
-
-    name: str
-    type: FieldType
-    primary_key: bool = False
-    unique: bool = False
-    nullable: bool = False
-    foreign_key: str | None = None
-    exclude_from_api: bool = False
-    auto_now_add: bool = False
-    auto_now: bool = False
-    index: bool = False
-
-    @field_validator("name")
-    @classmethod
-    def name_not_reserved(cls, v: str) -> str:
-        """Reject field names that clash with SQLAlchemy/pgcraft internals."""
-        if v in _RESERVED_COLUMN_NAMES:
-            msg = (
-                f"Field name '{v}' is reserved by SQLAlchemy/pgcraft and "
-                f"cannot be used as a column attribute name. "
-                f"Choose a different name (e.g. '{v}_data' or 'extra_{v}')."
-            )
-            raise ValueError(msg)
-        return v
-
-
-class CrudConfig(BaseModel):
-    """CRUD operation settings for a model."""
-
-    create: bool = True
-    read: bool = True
-    update: bool = True
-    delete: bool = True
-    list: bool = True
-    paginated: bool = True
-    require_auth: List[CrudOp] = []  # noqa: UP006
-
-
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -117,76 +64,104 @@ class DatabaseConfig(BaseModel):
     default: bool = False
 
 
-class ModelConfig(BaseModel):
-    """A pgcraft declarative model definition."""
-
-    name: str
-    table: str
-    schema: str = "public"
-    pgcraft_type: Literal["simple", "append_only", "ledger", "eav"] = "simple"
-    pgcraft_plugins: list[str] = []
-    fields: list[FieldConfig]
-    crud: CrudConfig | None = None
-    db_key: str | None = None
-
-
-class ViewParam(BaseModel):
-    """An input parameter for a parameterized view or function."""
+class FieldSpec(BaseModel):
+    """A named, typed field — used in operation schemas and action params."""
 
     name: str
     type: FieldType
 
 
-class ViewColumn(BaseModel):
-    """An output column from a view or set-returning function."""
+class FieldsConfig(BaseModel):
+    """An explicit set of fields to expose for a single operation."""
 
-    name: str
-    type: FieldType
+    fields: list[FieldSpec]
 
 
-class ViewModel(BaseModel):
-    """A database view or function exposed as a FastAPI endpoint.
+class ActionConfig(BaseModel):
+    """An action endpoint that calls a Python callable with pk + params.
 
-    When ``parameters`` is empty the route calls ``query_fn()`` to
-    obtain a SQLAlchemy ``select()`` expression — the developer writes
-    and owns that function.  When ``parameters`` is non-empty the route
-    calls the named set-returning function via
-    ``func.<schema>.<name>(params).table_valued(cols)``.
+    The action is mounted at ``POST /{prefix}/{pk}/{name}``.
+
+    ``fn`` is a dotted import path to an async callable, e.g.
+    ``"myapp.actions.publish_article"``.  The callable receives the
+    primary-key value as its first positional argument and the ``db``
+    session as a keyword argument, followed by any declared ``params``.
+
+    The callable is responsible for all database interaction, including
+    any SQL function calls.  kiln generates only the FastAPI endpoint
+    that wires up the arguments and delegates to the callable.
     """
 
     name: str
-    model: str
-    description: str = ""
-    schema: str = "public"
-    parameters: list[ViewParam] = []
-    returns: list[ViewColumn]
+    fn: str
+    params: list[FieldSpec] = []
     require_auth: bool = True
-    http_method: Literal["GET", "POST"] = "GET"
-    query_fn: str | None = None
-    db_key: str | None = None
-    """Dotted import path to a zero-argument function returning a
-    SQLAlchemy ``select()`` expression, e.g.
-    ``"app.db.views.published_articles.get_query"``.
-    Required for non-parameterised views; unused for function views.
+
+
+CrudOp = Literal["get", "list", "create", "update", "delete"]
+
+
+class ResourceConfig(BaseModel):
+    """A resource: a consumer-defined Python model plus its route configuration.
+
+    ``model`` is a dotted import path to any SQLAlchemy selectable class
+    (table, mapped view, etc.) defined by the consumer, e.g.
+    ``"myapp.models.Article"``.
+
+    Each CRUD operation is either ``False`` (disabled), ``True`` (all
+    columns, schema built at import time via SQLAlchemy inspection), or a
+    :class:`FieldsConfig` with an explicit list of fields.
+
+    ``require_auth`` controls which operations require authentication:
+
+    * ``True`` — all enabled operations require auth.
+    * ``False`` — no operations require auth.
+    * A list of operation names, e.g. ``["create", "update", "delete"]``.
     """
+
+    model: str
+    """Dotted import path to the consumer's SQLAlchemy model class,
+    e.g. ``"myapp.models.Article"``."""
+    pk: str = "id"
+    """Primary-key attribute name on the model."""
+    pk_type: FieldType = "uuid"
+    """Type of the primary key, used to generate the correct path parameter."""
+    route_prefix: str | None = None
+    """URL prefix for this resource's router, e.g. ``"/articles"``.
+    Defaults to ``"/{model_lower}s"`` (simple lowercase + 's').
+    """
+    db_key: str | None = None
+    require_auth: List[CrudOp] | bool = True  # noqa: UP006
+    get: bool | FieldsConfig = False
+    list: bool | FieldsConfig = False
+    create: bool | FieldsConfig = False
+    update: bool | FieldsConfig = False
+    delete: bool = False
+    # List from typing — 'list' (the field above) shadows the built-in in
+    # Pydantic's annotation evaluation localns.
+    actions: List[ActionConfig] = []  # noqa: UP006
 
 
 class KilnConfig(BaseModel):
     """Top-level kiln configuration.
 
-    Can be used as either an app-level config (``module``, ``models``,
-    ``views``) or a project-level config (``apps``, ``auth``,
-    ``databases``).  When ``apps`` is non-empty kiln treats the file as
-    a project config and runs generation for every listed app.
+    Can be used as either an app-level config or a project-level config.
+    When ``apps`` is non-empty kiln treats the file as a project config
+    and runs generation for every listed app.
     """
 
     version: str = "1"
     module: str = "app"
+    package_prefix: str = "_generated"
+    """Directory prefix prepended to all generated file paths and Python
+    import paths.  Defaults to ``"_generated"`` so generated code lives
+    at ``_generated/{module}/`` and is imported as
+    ``_generated.{module}.routes.article``.  Set to ``""`` to disable.
+    """
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = []
-    models: list[ModelConfig] = []
-    views: list[ViewModel] = []
-    apps: list["AppRef"] = []
+    resources: list[ResourceConfig] = []
+    apps: list[AppRef] = []
 
 
 class AppRef(BaseModel):

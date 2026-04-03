@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
+from kiln.generators._helpers import split_dotted_class
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -12,13 +13,13 @@ if TYPE_CHECKING:
 
 
 class RouterGenerator:
-    """Produces ``api/__init__.py`` that mounts every generated router.
+    """Produces ``{module}/routes/__init__.py`` mounting every resource router.
 
-    The file imports a router from each CRUD route file and each view
-    route file, then combines them into a single ``router`` object
-    that the application's ``main.py`` can include::
+    The file imports a router from each generated resource route file and
+    combines them into a single ``router`` object that the application's
+    ``main.py`` can include::
 
-        from app.api import router
+        from app.routes import router
         app.include_router(router)
     """
 
@@ -28,14 +29,13 @@ class RouterGenerator:
         return "router"
 
     def can_generate(self, config: KilnConfig) -> bool:
-        """Return True when there are any routes to aggregate.
+        """Return True when there are any resources to aggregate.
 
         Args:
             config: The validated kiln configuration.
 
         """
-        has_crud = any(m.crud is not None for m in config.models)
-        return has_crud or bool(config.views)
+        return bool(config.resources)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
         """Generate the aggregating router file.
@@ -45,7 +45,7 @@ class RouterGenerator:
 
         Returns:
             A single :class:`~kiln.generators.base.GeneratedFile`
-            at ``api/__init__.py``.
+            at ``{module}/routes/__init__.py``.
 
         """
         return [
@@ -66,15 +66,16 @@ def _render_router(config: KilnConfig) -> str:
         Python source string.
 
     """
-    crud_models = [m for m in config.models if m.crud is not None]
+    routes = []
+    for resource in config.resources:
+        _, class_name = split_dotted_class(resource.model)
+        module_name = class_name.lower()
+        routes.append(
+            {"module_name": module_name, "alias": f"{module_name}_router"}
+        )
+
     tmpl = env.get_template("fastapi/router.py.j2")
     return tmpl.render(
         module=config.module,
-        crud_models=[
-            {"lower": m.name.lower(), "alias": f"{m.name.lower()}_router"}
-            for m in crud_models
-        ],
-        views=[
-            {"name": v.name, "alias": f"{v.name}_router"} for v in config.views
-        ],
+        routes=routes,
     )
