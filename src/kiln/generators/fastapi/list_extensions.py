@@ -106,9 +106,10 @@ def contribute_filters(
 ) -> None:
     """Mark the list as POST /search and add the filter modifier.
 
-    The ``{Model}SearchRequest`` schema is rendered later by
-    :func:`contribute_search_request` after all extensions
-    have deposited their contributions.
+    Generates per-model ``FilterCondition`` and
+    ``FilterExpression`` Pydantic models with typed field
+    names.  The ``{Model}SearchRequest`` schema is rendered
+    later by :func:`contribute_search_request`.
 
     Args:
         specs: Mutable dict of file specs.
@@ -117,6 +118,7 @@ def contribute_filters(
         list_fields: The fields from the list operation.
 
     """
+    schema = specs["schema"]
     route = specs["route"]
     ext = route.context["list_extensions"]
 
@@ -128,6 +130,18 @@ def contribute_filters(
     else:
         allowed = []
 
+    # Schema: render FilterCondition + FilterExpression
+    snippet = render_snippet(
+        "fastapi/schema_parts/filter_node.py.j2",
+        model_name=ctx.model.pascal,
+        allowed_fields=allowed,
+    )
+    schema.context["schema_classes"].append(snippet)
+    schema.exports.append(ctx.model.suffixed("FilterCondition"))
+    schema.exports.append(ctx.model.suffixed("FilterExpression"))
+    schema.imports.add_from("typing", "Any", "Literal")
+    schema.imports.add_from("pydantic", "ConfigDict", "Field")
+
     # Route: import apply_filters from utils
     utils_module = prefix_import(ctx.package_prefix, "utils")
     route.imports.add_from(utils_module, "apply_filters")
@@ -138,15 +152,10 @@ def contribute_filters(
 
     # Extension contributions
     ext["extra_params"].append(f"body: {ctx.model.suffixed('SearchRequest')},")
-    allowed_set = "{" + ", ".join(f'"{f}"' for f in allowed) + "}"
     ext["query_modifiers"].append(
         "if body.filter is not None:\n"
-        "        stmt = apply_filters(\n"
-        "            stmt,\n"
-        "            body.filter,\n"
-        f"            {ctx.model.pascal},\n"
-        f"            allowed_fields={allowed_set},\n"
-        "        )"
+        "        stmt = apply_filters("
+        f"stmt, body.filter, {ctx.model.pascal})"
     )
 
 
@@ -160,12 +169,12 @@ def contribute_ordering(
     ctx: SharedContext,
     config: OrderConfig,
 ) -> None:
-    """Deposit sort enum, params, and order_by modifier.
+    """Deposit sort enum, sort clause, and ordering modifier.
 
-    Generates a ``{Model}SortField`` string enum and adds
-    ``sort_by`` / ``sort_dir`` parameters.  When filters are
-    enabled these are fields on the search request body;
-    otherwise they are query parameters.
+    Generates ``{Model}SortField`` enum and
+    ``{Model}SortClause`` model.  When filters are enabled,
+    ordering is read from ``body.sort`` and applied via
+    :func:`apply_ordering`; otherwise it uses query parameters.
 
     Args:
         specs: Mutable dict of file specs.
@@ -192,18 +201,28 @@ def contribute_ordering(
     default_col = config.default or ctx.pk_name
 
     if has_search_body:
-        modifier_lines = [
-            "sort_col = (",
-            f"    getattr({ctx.model.pascal}, body.sort_by.value)",
-            "    if body.sort_by",
-            f"    else {ctx.model.pascal}.{default_col}",
-            ")",
-            'if body.sort_dir == "desc":',
-            "    stmt = stmt.order_by(sort_col.desc())",
-            "else:",
-            "    stmt = stmt.order_by(sort_col.asc())",
-        ]
+        # Schema: render SortClause model
+        clause_snippet = render_snippet(
+            "fastapi/schema_parts/sort_clause.py.j2",
+            model_name=ctx.model.pascal,
+        )
+        schema.context["schema_classes"].append(clause_snippet)
+        schema.exports.append(ctx.model.suffixed("SortClause"))
+        schema.imports.add_from("typing", "Literal")
+
+        # Route: import apply_ordering from utils
+        utils_module = prefix_import(ctx.package_prefix, "utils")
+        route.imports.add_from(utils_module, "apply_ordering")
+
+        ext["query_modifiers"].append(
+            "stmt = apply_ordering(\n"
+            f"        stmt, body.sort, {ctx.model.pascal},"
+            f' "{default_col}",'
+            f' "{config.default_dir}"\n'
+            "    )"
+        )
     else:
+        # Ordering via query parameters (single column)
         sort_field_cls = ctx.model.suffixed("SortField")
         route.imports.add_from("typing", "Literal")
         ext["extra_params"].append(f"sort_by: {sort_field_cls} | None = None,")
@@ -221,8 +240,7 @@ def contribute_ordering(
             "else:",
             "    stmt = stmt.order_by(sort_col.asc())",
         ]
-
-    ext["query_modifiers"].extend(modifier_lines)
+        ext["query_modifiers"].extend(modifier_lines)
 
 
 # -------------------------------------------------------------------
@@ -283,6 +301,10 @@ def _contribute_keyset(
 
     has_search_body = ext.get("http_method") == "post"
 
+    # Route: import apply_keyset_pagination from utils
+    utils_module = prefix_import(ctx.package_prefix, "utils")
+    route.imports.add_from(utils_module, "apply_keyset_pagination")
+
     if not has_search_body:
         route.imports.add_from("fastapi", "Query")
         ext["extra_params"].append("cursor: str | None = None,")
@@ -292,40 +314,28 @@ def _contribute_keyset(
             f")] = {config.default_page_size},"
         )
 
-    # Query modifiers
+    # Build cursor cast expression
     cursor_py_type = PYTHON_TYPES[config.cursor_type]
     cursor_field = config.cursor_field
     if config.cursor_type == "uuid":
         route.imports.add("uuid")
-        cast_expr = "uuid.UUID(cursor)"
+        cast_expr = "uuid.UUID(raw_cursor)"
     elif config.cursor_type in ("int", "float"):
-        cast_expr = f"{cursor_py_type}(cursor)"
+        cast_expr = f"{cursor_py_type}(raw_cursor)"
     else:
-        cast_expr = "cursor"
+        cast_expr = "raw_cursor"
 
-    cursor_var = "body.cursor" if has_search_body else "cursor"
-    page_size_var = "body.page_size" if has_search_body else "page_size"
-    page_size_clamp = (
-        f"page_size = min({page_size_var}, {config.max_page_size})"
-    )
+    raw_cursor = "body.cursor" if has_search_body else "cursor"
+    page_size_src = "body.page_size" if has_search_body else "page_size"
 
-    modifiers: list[str] = []
-    if has_search_body:
-        modifiers.append(f"cursor = {cursor_var}")
-    modifiers.extend(
-        [
-            "if cursor:",
-            "    stmt = stmt.where(",
-            f"        {ctx.model.pascal}.{cursor_field} > {cast_expr}",
-            "    )",
-            page_size_clamp,
-            "stmt = stmt.limit(page_size + 1)",
-        ]
-    )
-    ext["query_modifiers"].extend(modifiers)
-
-    # Result expression
+    # Result expression (pagination + execute + return)
     result_lines = [
+        f"raw_cursor = {raw_cursor}",
+        f"cursor_val = {cast_expr} if raw_cursor else None",
+        "stmt, page_size = apply_keyset_pagination(",
+        f'    stmt, {ctx.model.pascal}, cursor_val, "{cursor_field}",',
+        f"    {page_size_src}, {config.max_page_size},",
+        ")",
         "result = await db.execute(stmt)",
         "rows = list(result.scalars())",
         "has_more = len(rows) > page_size",
@@ -380,6 +390,10 @@ def _contribute_offset(
 
     has_search_body = ext.get("http_method") == "post"
 
+    # Route: import apply_offset_pagination from utils
+    utils_module = prefix_import(ctx.package_prefix, "utils")
+    route.imports.add_from(utils_module, "apply_offset_pagination")
+
     if not has_search_body:
         route.imports.add_from("fastapi", "Query")
         ext["extra_params"].append("offset: Annotated[int, Query(ge=0)] = 0,")
@@ -389,29 +403,15 @@ def _contribute_offset(
             f")] = {config.default_page_size},"
         )
 
-    # Query modifiers
-    route.imports.add_from("sqlalchemy", "func")
     offset_var = "body.offset" if has_search_body else "offset"
     limit_var = "body.limit" if has_search_body else "limit"
-    limit_clamp = f"limit = min({limit_var}, {config.max_page_size})"
 
-    # Result expression
-    result_lines: list[str] = []
-    if has_search_body:
-        result_lines.append(f"offset = {offset_var}")
-    result_lines.extend(
-        [
-            limit_clamp,
-            "count_result = await db.execute(",
-            "    stmt.with_only_columns(func.count())",
-            ")",
-            "total = count_result.scalar_one()",
-            "result = await db.execute(",
-            "    stmt.offset(offset).limit(limit)",
-            ")",
-            "rows = list(result.scalars())",
-        ]
-    )
+    # Result expression (pagination + return)
+    result_lines = [
+        "total, rows = await apply_offset_pagination(",
+        f"    db, stmt, {offset_var}, {limit_var}, {config.max_page_size},",
+        ")",
+    ]
     if ctx.has_resource_schema:
         result_lines.append(f"return {page_cls}(")
         result_lines.append(
@@ -469,6 +469,3 @@ def contribute_search_request(
     )
     schema.context["schema_classes"].append(snippet)
     schema.exports.append(ctx.model.suffixed("SearchRequest"))
-
-    if has_sort:
-        schema.imports.add_from("typing", "Literal")
