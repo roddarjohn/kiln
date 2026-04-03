@@ -166,16 +166,6 @@ def test_resource_generator_cannot_generate_empty():
 def test_resource_generator_output_paths(full_config):
     files = ResourceGenerator().generate(full_config)
     paths = {f.path for f in files}
-    assert "_generated/myapp/routes/user.py" in paths
-    assert "_generated/myapp/schemas/user.py" in paths
-
-
-def test_resource_generator_output_paths_no_prefix():
-    """package_prefix="" emits paths without any prefix directory."""
-    r = ResourceConfig(model="myapp.models.User", get=True)
-    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
-    files = ResourceGenerator().generate(cfg)
-    paths = {f.path for f in files}
     assert "myapp/routes/user.py" in paths
     assert "myapp/schemas/user.py" in paths
 
@@ -221,6 +211,7 @@ def test_resource_generator_route_imports_from_schema(full_config):
     files = ResourceGenerator().generate(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "from _generated.myapp.schemas.user import" in route.content
+    # import path uses package_prefix even though file path does not
 
 
 def test_resource_generator_serializer_functions(full_config):
@@ -403,7 +394,7 @@ def test_router_generator_can_generate(full_config):
 
 def test_router_generator_output_path(full_config):
     files = RouterGenerator().generate(full_config)
-    assert any(f.path == "_generated/myapp/routes/__init__.py" for f in files)
+    assert any(f.path == "myapp/routes/__init__.py" for f in files)
 
 
 def test_router_generator_valid_python(full_config):
@@ -444,16 +435,6 @@ def test_utils_generator_cannot_generate_empty():
 
 def test_utils_generator_output_path(full_config):
     (f,) = UtilsGenerator().generate(full_config)
-    assert f.path == "_generated/myapp/utils.py"
-
-
-def test_utils_generator_output_path_no_prefix():
-    cfg = KilnConfig(
-        module="myapp",
-        package_prefix="",
-        resources=[ResourceConfig(model="myapp.models.User", get=True)],
-    )
-    (f,) = UtilsGenerator().generate(cfg)
     assert f.path == "myapp/utils.py"
 
 
@@ -473,19 +454,20 @@ def test_resource_generator_uses_utils_for_get_with_schema():
         model="myapp.models.User",
         get=FieldsConfig(fields=[FieldSpec(name="id", type="uuid")]),
     )
-    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
+    cfg = KilnConfig(module="myapp", resources=[r])
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "get_object_from_query_or_404" in route.content
     assert (
-        "from myapp.utils import get_object_from_query_or_404" in route.content
+        "from _generated.myapp.utils import get_object_from_query_or_404"
+        in route.content
     )
 
 
 def test_resource_generator_no_utils_for_get_without_schema():
     """GET route with get=True (no schema) does NOT import utils."""
     r = ResourceConfig(model="myapp.models.User", get=True)
-    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
+    cfg = KilnConfig(module="myapp", resources=[r])
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "get_object_from_query_or_404" not in route.content
@@ -738,7 +720,7 @@ def test_registry_project_mode_generates_scaffold_and_apps():
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
     assert "db/primary_session.py" in paths
-    assert "_generated/blog/routes/article.py" in paths
+    assert "blog/routes/article.py" in paths
     assert "routes/__init__.py" in paths
 
 

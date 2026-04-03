@@ -10,7 +10,6 @@ from kiln.generators._env import env
 from kiln.generators._helpers import (
     PYTHON_TYPES,
     prefix_import,
-    prefix_path,
     resolve_db_session,
     split_dotted_class,
     type_imports,
@@ -219,7 +218,6 @@ class ResourceGenerator:
             file under ``{module}/routes/``.
 
         """
-        pkg = config.package_prefix
         app = config.module
         files: list[GeneratedFile] = []
         for resource in config.resources:
@@ -231,13 +229,13 @@ class ResourceGenerator:
 
             files.append(
                 GeneratedFile(
-                    path=prefix_path(pkg, app, "schemas", f"{model_lower}.py"),
+                    path=f"{app}/schemas/{model_lower}.py",
                     content=_render_schema(ctx),
                 )
             )
             files.append(
                 GeneratedFile(
-                    path=prefix_path(pkg, app, "routes", f"{model_lower}.py"),
+                    path=f"{app}/routes/{model_lower}.py",
                     content=_render_resource(ctx),
                 )
             )

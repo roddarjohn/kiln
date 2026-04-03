@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators._helpers import prefix_path
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -47,9 +46,7 @@ class UtilsGenerator:
         tmpl = env.get_template("fastapi/utils.py.j2")
         return [
             GeneratedFile(
-                path=prefix_path(
-                    config.package_prefix, config.module, "utils.py"
-                ),
+                path=f"{config.module}/utils.py",
                 content=tmpl.render(),
             )
         ]

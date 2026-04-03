@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -34,9 +34,17 @@ def generate(
         ),
     ],
     out: Annotated[
-        Path,
-        typer.Option("--out", "-o", help="Output root directory."),
-    ],
+        Path | None,
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Output root directory.  Defaults to the config's "
+                "``package_prefix`` value (e.g. ``_generated``) or "
+                "the current directory when prefix is empty."
+            ),
+        ),
+    ] = None,
     clean: Annotated[  # noqa: FBT002
         bool,
         typer.Option(
@@ -75,8 +83,12 @@ def generate(
         typer.echo(f"Error loading config: {exc}", err=True)
         raise typer.Exit(1) from exc
 
-    if clean and out.exists():
-        shutil.rmtree(out)
+    effective_out: Path = (
+        out if out is not None else Path(cfg.package_prefix or ".")
+    )
+
+    if clean and effective_out.exists() and effective_out != Path():
+        shutil.rmtree(effective_out)
 
     try:
         registry = GeneratorRegistry.default()
@@ -85,7 +97,7 @@ def generate(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
 
-    written = _write_files(files, out)
+    written = _write_files(files, effective_out)
     typer.echo(f"Generated {written} file(s).")
 
 
