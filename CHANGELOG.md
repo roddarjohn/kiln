@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.2.1...kiln-v0.3.0) (2026-04-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* separating models and routes ([#6](https://github.com/roddarjohn/kiln/issues/6))
+
+### Features
+
+* separating models and routes ([#6](https://github.com/roddarjohn/kiln/issues/6)) ([43e7590](https://github.com/roddarjohn/kiln/commit/43e7590f1c214c055be1f2df937460cca82da5a7))
+
 ## [0.2.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.2.0...kiln-v0.2.1) (2026-04-02)
 
 
