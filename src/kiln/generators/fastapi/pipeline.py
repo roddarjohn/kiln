@@ -4,43 +4,33 @@ Composes :class:`~kiln.generators.base.FileSpec` objects and runs
 :class:`~kiln.generators.fastapi.operations.Operation` classes
 against them to produce the final generated files.
 
-The pipeline is the main extension point for customising FastAPI
-code generation.  Pass a custom list of operations to
-:class:`ResourcePipeline` to add, remove, or replace CRUD
-behaviour::
+Operations are resolved from configuration via
+:class:`~kiln.generators.fastapi.operations.OperationRegistry`,
+which discovers operations from ``kiln.operations`` entry points.
 
-    from kiln.generators.fastapi.operations import (
-        default_operations,
-    )
-    from kiln.generators.fastapi.pipeline import ResourcePipeline
-
-    ops = default_operations()
-    ops.append(MyBulkCreateOperation())
-    pipeline = ResourcePipeline(operations=ops)
+The pipeline is completely generic — it manages a
+``dict[str, FileSpec]`` bag.  Operations create and populate
+specs by key; the pipeline auto-wires cross-file imports and
+renders.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from kiln.config.schema import FieldsConfig
-from kiln.generators._helpers import (
-    PYTHON_TYPES,
-    ImportCollector,
-    Name,
-    prefix_import,
-    resolve_db_session,
-)
-from kiln.generators.base import FileSpec, GeneratedFile
+from kiln.config.schema import OperationConfig
 from kiln.generators.fastapi.operations import (
     Operation,
-    SharedContext,
-    _field_dicts,
-    default_operations,
+    OperationRegistry,
+    SetupOperation,
+    build_shared_context,
 )
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from kiln.config.schema import KilnConfig, ResourceConfig
+    from kiln.generators.base import FileSpec, GeneratedFile
 
 
 class ResourcePipeline:
@@ -48,28 +38,23 @@ class ResourcePipeline:
 
     For each resource the pipeline:
 
-    1. Creates empty :class:`FileSpec` objects for the schema,
-       serializer, and route files.
-    2. Runs every enabled :class:`Operation` against the specs,
-       letting each append its imports, schema classes, and route
-       handlers.
-    3. Auto-wires cross-file imports (route imports from schema,
-       route imports from serializer).
-    4. Renders each spec to a :class:`GeneratedFile`.
+    1. Resolves operation configs from resource/config inheritance.
+    2. Validates all operations before any generation begins.
+    3. Runs every operation against a shared ``specs`` dict.
+    4. Auto-wires cross-file imports.
+    5. Renders each spec to a :class:`GeneratedFile`.
 
     Args:
-        operations: Ordered list of operations to run.  Defaults
-            to :func:`default_operations`.
+        registry: Operation registry for resolving operation
+            names to classes.  Defaults to entry-point discovery.
 
     """
 
     def __init__(  # noqa: D107
         self,
-        operations: list[Operation] | None = None,
+        registry: OperationRegistry | None = None,
     ) -> None:
-        self.operations = (
-            operations if operations is not None else default_operations()
-        )
+        self.registry = registry or OperationRegistry.default()
 
     def build(
         self,
@@ -83,185 +68,90 @@ class ResourcePipeline:
             config: The top-level kiln configuration.
 
         Returns:
-            List of :class:`GeneratedFile` objects (schema,
-            optional serializer, routes).
+            List of :class:`GeneratedFile` objects.
 
         """
-        model_module, model = Name.from_dotted(resource.model)
-        app = config.module
-        pkg = config.package_prefix
+        op_configs = _resolve_op_configs(resource, config)
+        ctx = build_shared_context(resource, config, op_configs)
+        specs: dict[str, FileSpec] = {}
 
-        session_module, get_db_fn = resolve_db_session(
-            resource.db_key, config.databases
-        )
-        route_prefix = resource.route_prefix or f"/{model.lower}s"
+        # Always run setup (internal, not user-configurable)
+        setup_config = OperationConfig(name="setup")
+        setup_op = SetupOperation()
+        setup_opts = setup_op.Options()
+        setup_op.contribute(specs, resource, ctx, setup_config, setup_opts)
 
-        has_resource_schema = _will_have_resource_schema(resource)
-        response_schema = (
-            model.suffixed("Resource") if has_resource_schema else None
-        )
+        # Pass 1: resolve and parse options (Pydantic validation)
+        resolved: list[tuple[Operation, OperationConfig, BaseModel]] = []
+        for oc in op_configs:
+            op = self.registry.resolve(oc.name, oc.options)
+            parsed = op.Options(**oc.options)
+            resolved.append((op, oc, parsed))
 
-        ctx = SharedContext(
-            model=model,
-            model_module=model_module,
-            pk_name=resource.pk,
-            pk_py_type=PYTHON_TYPES[resource.pk_type],
-            route_prefix=route_prefix,
-            has_auth=config.auth is not None,
-            get_db_fn=get_db_fn,
-            session_module=session_module,
-            has_resource_schema=has_resource_schema,
-            response_schema=response_schema,
-            package_prefix=pkg,
-        )
-
-        # Create file specs
-        schema_spec = _init_schema(model, app, pkg)
-        serializer_spec = _init_serializer(
-            model, model_module, app, pkg, resource
-        )
-        route_spec = _init_route(model, app, pkg, ctx)
-
-        # Run operations
-        for op in self.operations:
-            if op.enabled(resource):
-                op.contribute_schema(schema_spec, resource, ctx)
-                op.contribute_route(route_spec, resource, ctx)
+        # Pass 2: contribute
+        for op, oc, parsed in resolved:
+            op.contribute(specs, resource, ctx, oc, parsed)
 
         # Auto-wire cross-file imports
-        _wire_imports(
-            schema_spec,
-            serializer_spec,
-            route_spec,
-            has_resource_schema,
-        )
+        _wire_imports(specs)
 
-        # Render
-        files = [schema_spec.render()]
-        if has_resource_schema:
-            files.append(serializer_spec.render())
-        files.append(route_spec.render())
-        return files
+        # Render all specs in insertion order
+        return [spec.render() for spec in specs.values()]
 
 
-# -------------------------------------------------------------------
-# FileSpec initialisation (module-level for testability)
-# -------------------------------------------------------------------
-
-
-def _init_schema(model: Name, app: str, pkg: str) -> FileSpec:
-    """Create the schema FileSpec with base imports."""
-    spec = FileSpec(
-        path=f"{app}/schemas/{model.lower}.py",
-        template="fastapi/schema_outer.py.j2",
-        imports=ImportCollector(),
-        package_prefix=pkg,
-        context={
-            "model_name": model.pascal,
-            "schema_classes": [],
-        },
-    )
-    spec.imports.add_from("__future__", "annotations")
-    spec.imports.add_from("pydantic", "BaseModel")
-    return spec
-
-
-def _init_serializer(
-    model: Name,
-    model_module: str,
-    app: str,
-    pkg: str,
+def _resolve_op_configs(
     resource: ResourceConfig,
-) -> FileSpec:
-    """Create the serializer FileSpec with base imports."""
-    # Determine resource_fields from get or list config
-    resource_fields: list[dict[str, str]] = []
-    if isinstance(resource.get, FieldsConfig):
-        resource_fields = _field_dicts(resource.get.fields)
-    elif isinstance(resource.list, FieldsConfig):
-        resource_fields = _field_dicts(resource.list.fields)
+    config: KilnConfig,
+) -> list[OperationConfig]:
+    """Resolve operation configs with three-level inheritance.
 
-    spec = FileSpec(
-        path=f"{app}/serializers/{model.lower}.py",
-        template="fastapi/serializer_outer.py.j2",
-        imports=ImportCollector(),
-        exports=[f"to_{model.lower}_resource"],
-        package_prefix=pkg,
-        context={
-            "model_name": model.pascal,
-            "model_lower": model.lower,
-            "resource_fields": resource_fields,
-        },
+    Resource-level operations override app/config-level.  String
+    entries are normalised to :class:`OperationConfig`.
+
+    Args:
+        resource: The resource configuration.
+        config: The app/project-level configuration.
+
+    Returns:
+        List of normalised :class:`OperationConfig` objects.
+
+    """
+    raw = (
+        resource.operations
+        if resource.operations is not None
+        else config.operations or []
     )
-    spec.imports.add_from("__future__", "annotations")
-    spec.imports.add_from(model_module, model.pascal)
-    return spec
+    return [_normalize_entry(entry) for entry in raw]
 
 
-def _init_route(
-    model: Name,
-    app: str,
-    pkg: str,
-    ctx: SharedContext,
-) -> FileSpec:
-    """Create the route FileSpec with base imports."""
-    utils_module = prefix_import(pkg, "utils")
-    spec = FileSpec(
-        path=f"{app}/routes/{model.lower}.py",
-        template="fastapi/route.py.j2",
-        imports=ImportCollector(),
-        package_prefix=pkg,
-        context={
-            "model_name": model.pascal,
-            "model_lower": model.lower,
-            "route_prefix": ctx.route_prefix,
-            "route_handlers": [],
-            "utils_module": utils_module,
-        },
-    )
-    spec.imports.add_from("__future__", "annotations")
-
-    # PK type imports
-    if "uuid" in ctx.pk_py_type:
-        spec.imports.add("uuid")
-
-    spec.imports.add_from("typing", "Annotated")
-    spec.imports.add_from("fastapi", "APIRouter", "Depends", "status")
-    spec.imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
-
-    # Auth import
-    if ctx.has_auth:
-        spec.imports.add_from("auth.dependencies", "get_current_user")
-
-    spec.imports.add_from(ctx.session_module, ctx.get_db_fn)
-    return spec
+def _normalize_entry(
+    entry: str | OperationConfig,
+) -> OperationConfig:
+    """Normalise a string or OperationConfig to OperationConfig."""
+    if isinstance(entry, str):
+        return OperationConfig(name=entry)
+    return entry
 
 
-def _will_have_resource_schema(
-    resource: ResourceConfig,
-) -> bool:
-    """Check if get or list have explicit fields."""
-    return isinstance(resource.get, FieldsConfig) or isinstance(
-        resource.list, FieldsConfig
-    )
+def _wire_imports(specs: dict[str, FileSpec]) -> None:
+    """Wire cross-file imports between specs.
 
+    Each spec can import from specs that appear **before** it
+    in insertion order.  This avoids circular imports — the
+    first spec (typically ``"schema"``) never receives wired
+    imports.
 
-def _wire_imports(
-    schema_spec: FileSpec,
-    serializer_spec: FileSpec,
-    route_spec: FileSpec,
-    has_resource_schema: bool,  # noqa: FBT001
-) -> None:
-    """Wire cross-file imports between specs."""
-    # Route imports from schema
-    if schema_spec.exports:
-        route_spec.imports.add_from(schema_spec.module, *schema_spec.exports)
-
-    if has_resource_schema:
-        # Serializer imports from schema
-        resource_cls = serializer_spec.context["model_name"] + "Resource"
-        serializer_spec.imports.add_from(schema_spec.module, resource_cls)
-        # Route imports from serializer
-        route_spec.imports.add_from(
-            serializer_spec.module, *serializer_spec.exports
-        )
+    The ``"serializer"`` spec is special-cased: it only
+    imports the ``Resource`` class, not all schema exports.
+    """
+    spec_list = list(specs.items())
+    for i, (dst_key, dst_spec) in enumerate(spec_list):
+        for _src_key, src_spec in spec_list[:i]:
+            if not src_spec.exports:
+                continue
+            if dst_key == "serializer":
+                resource_cls = dst_spec.context["model_name"] + "Resource"
+                if resource_cls in src_spec.exports:
+                    dst_spec.imports.add_from(src_spec.module, resource_cls)
+            else:
+                dst_spec.imports.add_from(src_spec.module, *src_spec.exports)

@@ -1,47 +1,55 @@
 """Pluggable CRUD operations for the resource pipeline.
 
-Each operation class contributes imports, schema classes, and route
-handlers to :class:`~kiln.generators.base.FileSpec` objects.
-Extensions can add, replace, or remove operations to customize
-the generated output.
+Each operation class contributes to a ``dict[str, FileSpec]`` bag,
+adding imports, schema classes, route handlers, or entirely new
+files.  Extensions can add, replace, or remove operations to
+customize the generated output.
 
-Example — adding a custom operation::
+Operations are discovered via the ``kiln.operations`` entry-point
+group.  kiln registers its own built-in operations in
+``pyproject.toml``; third-party packages do the same::
 
-    from kiln.generators.fastapi.operations import (
-        Operation,
-        default_operations,
-    )
-    from kiln.generators.fastapi.pipeline import ResourcePipeline
+    # pyproject.toml
+    [project.entry-points."kiln.operations"]
+    bulk_create = "my_package.ops:BulkCreateOperation"
 
-    class BulkCreateOperation:
-        name = "bulk_create"
+Operations can also be referenced by dotted class path in the
+config, or via an explicit ``class`` key in operation options.
 
-        def enabled(self, resource):
-            return resource.create is not False
-
-        def contribute_schema(self, spec, resource, ctx):
-            ...
-
-        def contribute_route(self, spec, resource, ctx):
-            ...
-
-    pipeline = ResourcePipeline(
-        operations=[*default_operations(), BulkCreateOperation()]
-    )
+Each operation defines an ``Options`` inner class (a Pydantic
+model) that declares and validates its configuration.  The
+pipeline parses options via Pydantic before calling
+``contribute()``, so operations receive typed, validated data.
 """
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from kiln.config.schema import FieldsConfig
+from pydantic import BaseModel
+
+from kiln.config.schema import FieldSpec  # noqa: TC001
 from kiln.generators._env import render_snippet
-from kiln.generators._helpers import PYTHON_TYPES, ImportCollector, Name
+from kiln.generators._helpers import (
+    PYTHON_TYPES,
+    ImportCollector,
+    Name,
+    prefix_import,
+    resolve_db_session,
+)
+from kiln.generators.base import FileSpec as FileSpecType
 
 if TYPE_CHECKING:
-    from kiln.config.schema import ResourceConfig
-    from kiln.generators.base import FileSpec
+    from typing import Any
+
+    from kiln.config.schema import (
+        KilnConfig,
+        OperationConfig,
+        ResourceConfig,
+    )
 
 
 # -------------------------------------------------------------------
@@ -76,30 +84,85 @@ class SharedContext:
 # -------------------------------------------------------------------
 
 
-def _field_dicts(fields: list) -> list[dict[str, str]]:
-    """Convert FieldSpec list to template-ready dicts."""
+def _field_dicts(fields: list[FieldSpec]) -> list[dict[str, str]]:
+    """Convert :class:`FieldSpec` list to template-ready dicts."""
     return [{"name": f.name, "py_type": PYTHON_TYPES[f.type]} for f in fields]
 
 
-def _add_field_type_imports(imports: ImportCollector, fields: list) -> None:
+def _add_field_type_imports(
+    imports: ImportCollector,
+    fields: list[FieldSpec],
+) -> None:
     """Add type-specific imports for *fields* to *imports*."""
     for f in fields:
-        ft = f.type
-        if ft == "uuid":
+        if f.type == "uuid":
             imports.add("uuid")
-        elif ft == "datetime":
+        elif f.type == "datetime":
             imports.add_from("datetime", "datetime")
-        elif ft == "date":
+        elif f.type == "date":
             imports.add_from("datetime", "date")
-        elif ft == "json":
+        elif f.type == "json":
             imports.add_from("typing", "Any")
 
 
-def _op_requires_auth(resource: ResourceConfig, op_name: str) -> bool:
-    """Return whether *op_name* requires authentication."""
-    if isinstance(resource.require_auth, bool):
-        return resource.require_auth
-    return op_name in resource.require_auth
+def _op_requires_auth(
+    resource: ResourceConfig,
+    op_config: OperationConfig,
+) -> bool:
+    """Return whether this operation requires authentication."""
+    if op_config.require_auth is not None:
+        return op_config.require_auth
+    return resource.require_auth
+
+
+def _will_have_resource_schema(
+    op_configs: list[OperationConfig],
+) -> bool:
+    """Check if any get or list operation has explicit fields."""
+    return any(
+        oc.name in ("get", "list") and "fields" in oc.options
+        for oc in op_configs
+    )
+
+
+def build_shared_context(
+    resource: ResourceConfig,
+    config: KilnConfig,
+    op_configs: list[OperationConfig],
+) -> SharedContext:
+    """Build the :class:`SharedContext` for a resource.
+
+    Args:
+        resource: The resource configuration.
+        config: The top-level kiln configuration.
+        op_configs: The resolved list of operation configs.
+
+    Returns:
+        A populated :class:`SharedContext`.
+
+    """
+    model_module, model = Name.from_dotted(resource.model)
+    session_module, get_db_fn = resolve_db_session(
+        resource.db_key, config.databases
+    )
+    route_prefix = resource.route_prefix or f"/{model.lower}s"
+    has_resource_schema = _will_have_resource_schema(op_configs)
+    response_schema = (
+        model.suffixed("Resource") if has_resource_schema else None
+    )
+    return SharedContext(
+        model=model,
+        model_module=model_module,
+        pk_name=resource.pk,
+        pk_py_type=PYTHON_TYPES[resource.pk_type],
+        route_prefix=route_prefix,
+        has_auth=config.auth is not None,
+        get_db_fn=get_db_fn,
+        session_module=session_module,
+        has_resource_schema=has_resource_schema,
+        response_schema=response_schema,
+        package_prefix=config.package_prefix,
+    )
 
 
 # -------------------------------------------------------------------
@@ -107,41 +170,176 @@ def _op_requires_auth(resource: ResourceConfig, op_name: str) -> bool:
 # -------------------------------------------------------------------
 
 
+class EmptyOptions(BaseModel):
+    """Default options model for operations that take no config."""
+
+
 @runtime_checkable
 class Operation(Protocol):
     """Protocol for pluggable pipeline operations.
 
-    Each operation can contribute schema classes and route
-    handlers to the corresponding :class:`FileSpec` objects.
-    Implementations mutate the specs in place — appending to
-    ``spec.imports``, ``spec.exports``, and
-    ``spec.context["schema_classes"]`` or
-    ``spec.context["route_handlers"]``.
+    Each operation receives the full ``specs`` dict and can
+    create, read, or modify any :class:`FileSpec` by key.
+    Built-in keys are ``"schema"`` and ``"route"``; extensions
+    may add others (e.g. ``"test"``, ``"client"``).
+
+    Operations must define an ``Options`` inner class (a Pydantic
+    ``BaseModel``) that declares and validates configuration.
+    The pipeline parses ``op_config.options`` via this model and
+    passes the result to ``contribute()``.
+
+    Operations are discovered via the ``kiln.operations``
+    entry-point group and resolved by name or dotted class path.
     """
 
     name: str
+    Options: type[BaseModel]
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True if this operation applies to *resource*."""
-        ...
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
+        op_config: OperationConfig,
+        options: BaseModel,
     ) -> None:
-        """Add schema classes and imports to *spec*."""
+        """Add content to *specs* for this operation.
+
+        Args:
+            specs: Mutable dict of file specs.
+            resource: The resource configuration.
+            ctx: Shared context for this resource.
+            op_config: The operation's configuration entry
+                (for ``name`` and ``require_auth``).
+            options: Parsed ``Options`` model instance.
+
+        """
         ...
 
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Add route handlers and imports to *spec*."""
-        ...
+
+# -------------------------------------------------------------------
+# Operation registry
+# -------------------------------------------------------------------
+
+
+class OperationRegistry:
+    """Discovers and caches operation classes from entry points.
+
+    Mirrors :class:`~kiln.generators.registry.GeneratorRegistry`
+    but for individual pipeline operations.
+
+    Usage::
+
+        registry = OperationRegistry.default()
+        op = registry.resolve("get", {})
+
+    Third-party packages register operations via
+    ``pyproject.toml``::
+
+        [project.entry-points."kiln.operations"]
+        bulk_create = "my_package.ops:BulkCreateOperation"
+
+    """
+
+    def __init__(self) -> None:  # noqa: D107
+        self._registry: dict[str, type[Operation]] = {}
+
+    def discover(self) -> None:
+        """Load all operations from ``kiln.operations`` entry points."""
+        for ep in importlib.metadata.entry_points(
+            group="kiln.operations",
+        ):
+            self._registry[ep.name] = ep.load()
+
+    def register(self, name: str, cls: type[Operation]) -> None:
+        """Manually register an operation class.
+
+        Useful for tests that need to register operations without
+        entry points.
+
+        Args:
+            name: Short name for the operation.
+            cls: The operation class.
+
+        """
+        self._registry[name] = cls
+
+    def resolve(self, name: str, options: dict[str, Any]) -> Operation:
+        """Resolve an operation by name, entry point, or class path.
+
+        Resolution order:
+
+        1. Explicit ``class`` key in *options* — import and
+           instantiate the class.
+        2. Entry-point registry lookup by *name*.
+        3. If *name* is not registered but *options* contains
+           ``fn`` — use the ``"action"`` entry point.
+        4. Dotted class path fallback — if *name* contains a
+           dot, treat it as an importable class.
+
+        Args:
+            name: Operation name or dotted class path.
+            options: The operation's options dict.
+
+        Returns:
+            An instantiated :class:`Operation`.
+
+        Raises:
+            ValueError: When the operation cannot be resolved.
+
+        """
+        if "class" in options:
+            return _import_class(options["class"])()
+        if name in self._registry:
+            return self._registry[name]()
+        if "fn" in options and "action" in self._registry:
+            return self._registry["action"]()
+        if "." in name:
+            return _import_class(name)()
+        msg = (
+            f"Unknown operation '{name}'. Register it via a "
+            f"kiln.operations entry point or use a dotted class "
+            f"path."
+        )
+        raise ValueError(msg)
+
+    @classmethod
+    def default(cls) -> OperationRegistry:
+        """Return a registry pre-loaded from entry points.
+
+        Returns:
+            A ready-to-use :class:`OperationRegistry`.
+
+        """
+        registry = cls()
+        registry.discover()
+        return registry
+
+
+def _import_class(dotted_path: str) -> type[Operation]:
+    """Import a class from a dotted path.
+
+    Args:
+        dotted_path: E.g. ``"my_package.ops.BulkCreateOperation"``.
+
+    Returns:
+        The imported class.
+
+    """
+    module, cls_name = dotted_path.rsplit(".", 1)
+    mod = importlib.import_module(module)
+    return getattr(mod, cls_name)
+
+
+# -------------------------------------------------------------------
+# Common options models
+# -------------------------------------------------------------------
+
+
+class FieldsOptions(BaseModel):
+    """Options for operations that accept an optional field list."""
+
+    fields: list[FieldSpec] | None = None
 
 
 # -------------------------------------------------------------------
@@ -149,45 +347,89 @@ class Operation(Protocol):
 # -------------------------------------------------------------------
 
 
+class SetupOperation:
+    """Creates the base FileSpec objects for schema and route.
+
+    This operation runs first and initialises the ``"schema"``
+    and ``"route"`` specs that other operations contribute to.
+    When the resource has explicit fields on get or list, a
+    ``"serializer"`` spec is also created.
+    """
+
+    name = "setup"
+    Options = EmptyOptions
+
+    def contribute(
+        self,
+        specs: dict[str, FileSpecType],
+        resource: ResourceConfig,  # noqa: ARG002
+        ctx: SharedContext,
+        op_config: OperationConfig,  # noqa: ARG002
+        options: EmptyOptions,  # noqa: ARG002
+    ) -> None:
+        """Create base schema, route, and optional serializer."""
+        pkg = ctx.package_prefix
+
+        # Derive app from the file paths (model module parent)
+        parts = ctx.model_module.rsplit(".", 1)
+        app = parts[0] if len(parts) > 1 else ctx.model_module
+
+        # Schema spec
+        specs["schema"] = _make_schema_spec(ctx.model, app, pkg)
+
+        # Serializer spec (only when resource schema exists)
+        if ctx.has_resource_schema:
+            specs["serializer"] = _make_serializer_spec(
+                ctx.model,
+                ctx.model_module,
+                app,
+                pkg,
+            )
+
+        # Route spec
+        specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
+
+
 class GetOperation:
     """GET /{pk} — retrieve a single resource by primary key."""
 
     name = "get"
+    Options = FieldsOptions
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when get is not disabled."""
-        return resource.get is not False
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
+        op_config: OperationConfig,
+        options: FieldsOptions,
     ) -> None:
-        """Emit ``{Model}Resource`` schema when fields are explicit."""
-        if not isinstance(resource.get, FieldsConfig):
-            return
-        fields = _field_dicts(resource.get.fields)
-        snippet = render_snippet(
-            "fastapi/schema_parts/resource.py.j2",
-            model_name=ctx.model.pascal,
-            fields=fields,
-        )
-        spec.context["schema_classes"].append(snippet)
-        spec.exports.append(ctx.model.suffixed("Resource"))
-        _add_field_type_imports(spec.imports, resource.get.fields)
+        """Emit schema and route for GET /{pk}."""
+        schema = specs["schema"]
+        route = specs["route"]
 
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit the GET /{pk} handler."""
-        spec.imports.add_from("sqlalchemy", "select")
-        spec.imports.add_from(ctx.model_module, ctx.model.pascal)
-        spec.imports.add_from(
-            spec.context["utils_module"],
+        # Schema contribution
+        if options.fields:
+            field_dicts = _field_dicts(options.fields)
+            snippet = render_snippet(
+                "fastapi/schema_parts/resource.py.j2",
+                model_name=ctx.model.pascal,
+                fields=field_dicts,
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append(ctx.model.suffixed("Resource"))
+            _add_field_type_imports(schema.imports, options.fields)
+            # Populate serializer fields if present
+            if "serializer" in specs:
+                serializer = specs["serializer"]
+                if not serializer.context["resource_fields"]:
+                    serializer.context["resource_fields"] = field_dicts
+
+        # Route contribution
+        route.imports.add_from("sqlalchemy", "select")
+        route.imports.add_from(ctx.model_module, ctx.model.pascal)
+        route.imports.add_from(
+            route.context["utils_module"],
             "get_object_from_query_or_404",
         )
         handler = render_snippet(
@@ -198,101 +440,100 @@ class GetOperation:
             pk_py_type=ctx.pk_py_type,
             get_db_fn=ctx.get_db_fn,
             has_auth=ctx.has_auth,
-            requires_auth=_op_requires_auth(resource, "get"),
+            requires_auth=_op_requires_auth(resource, op_config),
             has_resource_schema=ctx.has_resource_schema,
         )
-        spec.context["route_handlers"].append(handler)
+        route.context["route_handlers"].append(handler)
 
 
 class ListOperation:
     """GET / — list all resources."""
 
     name = "list"
+    Options = FieldsOptions
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when list is not disabled."""
-        return resource.list is not False
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
+        op_config: OperationConfig,
+        options: FieldsOptions,
     ) -> None:
-        """Emit ``{Model}Resource`` if get didn't already."""
-        if not isinstance(resource.list, FieldsConfig):
-            return
-        if ctx.model.suffixed("Resource") in spec.exports:
-            return
-        fields = _field_dicts(resource.list.fields)
-        snippet = render_snippet(
-            "fastapi/schema_parts/resource.py.j2",
-            model_name=ctx.model.pascal,
-            fields=fields,
-        )
-        spec.context["schema_classes"].append(snippet)
-        spec.exports.append(ctx.model.suffixed("Resource"))
-        _add_field_type_imports(spec.imports, resource.list.fields)
+        """Emit schema and route for GET /."""
+        schema = specs["schema"]
+        route = specs["route"]
 
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit the GET / handler."""
-        spec.imports.add_from("sqlalchemy", "select")
-        spec.imports.add_from(ctx.model_module, ctx.model.pascal)
+        # Schema contribution (only if get didn't already)
+        if (
+            options.fields
+            and ctx.model.suffixed("Resource") not in schema.exports
+        ):
+            field_dicts = _field_dicts(options.fields)
+            snippet = render_snippet(
+                "fastapi/schema_parts/resource.py.j2",
+                model_name=ctx.model.pascal,
+                fields=field_dicts,
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append(ctx.model.suffixed("Resource"))
+            _add_field_type_imports(schema.imports, options.fields)
+            # Populate serializer fields if present
+            if "serializer" in specs:
+                serializer = specs["serializer"]
+                if not serializer.context["resource_fields"]:
+                    serializer.context["resource_fields"] = field_dicts
+
+        # Route contribution
+        route.imports.add_from("sqlalchemy", "select")
+        route.imports.add_from(ctx.model_module, ctx.model.pascal)
         handler = render_snippet(
             "fastapi/ops/list.py.j2",
             model_name=ctx.model.pascal,
             model_lower=ctx.model.lower,
             get_db_fn=ctx.get_db_fn,
             has_auth=ctx.has_auth,
-            requires_auth=_op_requires_auth(resource, "list"),
+            requires_auth=_op_requires_auth(resource, op_config),
             has_resource_schema=ctx.has_resource_schema,
         )
-        spec.context["route_handlers"].append(handler)
+        route.context["route_handlers"].append(handler)
 
 
 class CreateOperation:
     """POST / — create a new resource."""
 
     name = "create"
+    Options = FieldsOptions
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when create is not disabled."""
-        return resource.create is not False
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
+        op_config: OperationConfig,
+        options: FieldsOptions,
     ) -> None:
-        """Emit ``{Model}CreateRequest`` schema."""
-        if not isinstance(resource.create, FieldsConfig):
-            return
-        fields = _field_dicts(resource.create.fields)
-        snippet = render_snippet(
-            "fastapi/schema_parts/create.py.j2",
-            model_name=ctx.model.pascal,
-            route_prefix=ctx.route_prefix,
-            fields=fields,
-        )
-        spec.context["schema_classes"].append(snippet)
-        spec.exports.append(ctx.model.suffixed("CreateRequest"))
-        _add_field_type_imports(spec.imports, resource.create.fields)
+        """Emit schema and route for POST /."""
+        schema = specs["schema"]
+        route = specs["route"]
+        has_schema = bool(options.fields)
 
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit the POST / handler."""
-        spec.imports.add_from("sqlalchemy", "insert")
-        spec.imports.add_from(ctx.model_module, ctx.model.pascal)
+        # Schema contribution
+        if options.fields:
+            field_dicts = _field_dicts(options.fields)
+            snippet = render_snippet(
+                "fastapi/schema_parts/create.py.j2",
+                model_name=ctx.model.pascal,
+                route_prefix=ctx.route_prefix,
+                fields=field_dicts,
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append(ctx.model.suffixed("CreateRequest"))
+            _add_field_type_imports(schema.imports, options.fields)
+
+        # Route contribution
+        route.imports.add_from("sqlalchemy", "insert")
+        route.imports.add_from(ctx.model_module, ctx.model.pascal)
         handler = render_snippet(
             "fastapi/ops/create.py.j2",
             model_name=ctx.model.pascal,
@@ -300,53 +541,50 @@ class CreateOperation:
             pk_name=ctx.pk_name,
             get_db_fn=ctx.get_db_fn,
             has_auth=ctx.has_auth,
-            requires_auth=_op_requires_auth(resource, "create"),
-            has_schema=isinstance(resource.create, FieldsConfig),
+            requires_auth=_op_requires_auth(resource, op_config),
+            has_schema=has_schema,
             response_schema=ctx.response_schema,
         )
-        spec.context["route_handlers"].append(handler)
+        route.context["route_handlers"].append(handler)
 
 
 class UpdateOperation:
     """PATCH /{pk} — partially update a resource."""
 
     name = "update"
+    Options = FieldsOptions
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when update is not disabled."""
-        return resource.update is not False
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
+        op_config: OperationConfig,
+        options: FieldsOptions,
     ) -> None:
-        """Emit ``{Model}UpdateRequest`` schema."""
-        if not isinstance(resource.update, FieldsConfig):
-            return
-        fields = _field_dicts(resource.update.fields)
-        snippet = render_snippet(
-            "fastapi/schema_parts/update.py.j2",
-            model_name=ctx.model.pascal,
-            route_prefix=ctx.route_prefix,
-            fields=fields,
-        )
-        spec.context["schema_classes"].append(snippet)
-        spec.exports.append(ctx.model.suffixed("UpdateRequest"))
-        _add_field_type_imports(spec.imports, resource.update.fields)
+        """Emit schema and route for PATCH /{pk}."""
+        schema = specs["schema"]
+        route = specs["route"]
+        has_schema = bool(options.fields)
 
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit the PATCH /{pk} handler."""
-        spec.imports.add_from("sqlalchemy", "update")
-        spec.imports.add_from(ctx.model_module, ctx.model.pascal)
-        spec.imports.add_from(
-            spec.context["utils_module"],
+        # Schema contribution
+        if options.fields:
+            field_dicts = _field_dicts(options.fields)
+            snippet = render_snippet(
+                "fastapi/schema_parts/update.py.j2",
+                model_name=ctx.model.pascal,
+                route_prefix=ctx.route_prefix,
+                fields=field_dicts,
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append(ctx.model.suffixed("UpdateRequest"))
+            _add_field_type_imports(schema.imports, options.fields)
+
+        # Route contribution
+        route.imports.add_from("sqlalchemy", "update")
+        route.imports.add_from(ctx.model_module, ctx.model.pascal)
+        route.imports.add_from(
+            route.context["utils_module"],
             "assert_rowcount",
         )
         handler = render_snippet(
@@ -357,41 +595,33 @@ class UpdateOperation:
             pk_py_type=ctx.pk_py_type,
             get_db_fn=ctx.get_db_fn,
             has_auth=ctx.has_auth,
-            requires_auth=_op_requires_auth(resource, "update"),
-            has_schema=isinstance(resource.update, FieldsConfig),
+            requires_auth=_op_requires_auth(resource, op_config),
+            has_schema=has_schema,
             response_schema=ctx.response_schema,
         )
-        spec.context["route_handlers"].append(handler)
+        route.context["route_handlers"].append(handler)
 
 
 class DeleteOperation:
     """DELETE /{pk} — delete a resource."""
 
     name = "delete"
+    Options = EmptyOptions
 
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when delete is enabled."""
-        return resource.delete
-
-    def contribute_schema(
+    def contribute(
         self,
-        spec: FileSpec,
+        specs: dict[str, FileSpecType],
         resource: ResourceConfig,
         ctx: SharedContext,
-    ) -> None:
-        """No-op — delete has no schema."""
-
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
+        op_config: OperationConfig,
+        options: EmptyOptions,  # noqa: ARG002
     ) -> None:
         """Emit the DELETE /{pk} handler."""
-        spec.imports.add_from("sqlalchemy", "delete")
-        spec.imports.add_from(ctx.model_module, ctx.model.pascal)
-        spec.imports.add_from(
-            spec.context["utils_module"],
+        route = specs["route"]
+        route.imports.add_from("sqlalchemy", "delete")
+        route.imports.add_from(ctx.model_module, ctx.model.pascal)
+        route.imports.add_from(
+            route.context["utils_module"],
             "assert_rowcount",
         )
         handler = render_snippet(
@@ -402,102 +632,171 @@ class DeleteOperation:
             pk_py_type=ctx.pk_py_type,
             get_db_fn=ctx.get_db_fn,
             has_auth=ctx.has_auth,
-            requires_auth=_op_requires_auth(resource, "delete"),
+            requires_auth=_op_requires_auth(resource, op_config),
         )
-        spec.context["route_handlers"].append(handler)
+        route.context["route_handlers"].append(handler)
 
 
 class ActionOperation:
-    """POST /{pk}/{action_slug} — custom action endpoints."""
+    """POST /{pk}/{action_slug} — custom action endpoint.
 
-    name = "actions"
-
-    def enabled(self, resource: ResourceConfig) -> bool:
-        """Return True when the resource has actions."""
-        return bool(resource.actions)
-
-    def contribute_schema(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit per-action request classes and ActionResponse."""
-        for action in resource.actions:
-            action_name = Name(action.name)
-            if action.params:
-                fields = _field_dicts(action.params)
-                snippet = render_snippet(
-                    "fastapi/schema_parts/action_request.py.j2",
-                    request_class=action_name.suffixed("Request"),
-                    route_prefix=ctx.route_prefix,
-                    slug=action_name.slug,
-                    params=fields,
-                )
-                spec.context["schema_classes"].append(snippet)
-                spec.exports.append(action_name.suffixed("Request"))
-                _add_field_type_imports(spec.imports, action.params)
-
-        snippet = render_snippet(
-            "fastapi/schema_parts/action_response.py.j2",
-        )
-        spec.context["schema_classes"].append(snippet)
-        spec.exports.append("ActionResponse")
-
-    def contribute_route(
-        self,
-        spec: FileSpec,
-        resource: ResourceConfig,
-        ctx: SharedContext,
-    ) -> None:
-        """Emit one handler per action with grouped imports."""
-        for action in resource.actions:
-            action_name = Name(action.name)
-            fn_module, fn_name = Name.from_dotted(action.fn)
-            spec.imports.add_from(fn_module, fn_name.raw)
-
-            action_ctx = {
-                "name": action_name.raw,
-                "fn_name": fn_name.raw,
-                "slug": action_name.slug,
-                "handler_name": f"{action_name.raw}_action",
-                "request_class": action_name.suffixed("Request"),
-                "params": _field_dicts(action.params),
-                "requires_auth": action.require_auth,
-            }
-            handler = render_snippet(
-                "fastapi/ops/action.py.j2",
-                action=action_ctx,
-                model_name=ctx.model.pascal,
-                pk_name=ctx.pk_name,
-                pk_py_type=ctx.pk_py_type,
-                get_db_fn=ctx.get_db_fn,
-                has_auth=ctx.has_auth,
-            )
-            spec.context["route_handlers"].append(handler)
-
-
-def default_operations() -> list[Operation]:
-    """Return the default list of built-in CRUD operations.
-
-    Extensions can append to or modify this list::
-
-        from kiln.generators.fastapi.operations import (
-            default_operations,
-        )
-
-        ops = default_operations()
-        ops.append(MyCustomOperation())
-
-    Returns:
-        Ordered list of operation instances.
-
+    Each action is a separate operation entry in the config.
+    The operation's name is the action slug; the ``fn`` option
+    provides the dotted import path to the async callable.
     """
-    return [
-        GetOperation(),
-        ListOperation(),
-        CreateOperation(),
-        UpdateOperation(),
-        DeleteOperation(),
-        ActionOperation(),
-    ]
+
+    name = "action"
+
+    class Options(BaseModel):
+        """Options for action operations."""
+
+        fn: str
+        params: list[FieldSpec] = []
+
+    def contribute(
+        self,
+        specs: dict[str, FileSpecType],
+        resource: ResourceConfig,
+        ctx: SharedContext,
+        op_config: OperationConfig,
+        options: Options,
+    ) -> None:
+        """Emit action schema and route handler."""
+        schema = specs["schema"]
+        route = specs["route"]
+        action_name = Name(op_config.name)
+
+        # Schema contribution
+        if options.params:
+            field_dicts = _field_dicts(options.params)
+            snippet = render_snippet(
+                "fastapi/schema_parts/action_request.py.j2",
+                request_class=action_name.suffixed("Request"),
+                route_prefix=ctx.route_prefix,
+                slug=action_name.slug,
+                params=field_dicts,
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append(
+                action_name.suffixed("Request"),
+            )
+            _add_field_type_imports(schema.imports, options.params)
+
+        # ActionResponse (guard against duplicates)
+        if "ActionResponse" not in schema.exports:
+            snippet = render_snippet(
+                "fastapi/schema_parts/action_response.py.j2",
+            )
+            schema.context["schema_classes"].append(snippet)
+            schema.exports.append("ActionResponse")
+
+        # Route contribution
+        fn_module, fn_name = Name.from_dotted(options.fn)
+        route.imports.add_from(fn_module, fn_name.raw)
+
+        action_ctx = {
+            "name": action_name.raw,
+            "fn_name": fn_name.raw,
+            "slug": action_name.slug,
+            "handler_name": f"{action_name.raw}_action",
+            "request_class": action_name.suffixed("Request"),
+            "params": (_field_dicts(options.params) if options.params else []),
+            "requires_auth": _op_requires_auth(resource, op_config),
+        }
+        handler = render_snippet(
+            "fastapi/ops/action.py.j2",
+            action=action_ctx,
+            model_name=ctx.model.pascal,
+            pk_name=ctx.pk_name,
+            pk_py_type=ctx.pk_py_type,
+            get_db_fn=ctx.get_db_fn,
+            has_auth=ctx.has_auth,
+        )
+        route.context["route_handlers"].append(handler)
+
+
+# -------------------------------------------------------------------
+# FileSpec factories (used by SetupOperation)
+# -------------------------------------------------------------------
+
+
+def _make_schema_spec(model: Name, app: str, pkg: str) -> FileSpecType:
+    """Create the schema FileSpec with base imports."""
+    spec = FileSpecType(
+        path=f"{app}/schemas/{model.lower}.py",
+        template="fastapi/schema_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix=pkg,
+        context={
+            "model_name": model.pascal,
+            "schema_classes": [],
+        },
+    )
+    spec.imports.add_from("__future__", "annotations")
+    spec.imports.add_from("pydantic", "BaseModel")
+    return spec
+
+
+def _make_serializer_spec(
+    model: Name,
+    model_module: str,
+    app: str,
+    pkg: str,
+) -> FileSpecType:
+    """Create the serializer FileSpec with base imports.
+
+    Resource fields are populated later by GetOperation or
+    ListOperation when they have explicit fields.
+    """
+    spec = FileSpecType(
+        path=f"{app}/serializers/{model.lower}.py",
+        template="fastapi/serializer_outer.py.j2",
+        imports=ImportCollector(),
+        exports=[f"to_{model.lower}_resource"],
+        package_prefix=pkg,
+        context={
+            "model_name": model.pascal,
+            "model_lower": model.lower,
+            "resource_fields": [],
+        },
+    )
+    spec.imports.add_from("__future__", "annotations")
+    spec.imports.add_from(model_module, model.pascal)
+    return spec
+
+
+def _make_route_spec(
+    model: Name,
+    app: str,
+    pkg: str,
+    ctx: SharedContext,
+) -> FileSpecType:
+    """Create the route FileSpec with base imports."""
+    utils_module = prefix_import(pkg, "utils")
+    spec = FileSpecType(
+        path=f"{app}/routes/{model.lower}.py",
+        template="fastapi/route.py.j2",
+        imports=ImportCollector(),
+        package_prefix=pkg,
+        context={
+            "model_name": model.pascal,
+            "model_lower": model.lower,
+            "route_prefix": ctx.route_prefix,
+            "route_handlers": [],
+            "utils_module": utils_module,
+        },
+    )
+    spec.imports.add_from("__future__", "annotations")
+
+    if "uuid" in ctx.pk_py_type:
+        spec.imports.add("uuid")
+
+    spec.imports.add_from("typing", "Annotated")
+    spec.imports.add_from("fastapi", "APIRouter", "Depends", "status")
+    spec.imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
+
+    if ctx.has_auth:
+        spec.imports.add_from("auth.dependencies", "get_current_user")
+
+    spec.imports.add_from(ctx.session_module, ctx.get_db_fn)
+    return spec

@@ -24,34 +24,38 @@ local resource = import "kiln/resources/presets.libsonnet";
       model: "blog.models.Article",
       pk: "id",
       pk_type: "uuid",
-      require_auth: ["create", "update", "delete"],
+      require_auth: false,
 
-      get: true,
-      list: {
-        fields: [
-          { name: "id", type: "uuid" },
-          { name: "title", type: "str" },
-          { name: "slug", type: "str" },
-          { name: "published", type: "bool" },
-        ],
-      },
-      create: {
-        fields: [
-          { name: "title", type: "str" },
-          { name: "slug", type: "str" },
-          { name: "body", type: "str" },
-          { name: "author_id", type: "uuid" },
-        ],
-      },
-      update: {
-        fields: [
-          { name: "title", type: "str" },
-          { name: "body", type: "str" },
-        ],
-      },
-      delete: true,
-
-      actions: [
+      operations: [
+        "get",
+        {
+          name: "list",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "title", type: "str" },
+            { name: "slug", type: "str" },
+            { name: "published", type: "bool" },
+          ],
+        },
+        {
+          name: "create",
+          require_auth: true,
+          fields: [
+            { name: "title", type: "str" },
+            { name: "slug", type: "str" },
+            { name: "body", type: "str" },
+            { name: "author_id", type: "uuid" },
+          ],
+        },
+        {
+          name: "update",
+          require_auth: true,
+          fields: [
+            { name: "title", type: "str" },
+            { name: "body", type: "str" },
+          ],
+        },
+        { name: "delete", require_auth: true },
         resource.action(
           name="publish",
           fn="blog.actions.publish_article",

@@ -21,36 +21,40 @@ local resource = import "kiln/resources/presets.libsonnet";
       pk: "id",
       pk_type: "uuid",
       route_prefix: "/products",
-      require_auth: ["create", "update", "delete"],
+      require_auth: false,
 
-      get: true,
-      list: {
-        fields: [
-          { name: "id", type: "uuid" },
-          { name: "sku", type: "str" },
-          { name: "name", type: "str" },
-          { name: "unit_price", type: "float" },
-          { name: "active", type: "bool" },
-        ],
-      },
-      create: {
-        fields: [
-          { name: "sku", type: "str" },
-          { name: "name", type: "str" },
-          { name: "unit_price", type: "float" },
-          { name: "active", type: "bool" },
-        ],
-      },
-      update: {
-        fields: [
-          { name: "name", type: "str" },
-          { name: "unit_price", type: "float" },
-          { name: "active", type: "bool" },
-        ],
-      },
-      delete: true,
-
-      actions: [
+      operations: [
+        "get",
+        {
+          name: "list",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "sku", type: "str" },
+            { name: "name", type: "str" },
+            { name: "unit_price", type: "float" },
+            { name: "active", type: "bool" },
+          ],
+        },
+        {
+          name: "create",
+          require_auth: true,
+          fields: [
+            { name: "sku", type: "str" },
+            { name: "name", type: "str" },
+            { name: "unit_price", type: "float" },
+            { name: "active", type: "bool" },
+          ],
+        },
+        {
+          name: "update",
+          require_auth: true,
+          fields: [
+            { name: "name", type: "str" },
+            { name: "unit_price", type: "float" },
+            { name: "active", type: "bool" },
+          ],
+        },
+        { name: "delete", require_auth: true },
         // Parameterised action, requires auth
         resource.action(
           name="stock_levels_by_date",
@@ -76,21 +80,20 @@ local resource = import "kiln/resources/presets.libsonnet";
       model: "inventory.models.StockMovement",
       pk: "id",
       pk_type: "uuid",
-      require_auth: ["create"],
+      require_auth: false,
 
-      get: false,
-      list: false,
-      create: {
-        fields: [
-          { name: "product_id", type: "uuid" },
-          { name: "quantity", type: "int" },
-          { name: "reason", type: "str" },
-          { name: "movement_date", type: "date" },
-        ],
-      },
-      update: false,
-      delete: false,
-      actions: [],
+      operations: [
+        {
+          name: "create",
+          require_auth: true,
+          fields: [
+            { name: "product_id", type: "uuid" },
+            { name: "quantity", type: "int" },
+            { name: "reason", type: "str" },
+            { name: "movement_date", type: "date" },
+          ],
+        },
+      ],
     },
 
     // EventLog: write_only (create/update/delete, no reads) backed by
@@ -105,21 +108,24 @@ local resource = import "kiln/resources/presets.libsonnet";
       require_auth=true,
     ) + {
       route_prefix: "/event-logs",
-      create: {
-        fields: [
-          { name: "event_type", type: "str" },
-          { name: "actor_email", type: "email" },
-          { name: "payload", type: "json" },
-          { name: "occurred_at", type: "datetime" },
-        ],
-      },
-      update: {
-        fields: [
-          { name: "event_type", type: "str" },
-          { name: "payload", type: "json" },
-        ],
-      },
-      actions: [
+      operations: [
+        {
+          name: "create",
+          fields: [
+            { name: "event_type", type: "str" },
+            { name: "actor_email", type: "email" },
+            { name: "payload", type: "json" },
+            { name: "occurred_at", type: "datetime" },
+          ],
+        },
+        {
+          name: "update",
+          fields: [
+            { name: "event_type", type: "str" },
+            { name: "payload", type: "json" },
+          ],
+        },
+        "delete",
         resource.action(
           name="ping",
           fn="inventory.actions.ping_event_log",

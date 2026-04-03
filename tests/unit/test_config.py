@@ -6,11 +6,10 @@ from pathlib import Path
 import pytest
 
 from kiln.config.schema import (
-    ActionConfig,
     AuthConfig,
-    FieldsConfig,
     FieldSpec,
     KilnConfig,
+    OperationConfig,
     ResourceConfig,
 )
 
@@ -25,6 +24,7 @@ def test_kiln_config_defaults():
     assert cfg.module == "app"
     assert cfg.auth is None
     assert cfg.resources == []
+    assert cfg.operations is None
 
 
 def test_auth_config_defaults():
@@ -42,44 +42,41 @@ def test_resource_config_defaults():
     assert r.route_prefix is None
     assert r.db_key is None
     assert r.require_auth is True
-    assert r.get is False
-    assert r.list is False
-    assert r.create is False
-    assert r.update is False
-    assert r.delete is False
-    assert r.actions == []
+    assert r.operations is None
 
 
-def test_resource_config_get_true():
-    r = ResourceConfig(model="myapp.models.User", get=True)
-    assert r.get is True
-
-
-def test_resource_config_get_fields_config():
+def test_resource_config_with_string_operations():
     r = ResourceConfig(
         model="myapp.models.User",
-        get={
-            "fields": [
-                {"name": "id", "type": "uuid"},
-                {"name": "email", "type": "email"},
-            ]
-        },
+        operations=["get", "list"],
     )
-    assert isinstance(r.get, FieldsConfig)
-    assert len(r.get.fields) == 2
-    assert r.get.fields[0].name == "id"
-    assert r.get.fields[1].type == "email"
+    assert len(r.operations) == 2
+    assert r.operations[0] == "get"
+    assert r.operations[1] == "list"
 
 
-def test_resource_config_require_auth_list():
+def test_resource_config_with_operation_configs():
     r = ResourceConfig(
         model="myapp.models.User",
-        require_auth=["create", "update", "delete"],
+        operations=[
+            "get",
+            {
+                "name": "list",
+                "fields": [
+                    {"name": "id", "type": "uuid"},
+                    {"name": "email", "type": "email"},
+                ],
+            },
+        ],
     )
-    assert r.require_auth == ["create", "update", "delete"]
+    assert len(r.operations) == 2
+    assert r.operations[0] == "get"
+    assert isinstance(r.operations[1], OperationConfig)
+    assert r.operations[1].name == "list"
+    assert r.operations[1].options["fields"][0]["name"] == "id"
 
 
-def test_resource_config_require_auth_false():
+def test_resource_config_require_auth_bool():
     r = ResourceConfig(model="myapp.models.User", require_auth=False)
     assert r.require_auth is False
 
@@ -94,40 +91,60 @@ def test_resource_config_int_pk():
     assert r.pk_type == "int"
 
 
-def test_action_config():
-    a = ActionConfig(
+def test_operation_config_basic():
+    oc = OperationConfig(name="get")
+    assert oc.name == "get"
+    assert oc.require_auth is None
+    assert oc.options == {}
+
+
+def test_operation_config_with_extras():
+    oc = OperationConfig(
+        name="create",
+        fields=[{"name": "title", "type": "str"}],
+    )
+    assert oc.name == "create"
+    assert oc.options == {"fields": [{"name": "title", "type": "str"}]}
+
+
+def test_operation_config_require_auth_override():
+    oc = OperationConfig(name="delete", require_auth=True)
+    assert oc.require_auth is True
+    assert oc.options == {}
+
+
+def test_operation_config_action():
+    oc = OperationConfig(
         name="publish",
-        fn="myapp.actions.publish",
-        params=[FieldSpec(name="notify", type="bool")],
+        fn="blog.actions.publish",
+        params=[{"name": "notify", "type": "bool"}],
     )
-    assert a.fn == "myapp.actions.publish"
-    assert a.params[0].name == "notify"
-    assert a.require_auth is True
+    assert oc.options["fn"] == "blog.actions.publish"
+    assert oc.options["params"][0]["name"] == "notify"
 
 
-def test_resource_config_with_actions():
-    r = ResourceConfig(
-        model="blog.models.Article",
-        actions=[
-            ActionConfig(
-                name="publish",
-                fn="blog.actions.publish_article",
-            ),
-        ],
+def test_operation_config_options_excludes_known_fields():
+    oc = OperationConfig(
+        name="create",
+        require_auth=True,
+        fields=[{"name": "x", "type": "str"}],
     )
-    assert len(r.actions) == 1
-    assert r.actions[0].name == "publish"
+    assert "name" not in oc.options
+    assert "require_auth" not in oc.options
+    assert "fields" in oc.options
+
+
+def test_kiln_config_with_operations():
+    cfg = KilnConfig(
+        operations=["get", "list", "create"],
+    )
+    assert len(cfg.operations) == 3
 
 
 def test_field_spec():
     f = FieldSpec(name="title", type="str")
     assert f.name == "title"
     assert f.type == "str"
-
-
-def test_fields_config():
-    fc = FieldsConfig(fields=[FieldSpec(name="id", type="uuid")])
-    assert len(fc.fields) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +159,7 @@ def test_load_json(tmp_path: Path):
         "resources": [
             {
                 "model": "myapp.models.Widget",
-                "get": True,
-                "list": True,
+                "operations": ["get", "list"],
             }
         ],
     }
@@ -192,7 +208,7 @@ def test_load_validation_error(tmp_path: Path):
     from kiln.config.loader import load
 
     # model is required in ResourceConfig
-    data = {"resources": [{"get": True}]}
+    data = {"resources": [{"operations": ["get"]}]}
     cfg_file = tmp_path / "bad.json"
     cfg_file.write_text(json.dumps(data))
     from pydantic import ValidationError
@@ -219,5 +235,4 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     assert cfg.module == "blog"
     assert len(cfg.resources) == 1
     assert cfg.resources[0].model == "blog.models.Article"
-    assert cfg.resources[0].get is True
-    assert cfg.resources[0].create is False
+    assert cfg.resources[0].operations == ["get", "list"]

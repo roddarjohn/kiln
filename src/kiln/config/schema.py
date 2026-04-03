@@ -2,20 +2,9 @@
 
 from __future__ import annotations
 
-import warnings
-from typing import List, Literal  # noqa: UP035
+from typing import Any, Literal
 
-from pydantic import BaseModel
-
-# Pydantic v2 warns when a field name shadows a deprecated attribute on
-# BaseModel.  ``schema`` shadows the deprecated v1-compat ``BaseModel.schema()``
-# classmethod, which is intentional — ``schema`` is a valid database concept.
-warnings.filterwarnings(
-    "ignore",
-    message='Field name "schema" .* shadows',
-    category=UserWarning,
-    module=__name__,
-)
+from pydantic import BaseModel, ConfigDict
 
 FieldType = Literal[
     "uuid",
@@ -71,52 +60,61 @@ class FieldSpec(BaseModel):
     type: FieldType
 
 
-class FieldsConfig(BaseModel):
-    """An explicit set of fields to expose for a single operation."""
+class OperationConfig(BaseModel):
+    """Configuration for a single pipeline operation.
 
-    fields: list[FieldSpec]
+    Known fields (``name``, ``require_auth``) are parsed normally.
+    All other keys are collected into :attr:`options` via Pydantic's
+    ``extra="allow"`` setting and passed to the operation's
+    :meth:`~kiln.generators.fastapi.operations.Operation.validate`
+    and
+    :meth:`~kiln.generators.fastapi.operations.Operation.contribute`
+    methods.
 
+    Examples::
 
-class ActionConfig(BaseModel):
-    """An action endpoint that calls a Python callable with pk + params.
+        # String shorthand (expanded to OperationConfig by the pipeline)
+        "get"
 
-    The action is mounted at ``POST /{prefix}/{pk}/{name}``.
+        # With explicit fields
+        {"name": "create", "fields": [...]}
 
-    ``fn`` is a dotted import path to an async callable, e.g.
-    ``"myapp.actions.publish_article"``.  The callable receives the
-    primary-key value as its first positional argument and the ``db``
-    session as a keyword argument, followed by any declared ``params``.
+        # Action operation
+        {"name": "publish", "fn": "blog.actions.publish", "params": [...]}
 
-    The callable is responsible for all database interaction, including
-    any SQL function calls.  kiln generates only the FastAPI endpoint
-    that wires up the arguments and delegates to the callable.
+        # Custom third-party operation
+        {"name": "bulk_create", "class": "my_pkg.ops.BulkOp", "max": 100}
     """
 
+    model_config = ConfigDict(extra="allow")
+
     name: str
-    fn: str
-    params: list[FieldSpec] = []
-    require_auth: bool = True
+    require_auth: bool | None = None
+    """Per-operation auth override.  When ``None``, inherits the
+    resource-level ``require_auth`` default."""
 
-
-CrudOp = Literal["get", "list", "create", "update", "delete"]
+    @property
+    def options(self) -> dict[str, Any]:
+        """Operation-specific options (all extra fields)."""
+        return self.model_extra or {}
 
 
 class ResourceConfig(BaseModel):
-    """A resource: a consumer-defined Python model plus its route configuration.
+    """A resource: a consumer-defined Python model plus its operations.
 
     ``model`` is a dotted import path to any SQLAlchemy selectable class
     (table, mapped view, etc.) defined by the consumer, e.g.
     ``"myapp.models.Article"``.
 
-    Each CRUD operation is either ``False`` (disabled), ``True`` (all
-    columns, schema built at import time via SQLAlchemy inspection), or a
-    :class:`FieldsConfig` with an explicit list of fields.
+    ``operations`` lists the operations to run for this resource.
+    Each entry is either a string (built-in operation name resolved
+    via entry points) or an :class:`OperationConfig` object.  When
+    ``None``, operations are inherited from the parent
+    :class:`KilnConfig`.
 
-    ``require_auth`` controls which operations require authentication:
-
-    * ``True`` — all enabled operations require auth.
-    * ``False`` — no operations require auth.
-    * A list of operation names, e.g. ``["create", "update", "delete"]``.
+    ``require_auth`` sets the default authentication requirement for
+    all operations.  Individual operations can override this via
+    their own ``require_auth`` field.
     """
 
     model: str
@@ -125,21 +123,20 @@ class ResourceConfig(BaseModel):
     pk: str = "id"
     """Primary-key attribute name on the model."""
     pk_type: FieldType = "uuid"
-    """Type of the primary key, used to generate the correct path parameter."""
+    """Type of the primary key, used to generate the correct path
+    parameter."""
     route_prefix: str | None = None
     """URL prefix for this resource's router, e.g. ``"/articles"``.
     Defaults to ``"/{model_lower}s"`` (simple lowercase + 's').
     """
     db_key: str | None = None
-    require_auth: List[CrudOp] | bool = True  # noqa: UP006
-    get: bool | FieldsConfig = False
-    list: bool | FieldsConfig = False
-    create: bool | FieldsConfig = False
-    update: bool | FieldsConfig = False
-    delete: bool = False
-    # List from typing — 'list' (the field above) shadows the built-in in
-    # Pydantic's annotation evaluation localns.
-    actions: List[ActionConfig] = []  # noqa: UP006
+    require_auth: bool = True
+    """Default authentication requirement for all operations on this
+    resource.  Individual operations can override via their own
+    ``require_auth`` field."""
+    operations: list[str | OperationConfig] | None = None
+    """Ordered list of operations to run.  ``None`` inherits from
+    the parent :class:`KilnConfig`."""
 
 
 class KilnConfig(BaseModel):
@@ -160,6 +157,9 @@ class KilnConfig(BaseModel):
     """
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = []
+    operations: list[str | OperationConfig] | None = None
+    """Default operations for all resources in this config.  Resources
+    can override with their own ``operations`` list."""
     resources: list[ResourceConfig] = []
     apps: list[AppRef] = []
 
