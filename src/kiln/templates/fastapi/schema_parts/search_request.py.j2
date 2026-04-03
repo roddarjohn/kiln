@@ -1,0 +1,16 @@
+
+
+class {{ model_name }}SearchRequest(BaseModel):
+    """Search request body for {{ model_name }} lists."""
+
+    filter: {{ model_name }}FilterCondition | {{ model_name }}FilterExpression | None = None
+{% if sort_fields %}
+    sort: list[{{ model_name }}SortClause] | None = None
+{% endif %}
+{% if pagination_mode == "keyset" %}
+    cursor: str | None = None
+    page_size: int = {{ default_page_size }}
+{% elif pagination_mode == "offset" %}
+    offset: int = 0
+    limit: int = {{ default_page_size }}
+{% endif %}

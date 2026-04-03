@@ -71,3 +71,5 @@ See [LICENSE](LICENSE) for details.
 - filtering / pagination
 
 - spin up sample kiln app
+
+- autogenerate tests

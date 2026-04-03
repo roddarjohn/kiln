@@ -1,0 +1,7 @@
+
+class {{ model_name }}SortField(str, Enum):
+    """Allowed sort fields for {{ model_name }} lists."""
+
+{% for field in sort_fields %}
+    {{ field.name }} = "{{ field.value }}"
+{% endfor %}

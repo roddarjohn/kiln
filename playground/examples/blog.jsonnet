@@ -36,6 +36,24 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "slug", type: "str" },
             { name: "published", type: "bool" },
           ],
+          // Filtering: search by title and published status
+          filters: {
+            fields: ["title", "published"],
+          },
+          // Ordering: sort by title
+          ordering: {
+            fields: [
+              { name: "title", type: "str" },
+            ],
+            default: "title",
+            default_dir: "asc",
+          },
+          // Offset pagination (alternative to keyset)
+          pagination: {
+            mode: "offset",
+            default_page_size: 20,
+            max_page_size: 50,
+          },
         },
         {
           name: "create",

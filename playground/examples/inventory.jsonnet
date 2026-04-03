@@ -34,6 +34,27 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
+          // Filtering: search by sku/name/unit_price/active
+          filters: {
+            fields: ["sku", "name", "unit_price", "active"],
+          },
+          // Ordering: sort by name or unit_price
+          ordering: {
+            fields: [
+              { name: "name", type: "str" },
+              { name: "unit_price", type: "float" },
+            ],
+            default: "name",
+            default_dir: "asc",
+          },
+          // Keyset pagination on the primary key
+          pagination: {
+            mode: "keyset",
+            cursor_field: "id",
+            cursor_type: "uuid",
+            default_page_size: 25,
+            max_page_size: 100,
+          },
         },
         {
           name: "create",

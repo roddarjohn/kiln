@@ -1,0 +1,7 @@
+
+
+class {{ model_name }}SortClause(BaseModel):
+    """A single sort clause for {{ model_name }} lists."""
+
+    field: {{ model_name }}SortField
+    dir: Literal["asc", "desc"] = "asc"

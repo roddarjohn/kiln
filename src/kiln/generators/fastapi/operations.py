@@ -41,6 +41,15 @@ from kiln.generators._helpers import (
     resolve_db_session,
 )
 from kiln.generators.base import FileSpec as FileSpecType
+from kiln.generators.fastapi.list_extensions import (
+    FilterConfig,
+    OrderConfig,
+    PaginateConfig,
+    contribute_filters,
+    contribute_ordering,
+    contribute_pagination,
+    contribute_search_request,
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -389,6 +398,15 @@ class SetupOperation:
         # Route spec
         specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
 
+        # Extension points for list operation plugins
+        specs["route"].context["list_extensions"] = {
+            "extra_params": [],
+            "query_modifiers": [],
+            "response_model": None,
+            "return_type": None,
+            "result_expression": None,
+        }
+
 
 class GetOperation:
     """GET /{pk} — retrieve a single resource by primary key."""
@@ -446,11 +464,56 @@ class GetOperation:
         route.context["route_handlers"].append(handler)
 
 
+def _list_response_types(
+    ext: dict,
+    ctx: SharedContext,
+) -> tuple[str, str]:
+    """Resolve response_model and return_type for the list handler.
+
+    When a pagination extension sets overrides they take
+    precedence; otherwise the default list types are used.
+
+    Args:
+        ext: The ``list_extensions`` context dict.
+        ctx: Shared context for this resource.
+
+    Returns:
+        ``(response_model, return_type)`` tuple.
+
+    """
+    response_model = ext.get("response_model")
+    return_type = ext.get("return_type")
+    if not response_model:
+        if ctx.has_resource_schema:
+            response_model = f"list[{ctx.model.pascal}Resource]"
+        else:
+            response_model = "list"
+    if not return_type:
+        if ctx.has_resource_schema:
+            return_type = f"list[{ctx.model.pascal}Resource]"
+        else:
+            return_type = "object"
+    return response_model, return_type
+
+
 class ListOperation:
-    """GET / — list all resources."""
+    """GET / — list all resources.
+
+    Supports optional filtering, ordering, and pagination via
+    sub-configuration keys.  When present, these delegate to
+    helper functions in
+    :mod:`kiln.generators.fastapi.list_extensions`.
+    """
 
     name = "list"
-    Options = FieldsOptions
+
+    class Options(BaseModel):
+        """Options for the list operation."""
+
+        fields: list[FieldSpec] | None = None
+        filters: FilterConfig | None = None
+        ordering: OrderConfig | None = None
+        pagination: PaginateConfig | None = None
 
     def contribute(
         self,
@@ -458,11 +521,10 @@ class ListOperation:
         resource: ResourceConfig,
         ctx: SharedContext,
         op_config: OperationConfig,
-        options: FieldsOptions,
+        options: Options,
     ) -> None:
         """Emit schema and route for GET /."""
         schema = specs["schema"]
-        route = specs["route"]
 
         # Schema contribution (only if get didn't already)
         if (
@@ -484,9 +546,44 @@ class ListOperation:
                 if not serializer.context["resource_fields"]:
                     serializer.context["resource_fields"] = field_dicts
 
+        # Delegate to extension helpers (before rendering)
+        if options.filters:
+            contribute_filters(
+                specs,
+                ctx,
+                options.filters,
+                options.fields,
+            )
+        if options.ordering:
+            contribute_ordering(specs, ctx, options.ordering)
+        if options.pagination:
+            contribute_pagination(specs, ctx, options.pagination)
+
+        # Render SearchRequest schema after all extensions
+        if options.filters:
+            contribute_search_request(
+                specs,
+                ctx,
+                options.ordering,
+                options.pagination,
+            )
+
         # Route contribution
+        self._contribute_route(specs, resource, ctx, op_config)
+
+    def _contribute_route(
+        self,
+        specs: dict[str, FileSpecType],
+        resource: ResourceConfig,
+        ctx: SharedContext,
+        op_config: OperationConfig,
+    ) -> None:
+        """Render the list route handler."""
+        route = specs["route"]
         route.imports.add_from("sqlalchemy", "select")
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
+        ext = route.context.get("list_extensions", {})
+        response_model, return_type = _list_response_types(ext, ctx)
         handler = render_snippet(
             "fastapi/ops/list.py.j2",
             model_name=ctx.model.pascal,
@@ -495,6 +592,13 @@ class ListOperation:
             has_auth=ctx.has_auth,
             requires_auth=_op_requires_auth(resource, op_config),
             has_resource_schema=ctx.has_resource_schema,
+            response_model=response_model,
+            return_type=return_type,
+            http_method=ext.get("http_method", "get"),
+            route_path=ext.get("route_path", "/"),
+            extra_params=ext.get("extra_params", []),
+            query_modifiers=ext.get("query_modifiers", []),
+            result_expression=ext.get("result_expression"),
         )
         route.context["route_handlers"].append(handler)
 
