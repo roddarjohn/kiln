@@ -596,6 +596,18 @@ def test_name_pascal_already_pascal():
     assert Name("Article").pascal == "Article"
 
 
+def test_name_pascal_preserves_multi_word_pascal():
+    from kiln.generators._helpers import Name
+
+    assert Name("StockMovement").pascal == "StockMovement"
+
+
+def test_name_pascal_single_lowercase():
+    from kiln.generators._helpers import Name
+
+    assert Name("publish").pascal == "Publish"
+
+
 def test_name_lower():
     from kiln.generators._helpers import Name
 

@@ -59,7 +59,15 @@ class Name:
 
     @property
     def pascal(self) -> str:
-        """PascalCase form of the name."""
+        """PascalCase form of the name.
+
+        If the raw string contains no underscores and already
+        starts with an uppercase letter it is returned as-is
+        (assumed to already be PascalCase, e.g. ``"StockMovement"``
+        from a dotted import path).
+        """
+        if "_" not in self.raw and self.raw[:1].isupper():
+            return self.raw
         return "".join(part.capitalize() for part in self.raw.split("_"))
 
     @property
@@ -155,14 +163,24 @@ class ImportCollector:
     def lines(self) -> list[str]:
         """Return the collected import statements as strings.
 
+        ``from __future__`` imports are always emitted first
+        (required by Python), then bare imports, then remaining
+        from-imports.  Within each group insertion order is
+        preserved.
+
         Returns:
-            List of import lines (no trailing newlines), bare
-            imports first, then from-imports, each in insertion
-            order.
+            List of import lines (no trailing newlines).
 
         """
-        result = [f"import {m}" for m in self._bare]
+        result: list[str] = []
+        # __future__ must come first
+        if "__future__" in self._from:
+            names = self._from["__future__"]
+            result.append(f"from __future__ import {', '.join(names)}")
+        result.extend(f"import {m}" for m in self._bare)
         for mod, names in self._from.items():
+            if mod == "__future__":
+                continue
             result.append(f"from {mod} import {', '.join(names)}")
         return result
 
