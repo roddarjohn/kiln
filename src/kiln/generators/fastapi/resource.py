@@ -1,7 +1,8 @@
-"""Generator that produces FastAPI route files for resources."""
+"""Generator that produces FastAPI schema and route files for resources."""
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from kiln.config.schema import FieldsConfig
@@ -60,16 +61,21 @@ def _op_ctx(
     require_auth: Sequence[str] | bool,  # noqa: FBT001
     model_name: str,
 ) -> dict:
-    """Build the template context dict for a single CRUD operation."""
-    if isinstance(op_value, FieldsConfig):
-        all_fields = False
+    """Build the template context dict for a single CRUD operation.
+
+    When *op_value* is a :class:`~kiln.config.schema.FieldsConfig`, the op
+    has an explicit schema (``has_schema=True``) and exposes the field list
+    for code generation.  When it is the boolean ``True``, the endpoint is
+    enabled but no schema is generated (``has_schema=False``).
+    """
+    has_schema = isinstance(op_value, FieldsConfig)
+    if has_schema:
         fields: list[FieldSpec] = op_value.fields
     else:
-        all_fields = True
         fields = []
     return {
         "enabled": True,
-        "all_fields": all_fields,
+        "has_schema": has_schema,
         "fields": _field_dicts(fields),
         "sa_columns": _sa_columns(fields, model_name),
         "requires_auth": _op_requires_auth(require_auth, op_name),
@@ -79,11 +85,77 @@ def _op_ctx(
 def _disabled_op() -> dict:
     return {
         "enabled": False,
-        "all_fields": False,
+        "has_schema": False,
         "fields": [],
         "sa_columns": [],
         "requires_auth": False,
     }
+
+
+def _build_op_ctx(
+    resource: ResourceConfig,
+    op_name: str,
+    require_auth: Sequence[str] | bool,  # noqa: FBT001
+    model_name: str,
+) -> dict:
+    """Return the op context for *op_name*, dispatching to disabled/enabled."""
+    op_value = getattr(resource, op_name)
+    if op_value is False:
+        return _disabled_op()
+    return _op_ctx(op_value, op_name, require_auth, model_name)
+
+
+def _collect_schema_types(
+    resource: ResourceConfig, ops: dict[str, dict]
+) -> list[str]:
+    """Collect field type strings needed for schema file imports.
+
+    Args:
+        resource: The resource configuration (for field access and actions).
+        ops: Mapping of op name → op context dict (get/list/create/update).
+
+    Returns:
+        List of :data:`FieldType` strings for explicit fields and action params.
+
+    """
+    types: list[str] = []
+    for op_name, op_ctx in ops.items():
+        if op_ctx["enabled"] and op_ctx["has_schema"]:
+            op_value = getattr(resource, op_name)
+            if isinstance(op_value, FieldsConfig):
+                types.extend(f.type for f in op_value.fields)
+    for action in resource.actions:
+        types.extend(p.type for p in action.params)
+    return types
+
+
+def _collect_schema_names(
+    model_name: str, ops: dict[str, dict], action_ctxs: list[dict]
+) -> list[str]:
+    """Collect names exported from the schema module for route imports.
+
+    Args:
+        model_name: PascalCase model class name.
+        ops: Mapping of op name → op context dict (get/list/create/update).
+        action_ctxs: Rendered action context dicts.
+
+    Returns:
+        List of class name strings to import from the schema module.
+
+    """
+    names: list[str] = []
+    if ops["get"]["enabled"] and ops["get"]["has_schema"]:
+        names.append(f"{model_name}GetResponse")
+    if ops["list"]["enabled"] and ops["list"]["has_schema"]:
+        names.append(f"{model_name}ListResponse")
+    if ops["create"]["enabled"] and ops["create"]["has_schema"]:
+        names.append(f"{model_name}CreateRequest")
+    if ops["update"]["enabled"] and ops["update"]["has_schema"]:
+        names.append(f"{model_name}UpdateRequest")
+    names.extend(a["request_class"] for a in action_ctxs if a["params"])
+    if action_ctxs:
+        names.append("ActionResponse")
+    return names
 
 
 def _action_ctx(action: ActionConfig) -> dict:
@@ -102,15 +174,16 @@ def _action_ctx(action: ActionConfig) -> dict:
 
 
 class ResourceGenerator:
-    """Produces one FastAPI route file per resource in config.
+    """Produces one schema file and one route file per resource in config.
 
-    Each file contains:
+    For each resource two files are emitted:
 
-    * Pydantic request/response schemas (static for explicit field lists,
-      dynamically built via SQLAlchemy inspection for ``True`` ops).
-    * Async route handlers for each enabled CRUD operation.
-    * Action endpoints that delegate to Python callables or Postgres
-      functions.
+    * ``{module}/schemas/{model}.py`` — explicit Pydantic request/response
+      schemas with named fields.
+    * ``{module}/routes/{model}.py`` — async FastAPI route handlers using
+      raw SQLAlchemy Core statements (``select``, ``insert``, ``update``,
+      ``delete``).  Routes import schemas from the schema module and return
+      schema instances via generated serializer functions.
 
     Generated files are always overwritten on re-generation.
     """
@@ -130,14 +203,15 @@ class ResourceGenerator:
         return bool(config.resources)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Generate one route file per resource.
+        """Generate one schema file and one route file per resource.
 
         Args:
             config: The validated kiln configuration.
 
         Returns:
-            One :class:`~kiln.generators.base.GeneratedFile` per resource,
-            written to ``{module}/routes/{model_lower}.py``.
+            Two :class:`~kiln.generators.base.GeneratedFile` instances per
+            resource — a schema file under ``{module}/schemas/`` and a route
+            file under ``{module}/routes/``.
 
         """
         app = config.module
@@ -146,12 +220,19 @@ class ResourceGenerator:
             session_module, get_db_fn = resolve_db_session(
                 resource.db_key, config.databases
             )
+            ctx = _build_ctx(resource, config, session_module, get_db_fn)
+            model_lower = ctx["model_lower"]
+
             files.append(
                 GeneratedFile(
-                    path=f"{app}/routes/{_model_lower(resource)}.py",
-                    content=_render_resource(
-                        resource, config, session_module, get_db_fn
-                    ),
+                    path=f"{app}/schemas/{model_lower}.py",
+                    content=_render_schema(ctx),
+                )
+            )
+            files.append(
+                GeneratedFile(
+                    path=f"{app}/routes/{model_lower}.py",
+                    content=_render_resource(ctx),
                 )
             )
         return files
@@ -168,112 +249,203 @@ def _model_lower(resource: ResourceConfig) -> str:
     return class_name.lower()
 
 
-def _render_resource(
+def _sqlalchemy_imports(
+    op_get: dict,
+    op_list: dict,
+    op_create: dict,
+    op_update: dict,
+    op_delete: dict,
+) -> list[str]:
+    """Return the SQLAlchemy statement names needed in the route file."""
+    ops = []
+    if op_get["enabled"] or op_list["enabled"]:
+        ops.append("select")
+    if op_create["enabled"]:
+        ops.append("insert")
+    if op_update["enabled"]:
+        ops.append("update")
+    if op_delete["enabled"]:
+        ops.append("delete")
+    return ops
+
+
+def _action_imports(action_ctxs: list[dict]) -> list[str]:
+    """Return top-level import lines for all action callables.
+
+    Groups callables by module so that multiple actions from the same module
+    produce a single ``from module import fn1, fn2`` line.
+
+    Args:
+        action_ctxs: Rendered action context dicts (from :func:`_action_ctx`).
+
+    Returns:
+        List of ``from module import name[, name…]`` strings.
+
+    """
+    by_module: dict[str, list[str]] = defaultdict(list)
+    for a in action_ctxs:
+        by_module[a["fn_module"]].append(a["fn_name"])
+    return [
+        f"from {mod} import {', '.join(fns)}" for mod, fns in by_module.items()
+    ]
+
+
+def _serializer_ctxs(
+    model_name: str, model_lower: str, op_get: dict, op_list: dict
+) -> list[dict]:
+    """Build context dicts for the route file's serializer functions.
+
+    A serializer is a small helper that explicitly constructs a schema
+    instance from an ORM object or SQLAlchemy ``Row``.
+
+    Args:
+        model_name: PascalCase model class name.
+        model_lower: Lowercase model name used in function names.
+        op_get: Rendered get op context.
+        op_list: Rendered list op context.
+
+    Returns:
+        List of dicts consumed by the serializer section of the route template.
+
+    """
+    serializers = []
+    if op_get["enabled"] and op_get["has_schema"]:
+        serializers.append(
+            {
+                "name": f"_to_{model_lower}_get",
+                "schema_class": f"{model_name}GetResponse",
+                "fields": op_get["fields"],
+            }
+        )
+    if op_list["enabled"] and op_list["has_schema"]:
+        serializers.append(
+            {
+                "name": f"_to_{model_lower}_list",
+                "schema_class": f"{model_name}ListResponse",
+                "fields": op_list["fields"],
+            }
+        )
+    return serializers
+
+
+def _build_ctx(
     resource: ResourceConfig,
     config: KilnConfig,
     session_module: str,
     get_db_fn: str,
-) -> str:
-    """Render the full route file for *resource*.
+) -> dict:
+    """Build the shared template context for both schema and route files.
 
     Args:
         resource: The resource configuration.
-        config: The top-level kiln configuration (for auth presence).
-        session_module: Dotted module for the DB session, e.g.
-            ``"db.session"``.
-        get_db_fn: Name of the session dependency, e.g. ``"get_db"``.
+        config: The top-level kiln configuration.
+        session_module: Dotted module for the DB session.
+        get_db_fn: Name of the session dependency function.
 
     Returns:
-        Python source string.
+        Dict of template variables consumed by both ``schema.py.j2`` and
+        ``resource.py.j2``.
 
     """
     model_module, model_name = split_dotted_class(resource.model)
     model_lower = model_name.lower()
+    app = config.module
 
-    # Determine the URL prefix.
     route_prefix = resource.route_prefix or f"/{model_lower}s"
-
-    # Build per-op context. Use prefixed names (op_get, op_list, …) to
-    # avoid passing 'get' or 'list' as Jinja2 variable names — those
-    # clash with Python dict methods during attribute lookup in templates.
     require_auth = resource.require_auth
 
-    def _build_op(op_name: str) -> dict:
-        op_value = getattr(resource, op_name)
-        if op_value is False:
-            return _disabled_op()
-        return _op_ctx(op_value, op_name, require_auth, model_name)
-
-    op_get = _build_op("get")
-    op_list = _build_op("list")
-    op_create = _build_op("create")
-    op_update = _build_op("update")
+    op_get = _build_op_ctx(resource, "get", require_auth, model_name)
+    op_list = _build_op_ctx(resource, "list", require_auth, model_name)
+    op_create = _build_op_ctx(resource, "create", require_auth, model_name)
+    op_update = _build_op_ctx(resource, "update", require_auth, model_name)
     op_delete = {
         "enabled": resource.delete,
+        "has_schema": False,
         "requires_auth": _op_requires_auth(require_auth, "delete"),
-        "all_fields": False,
         "fields": [],
         "sa_columns": [],
     }
 
-    # Actions.
     action_ctxs = [_action_ctx(a) for a in resource.actions]
+    has_actions = bool(action_ctxs)
 
-    # Response schema used for create/update — prefer the get schema.
+    read_write_ops = {
+        "get": op_get,
+        "list": op_list,
+        "create": op_create,
+        "update": op_update,
+    }
+    schema_types = _collect_schema_types(resource, read_write_ops)
+    schema_names = _collect_schema_names(
+        model_name, read_write_ops, action_ctxs
+    )
+
+    pk_types: list[str] = [resource.pk_type]
+
+    serializers = _serializer_ctxs(model_name, model_lower, op_get, op_list)
+    sa_ops = _sqlalchemy_imports(
+        op_get, op_list, op_create, op_update, op_delete
+    )
+    act_imports = _action_imports(action_ctxs)
+
+    # Response schema for create/update: reuse the get schema when available.
     response_schema = (
-        f"{model_name}GetResponse" if op_get["enabled"] else "object"
+        f"{model_name}GetResponse"
+        if op_get["enabled"] and op_get["has_schema"]
+        else None
     )
 
-    # Decide whether to emit _build_schema helper.
-    needs_build_schema = (op_get["enabled"] and op_get["all_fields"]) or (
-        op_list["enabled"] and op_list["all_fields"]
-    )
+    return {
+        "model_name": model_name,
+        "model_module": model_module,
+        "model_lower": model_lower,
+        "route_prefix": route_prefix,
+        "has_auth": config.auth is not None,
+        "session_module": session_module,
+        "get_db_fn": get_db_fn,
+        "pk_name": resource.pk,
+        "pk_py_type": PYTHON_TYPES[resource.pk_type],
+        "schema_imports": type_imports(schema_types),
+        "pk_imports": type_imports(pk_types),
+        "op_get": op_get,
+        "op_list": op_list,
+        "op_create": op_create,
+        "op_update": op_update,
+        "op_delete": op_delete,
+        "actions": action_ctxs,
+        "has_actions": has_actions,
+        "response_schema": response_schema,
+        "schema_module": f"{app}.schemas.{model_lower}",
+        "schema_names": schema_names,
+        "serializers": serializers,
+        "sqlalchemy_imports": sa_ops,
+        "action_imports": act_imports,
+    }
 
-    # Decide whether to emit `from sqlalchemy import select`.
-    needs_select = op_get["enabled"] or op_list["enabled"]
 
-    # Whether to emit _get_or_404 helper.
-    needs_get_or_404 = (
-        (op_get["enabled"] and op_get["all_fields"])
-        or op_update["enabled"]
-        or op_delete["enabled"]
-    )
+def _render_schema(ctx: dict) -> str:
+    """Render the schema file for a resource.
 
-    # Collect all field types for imports.
-    all_types: list[str] = [resource.pk_type]
-    for op_name, op_ctx in (
-        ("get", op_get),
-        ("list", op_list),
-        ("create", op_create),
-        ("update", op_update),
-    ):
-        if op_ctx["enabled"] and not op_ctx["all_fields"]:
-            op_value = getattr(resource, op_name)
-            if isinstance(op_value, FieldsConfig):
-                all_types.extend(f.type for f in op_value.fields)
-    for action in resource.actions:
-        all_types.extend(p.type for p in action.params)
+    Args:
+        ctx: The shared template context from :func:`_build_ctx`.
 
+    Returns:
+        Python source string for the schema module.
+
+    """
+    tmpl = env.get_template("fastapi/schema.py.j2")
+    return tmpl.render(**ctx)
+
+
+def _render_resource(ctx: dict) -> str:
+    """Render the route file for a resource.
+
+    Args:
+        ctx: The shared template context from :func:`_build_ctx`.
+
+    Returns:
+        Python source string for the route module.
+
+    """
     tmpl = env.get_template("fastapi/resource.py.j2")
-    return tmpl.render(
-        model_name=model_name,
-        model_module=model_module,
-        model_lower=model_lower,
-        route_prefix=route_prefix,
-        has_auth=config.auth is not None,
-        session_module=session_module,
-        get_db_fn=get_db_fn,
-        pk_name=resource.pk,
-        pk_py_type=PYTHON_TYPES[resource.pk_type],
-        imports=type_imports(all_types),
-        needs_build_schema=needs_build_schema,
-        needs_select=needs_select,
-        needs_get_or_404=needs_get_or_404,
-        op_get=op_get,
-        op_list=op_list,
-        op_create=op_create,
-        op_update=op_update,
-        op_delete=op_delete,
-        actions=action_ctxs,
-        response_schema=response_schema,
-    )
+    return tmpl.render(**ctx)

@@ -172,9 +172,11 @@ def test_resource_generator_cannot_generate_empty():
     assert not ResourceGenerator().can_generate(KilnConfig())
 
 
-def test_resource_generator_output_path(full_config):
+def test_resource_generator_output_paths(full_config):
     files = ResourceGenerator().generate(full_config)
-    assert any(f.path == "myapp/routes/user.py" for f in files)
+    paths = {f.path for f in files}
+    assert "myapp/routes/user.py" in paths
+    assert "myapp/schemas/user.py" in paths
 
 
 def test_resource_generator_valid_python(full_config):
@@ -182,41 +184,85 @@ def test_resource_generator_valid_python(full_config):
         ast.parse(f.content)
 
 
-def test_resource_generator_all_fields_uses_build_schema(full_config):
+def test_resource_generator_no_build_schema(full_config):
+    """get=True generates no schema (no _build_schema, no dynamic class)."""
     files = ResourceGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
-    # get=True → _build_schema helper must be present
-    assert "_build_schema" in route.content
-    assert "UserGetResponse = _build_schema" in route.content
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "_build_schema" not in schema.content
+    assert "UserGetResponse = _build_schema" not in schema.content
+    # get=True → no explicit schema class either
+    assert "class UserGetResponse" not in schema.content
 
 
 def test_resource_generator_specific_fields_static_class(full_config):
     files = ResourceGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
-    # list has specific fields → static Pydantic class
-    assert "class UserListResponse(BaseModel):" in route.content
-    assert "id: uuid.UUID" in route.content
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    # list has specific fields → explicit static Pydantic class
+    assert "class UserListResponse(BaseModel):" in schema.content
+    assert "id: uuid.UUID" in schema.content
 
 
 def test_resource_generator_create_request_class(full_config):
     files = ResourceGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
-    assert "class UserCreateRequest(BaseModel):" in route.content
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "class UserCreateRequest(BaseModel):" in schema.content
 
 
 def test_resource_generator_update_request_optional_fields(full_config):
     files = ResourceGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
-    assert "class UserUpdateRequest(BaseModel):" in route.content
+    schema = next(f for f in files if "schemas/user.py" in f.path)
+    assert "class UserUpdateRequest(BaseModel):" in schema.content
     # update fields are all optional (| None = None)
-    assert "| None = None" in route.content
+    assert "| None = None" in schema.content
+
+
+def test_resource_generator_route_imports_from_schema(full_config):
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "from myapp.schemas.user import" in route.content
+
+
+def test_resource_generator_serializer_functions(full_config):
+    """Explicit-field ops get serializer helpers in the route file."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    # list=FieldsConfig → _to_user_list serializer
+    assert "def _to_user_list(obj: Any) -> UserListResponse:" in route.content
+    assert "return UserListResponse(" in route.content
+    # get=True → no serializer for get
+    assert "def _to_user_get" not in route.content
+
+
+def test_resource_generator_route_uses_insert(full_config):
+    """Create route uses insert() not db.add()."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "insert(User)" in route.content
+    assert "db.add(" not in route.content
+
+
+def test_resource_generator_route_uses_update(full_config):
+    """Update route uses update() not session ORM methods."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "update(User)" in route.content
+    assert "db.merge(" not in route.content
+
+
+def test_resource_generator_route_uses_delete(full_config):
+    """Delete route uses delete() not session ORM methods."""
+    files = ResourceGenerator().generate(full_config)
+    route = next(f for f in files if "routes/user.py" in f.path)
+    assert "delete(User)" in route.content
 
 
 def test_resource_generator_auth_injected(full_config):
     files = ResourceGenerator().generate(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
-    assert "CurrentUser" in route.content
+    assert "current_user" in route.content
     assert "get_current_user" in route.content
+    # no uppercase DB alias
+    assert "DB = " not in route.content
 
 
 def test_resource_generator_no_auth_when_unconfigured(simple_resource):
@@ -269,9 +315,15 @@ def test_resource_generator_python_action(action_resource):
     cfg = KilnConfig(resources=[action_resource])
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if "routes/article.py" in f.path)
+    schema = next(f for f in files if "schemas/article.py" in f.path)
     assert "publish_action" in route.content
-    assert "from blog.actions import publish_article" in route.content
-    assert "class PublishRequest(BaseModel):" in route.content
+    # top-level import, not deferred
+    assert "from blog.actions import" in route.content
+    assert "publish_article" in route.content
+    # no deferred import inside the function
+    assert "# noqa: PLC0415" not in route.content
+    # request class lives in the schema file
+    assert "class PublishRequest(BaseModel):" in schema.content
 
 
 def test_resource_generator_archive_action(action_resource):
@@ -279,7 +331,18 @@ def test_resource_generator_archive_action(action_resource):
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if "routes/article.py" in f.path)
     assert "archive_action" in route.content
-    assert "from blog.actions import archive_article" in route.content
+    # both actions from the same module → one import line
+    assert "from blog.actions import" in route.content
+
+
+def test_resource_generator_action_response(action_resource):
+    cfg = KilnConfig(resources=[action_resource])
+    files = ResourceGenerator().generate(cfg)
+    schema = next(f for f in files if "schemas/article.py" in f.path)
+    route = next(f for f in files if "routes/article.py" in f.path)
+    assert "class ActionResponse(BaseModel):" in schema.content
+    assert "response_model=ActionResponse" in route.content
+    assert "return ActionResponse()" in route.content
 
 
 def test_resource_generator_valid_python_with_actions(action_resource):
@@ -317,7 +380,6 @@ def test_resource_generator_specific_select_columns():
     files = ResourceGenerator().generate(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "select(User.id, User.email)" in route.content
-    assert "select(User)" not in route.content
 
 
 def test_resource_generator_all_fields_select_model():
