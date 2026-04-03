@@ -1,4 +1,4 @@
-@router.get("/", response_model={{ response_model }})
+@router.{{ http_method }}("{{ route_path }}", response_model={{ response_model }})
 async def list_{{ model_lower }}(
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if has_auth and requires_auth %}

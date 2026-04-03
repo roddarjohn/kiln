@@ -1,0 +1,28 @@
+
+
+class {{ model_name }}SearchRequest(BaseModel):
+    """Search request body for {{ model_name }} lists.
+
+    The ``filter`` field accepts a recursive AND/OR filter tree::
+
+        {"and": [
+            {"field": "status", "op": "eq", "value": "active"},
+            {"or": [
+                {"field": "role", "op": "eq", "value": "admin"},
+                {"field": "age", "op": "gt", "value": 30}
+            ]}
+        ]}
+    """
+
+    filter: dict | None = None
+{% if sort_fields %}
+    sort_by: {{ model_name }}SortField | None = None
+    sort_dir: Literal["asc", "desc"] = "asc"
+{% endif %}
+{% if pagination_mode == "keyset" %}
+    cursor: str | None = None
+    page_size: int = {{ default_page_size }}
+{% elif pagination_mode == "offset" %}
+    offset: int = 0
+    limit: int = {{ default_page_size }}
+{% endif %}

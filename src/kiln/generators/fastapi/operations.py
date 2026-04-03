@@ -547,7 +547,12 @@ class ListOperation:
 
         # Delegate to extension helpers (before rendering)
         if options.filters:
-            contribute_filters(specs, ctx, options.filters)
+            contribute_filters(
+                specs,
+                ctx,
+                options.filters,
+                options.fields,
+            )
         if options.ordering:
             contribute_ordering(specs, ctx, options.ordering)
         if options.pagination:
@@ -579,6 +584,8 @@ class ListOperation:
             has_resource_schema=ctx.has_resource_schema,
             response_model=response_model,
             return_type=return_type,
+            http_method=ext.get("http_method", "get"),
+            route_path=ext.get("route_path", "/"),
             extra_params=ext.get("extra_params", []),
             query_modifiers=ext.get("query_modifiers", []),
             result_expression=ext.get("result_expression"),

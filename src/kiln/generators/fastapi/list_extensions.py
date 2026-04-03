@@ -7,7 +7,11 @@ contributions into the ``list_extensions`` dict on the route
 spec's context.
 
 All three are optional — when absent the list operation
-generates a bare ``select(Model)`` query.
+generates a bare ``select(Model)`` query with a GET endpoint.
+
+When filtering is enabled the list endpoint becomes a
+``POST /search`` that accepts a JSON body with a recursive
+AND/OR filter tree.
 """
 
 from __future__ import annotations
@@ -40,62 +44,21 @@ DEFAULT_OPERATORS: dict[FieldType, list[str]] = {
     "json": [],
 }
 
-#: Python type strings for ``list[T]`` used by the ``in`` operator.
-_LIST_TYPES: dict[str, str] = {
-    "uuid": "list[uuid.UUID]",
-    "str": "list[str]",
-    "email": "list[str]",
-    "int": "list[int]",
-    "float": "list[float]",
-    "bool": "list[bool]",
-    "datetime": "list[datetime]",
-    "date": "list[date]",
-}
-
-
-def _filter_py_type(field_type: FieldType, operator: str) -> str:
-    """Return the Python type annotation for a filter parameter."""
-    if operator == "in":
-        return _LIST_TYPES.get(field_type, f"list[{PYTHON_TYPES[field_type]}]")
-    return PYTHON_TYPES[field_type]
-
-
-def _add_filter_type_imports(
-    imports: ImportCollector,
-    field_type: FieldType,
-) -> None:
-    """Add type-specific imports for a single filter parameter."""
-    if field_type == "uuid":
-        imports.add("uuid")
-    elif field_type == "datetime":
-        imports.add_from("datetime", "datetime")
-    elif field_type == "date":
-        imports.add_from("datetime", "date")
-    elif field_type == "json":
-        imports.add_from("typing", "Any")
-
-
-if TYPE_CHECKING:
-    from kiln.generators._helpers import ImportCollector
-
 
 # -------------------------------------------------------------------
 # Config models
 # -------------------------------------------------------------------
 
 
-class FilterFieldSpec(BaseModel):
-    """A field available for filtering, with optional operator list."""
-
-    name: str
-    type: FieldType
-    operators: list[str] | None = None
-
-
 class FilterConfig(BaseModel):
-    """Configuration for list filtering."""
+    """Configuration for list filtering.
 
-    fields: list[FilterFieldSpec]
+    When ``fields`` is omitted or empty, all fields from the
+    list operation's ``fields`` config are used.  Otherwise only
+    the named fields are filterable.
+    """
+
+    fields: list[str] | None = None
 
 
 class OrderConfig(BaseModel):
@@ -125,58 +88,76 @@ def contribute_filters(
     specs: dict[str, FileSpec],
     ctx: SharedContext,
     config: FilterConfig,
+    list_fields: list[FieldSpec] | None,
 ) -> None:
-    """Deposit filter schema and query modifier.
+    """Deposit search request schema and query modifier.
 
-    Generates a ``{Model}ListFilter`` Pydantic schema and adds
-    a call to the generic ``apply_filters()`` utility as a query
-    modifier.
+    When filtering is enabled the list endpoint changes from
+    ``GET /`` to ``POST /search`` and accepts a JSON body with
+    a recursive AND/OR filter expression.
+
+    The ``allowed_fields`` set is derived from the config: when
+    ``config.fields`` is provided, only those field names are
+    allowed.  Otherwise all ``list_fields`` names are used.
 
     Args:
         specs: Mutable dict of file specs.
         ctx: Shared context for this resource.
         config: The filter configuration.
+        list_fields: The fields from the list operation.
 
     """
     schema = specs["schema"]
     route = specs["route"]
     ext = route.context["list_extensions"]
 
-    filter_fields: list[dict[str, str]] = []
-    for field in config.fields:
-        ops = field.operators or DEFAULT_OPERATORS.get(field.type, [])
-        for op in ops:
-            param_name = f"{field.name}_{op}" if op != "eq" else field.name
-            py_type = _filter_py_type(field.type, op)
-            filter_fields.append(
-                {
-                    "param_name": param_name,
-                    "py_type": py_type,
-                    "column": field.name,
-                    "operator": op,
-                }
-            )
-            _add_filter_type_imports(schema.imports, field.type)
+    # Determine allowed filterable fields
+    if config.fields:
+        allowed = config.fields
+    elif list_fields:
+        allowed = [f.name for f in list_fields]
+    else:
+        allowed = []
 
-    # Schema: render ListFilter model
+    # Derive allowed operators per field from the field types
+    field_type_map: dict[str, FieldType] = {}
+    if list_fields:
+        field_type_map = {f.name: f.type for f in list_fields}
+
+    allowed_ops: dict[str, list[str]] = {}
+    for name in allowed:
+        ftype = field_type_map.get(name, "str")
+        allowed_ops[name] = DEFAULT_OPERATORS.get(ftype, [])
+
+    # Schema: render SearchRequest model
     snippet = render_snippet(
-        "fastapi/schema_parts/list_filter.py.j2",
+        "fastapi/schema_parts/search_request.py.j2",
         model_name=ctx.model.pascal,
-        filter_fields=filter_fields,
+        allowed_fields=allowed,
+        allowed_ops=allowed_ops,
     )
     schema.context["schema_classes"].append(snippet)
-    schema.exports.append(ctx.model.suffixed("ListFilter"))
+    schema.exports.append(ctx.model.suffixed("SearchRequest"))
 
     # Route: import apply_filters from utils
     utils_module = prefix_import(ctx.package_prefix, "utils")
     route.imports.add_from(utils_module, "apply_filters")
 
+    # Mark route as POST /search
+    ext["http_method"] = "post"
+    ext["route_path"] = "/search"
+
     # Extension contributions
-    ext["extra_params"].append(
-        f"filters: Annotated[{ctx.model.suffixed('ListFilter')}, Depends()],"
-    )
+    ext["extra_params"].append(f"body: {ctx.model.suffixed('SearchRequest')},")
+    allowed_set = "{" + ", ".join(f'"{f}"' for f in allowed) + "}"
     ext["query_modifiers"].append(
-        f"stmt = apply_filters(stmt, filters, {ctx.model.pascal})"
+        f"if body.filter is not None:\n"
+        f"        stmt = apply_filters(\n"
+        f"            stmt,\n"
+        f"            body.filter,\n"
+        f"            {ctx.model.pascal},\n"
+        f"            allowed_fields={allowed_set},\n"
+        f"        )"
     )
 
 
@@ -193,8 +174,9 @@ def contribute_ordering(
     """Deposit sort enum, params, and order_by modifier.
 
     Generates a ``{Model}SortField`` string enum and adds
-    ``sort_by`` / ``sort_dir`` query parameters to the list
-    handler.
+    ``sort_by`` / ``sort_dir`` parameters.  When filters are
+    enabled these are fields on the search request body;
+    otherwise they are query parameters.
 
     Args:
         specs: Mutable dict of file specs.
@@ -220,26 +202,41 @@ def contribute_ordering(
     # Route imports
     route.imports.add_from("typing", "Literal")
 
-    # Extension contributions: params
+    has_search_body = ext.get("http_method") == "post"
     sort_field_cls = ctx.model.suffixed("SortField")
-    ext["extra_params"].append(f"sort_by: {sort_field_cls} | None = None,")
-    ext["extra_params"].append(
-        f'sort_dir: Literal["asc", "desc"] = "{config.default_dir}",'
-    )
-
-    # Extension contributions: query modifier
     default_col = config.default or ctx.pk_name
-    modifier_lines = [
-        "sort_col = (",
-        f"    getattr({ctx.model.pascal}, sort_by.value)",
-        "    if sort_by",
-        f"    else {ctx.model.pascal}.{default_col}",
-        ")",
-        'if sort_dir == "desc":',
-        "    stmt = stmt.order_by(sort_col.desc())",
-        "else:",
-        "    stmt = stmt.order_by(sort_col.asc())",
-    ]
+
+    if has_search_body:
+        # Ordering is read from body.sort_by / body.sort_dir
+        modifier_lines = [
+            "sort_col = (",
+            f"    getattr({ctx.model.pascal}, body.sort_by.value)",
+            "    if body.sort_by",
+            f"    else {ctx.model.pascal}.{default_col}",
+            ")",
+            'if body.sort_dir == "desc":',
+            "    stmt = stmt.order_by(sort_col.desc())",
+            "else:",
+            "    stmt = stmt.order_by(sort_col.asc())",
+        ]
+    else:
+        # Ordering via query parameters
+        ext["extra_params"].append(f"sort_by: {sort_field_cls} | None = None,")
+        ext["extra_params"].append(
+            f'sort_dir: Literal["asc", "desc"] = "{config.default_dir}",'
+        )
+        modifier_lines = [
+            "sort_col = (",
+            f"    getattr({ctx.model.pascal}, sort_by.value)",
+            "    if sort_by",
+            f"    else {ctx.model.pascal}.{default_col}",
+            ")",
+            'if sort_dir == "desc":',
+            "    stmt = stmt.order_by(sort_col.desc())",
+            "else:",
+            "    stmt = stmt.order_by(sort_col.asc())",
+        ]
+
     ext["query_modifiers"].extend(modifier_lines)
 
 
@@ -301,14 +298,20 @@ def _contribute_keyset(
     ext["response_model"] = page_cls
     ext["return_type"] = page_cls
 
-    # Params — use Query() for validation
+    has_search_body = ext.get("http_method") == "post"
+
+    # Params
     route.imports.add_from("fastapi", "Query")
-    ext["extra_params"].append("cursor: str | None = None,")
-    ext["extra_params"].append(
-        f"page_size: Annotated[int, Query("
-        f"ge=1, le={config.max_page_size}"
-        f")] = {config.default_page_size},"
-    )
+    if has_search_body:
+        # cursor / page_size read from body
+        pass
+    else:
+        ext["extra_params"].append("cursor: str | None = None,")
+        ext["extra_params"].append(
+            f"page_size: Annotated[int, Query("
+            f"ge=1, le={config.max_page_size}"
+            f")] = {config.default_page_size},"
+        )
 
     # Query modifiers
     cursor_py_type = PYTHON_TYPES[config.cursor_type]
@@ -321,12 +324,20 @@ def _contribute_keyset(
     else:
         cast_expr = "cursor"
 
+    cursor_var = "body.cursor" if has_search_body else "cursor"
+    page_size_var = "body.page_size" if has_search_body else "page_size"
+    page_size_clamp = (
+        f"page_size = min({page_size_var}, {config.max_page_size})"
+    )
+
     ext["query_modifiers"].extend(
         [
+            f"cursor = {cursor_var}" if has_search_body else "",
             "if cursor:",
             "    stmt = stmt.where(",
             f"        {ctx.model.pascal}.{cursor_field} > {cast_expr}",
             "    )",
+            page_size_clamp,
             "stmt = stmt.limit(page_size + 1)",
         ]
     )
@@ -387,29 +398,42 @@ def _contribute_offset(
     ext["response_model"] = page_cls
     ext["return_type"] = page_cls
 
-    # Params — use Query() for validation
+    has_search_body = ext.get("http_method") == "post"
+
+    # Params
     route.imports.add_from("fastapi", "Query")
-    ext["extra_params"].append("offset: Annotated[int, Query(ge=0)] = 0,")
-    ext["extra_params"].append(
-        f"limit: Annotated[int, Query("
-        f"ge=1, le={config.max_page_size}"
-        f")] = {config.default_page_size},"
-    )
+    if not has_search_body:
+        ext["extra_params"].append("offset: Annotated[int, Query(ge=0)] = 0,")
+        ext["extra_params"].append(
+            f"limit: Annotated[int, Query("
+            f"ge=1, le={config.max_page_size}"
+            f")] = {config.default_page_size},"
+        )
 
     # Query modifiers
     route.imports.add_from("sqlalchemy", "func")
+    offset_var = "body.offset" if has_search_body else "offset"
+    limit_var = "body.limit" if has_search_body else "limit"
+    limit_clamp = f"limit = min({limit_var}, {config.max_page_size})"
+    offset_assign = f"offset = {offset_var}" if has_search_body else ""
 
     # Result expression
-    result_lines = [
-        "count_result = await db.execute(",
-        "    stmt.with_only_columns(func.count())",
-        ")",
-        "total = count_result.scalar_one()",
-        "result = await db.execute(",
-        "    stmt.offset(offset).limit(limit)",
-        ")",
-        "rows = list(result.scalars())",
-    ]
+    result_lines = []
+    if offset_assign:
+        result_lines.append(offset_assign)
+    result_lines.extend(
+        [
+            limit_clamp,
+            "count_result = await db.execute(",
+            "    stmt.with_only_columns(func.count())",
+            ")",
+            "total = count_result.scalar_one()",
+            "result = await db.execute(",
+            "    stmt.offset(offset).limit(limit)",
+            ")",
+            "rows = list(result.scalars())",
+        ]
+    )
     if ctx.has_resource_schema:
         result_lines.append(f"return {page_cls}(")
         result_lines.append(
