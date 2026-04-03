@@ -217,7 +217,7 @@ class TestContributeSearchRequest:
 
     def test_with_ordering(self, specs, shared_ctx):
         ordering = OrderConfig(
-            fields=[FieldSpec(name="name", type="str")],
+            fields=["name"],
         )
         contribute_search_request(specs, shared_ctx, ordering, None)
         snippet = specs["schema"].context["schema_classes"][0]
@@ -249,10 +249,7 @@ class TestContributeSearchRequest:
 class TestContributeOrdering:
     def test_adds_sort_field_enum(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[
-                {"name": "created_at", "type": "datetime"},
-                {"name": "name", "type": "str"},
-            ],
+            fields=["created_at", "name"],
             default="created_at",
             default_dir="desc",
         )
@@ -264,7 +261,7 @@ class TestContributeOrdering:
 
     def test_adds_sort_params_no_search_body(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "created_at", "type": "datetime"}],
+            fields=["created_at"],
             default="created_at",
             default_dir="desc",
         )
@@ -280,7 +277,7 @@ class TestContributeOrdering:
         ext = specs["route"].context["list_extensions"]
         ext["http_method"] = "post"
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
             default="name",
         )
         contribute_ordering(specs, shared_ctx, config)
@@ -294,7 +291,7 @@ class TestContributeOrdering:
         ext = specs["route"].context["list_extensions"]
         ext["http_method"] = "post"
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
         assert "UserSortClause" in specs["schema"].exports
@@ -305,7 +302,7 @@ class TestContributeOrdering:
 
     def test_adds_order_by_modifiers_no_search(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "created_at", "type": "datetime"}],
+            fields=["created_at"],
             default="created_at",
         )
         contribute_ordering(specs, shared_ctx, config)
@@ -317,7 +314,7 @@ class TestContributeOrdering:
 
     def test_default_dir_asc(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
@@ -325,7 +322,7 @@ class TestContributeOrdering:
 
     def test_default_falls_back_to_pk(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
         ext = specs["route"].context["list_extensions"]
@@ -334,7 +331,7 @@ class TestContributeOrdering:
 
     def test_adds_enum_import(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
         lines = "\n".join(specs["schema"].imports.lines())
@@ -342,7 +339,7 @@ class TestContributeOrdering:
 
     def test_adds_literal_import_no_search(self, specs, shared_ctx):
         config = OrderConfig(
-            fields=[{"name": "name", "type": "str"}],
+            fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
         lines = "\n".join(specs["route"].imports.lines())
@@ -517,7 +514,7 @@ class TestListOperationWithExtensions:
             ],
             filters={"fields": ["email"]},
             ordering={
-                "fields": [{"name": "created_at", "type": "datetime"}],
+                "fields": ["created_at"],
                 "default": "created_at",
                 "default_dir": "desc",
             },
@@ -546,7 +543,7 @@ class TestListOperationWithExtensions:
             ],
             filters={"fields": ["email"]},
             ordering={
-                "fields": [{"name": "created_at", "type": "datetime"}],
+                "fields": ["created_at"],
                 "default": "created_at",
             },
             pagination={"mode": "keyset"},
@@ -581,7 +578,7 @@ class TestListOperationWithExtensions:
             ],
             filters={"fields": ["email"]},
             ordering={
-                "fields": [{"name": "created_at", "type": "datetime"}],
+                "fields": ["created_at"],
                 "default": "created_at",
             },
             pagination={"mode": "keyset"},
@@ -603,7 +600,7 @@ class TestListOperationWithExtensions:
             ],
             filters={"fields": ["email"]},
             ordering={
-                "fields": [{"name": "created_at", "type": "datetime"}],
+                "fields": ["created_at"],
             },
             pagination={"mode": "keyset"},
         )
@@ -626,7 +623,7 @@ class TestListOperationWithExtensions:
             ],
             filters={},
             ordering={
-                "fields": [{"name": "name", "type": "str"}],
+                "fields": ["name"],
             },
             pagination={
                 "mode": "keyset",
@@ -653,7 +650,7 @@ class TestListOperationWithExtensions:
             ],
             filters={},
             ordering={
-                "fields": [{"name": "name", "type": "str"}],
+                "fields": ["name"],
             },
             pagination={"mode": "offset"},
         )

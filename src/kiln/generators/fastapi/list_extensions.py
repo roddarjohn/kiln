@@ -78,7 +78,7 @@ class FilterConfig(BaseModel):
 class OrderConfig(BaseModel):
     """Configuration for list ordering."""
 
-    fields: list[FieldSpec]
+    fields: list[str]
     default: str | None = None
     default_dir: Literal["asc", "desc"] = "asc"
 
@@ -187,7 +187,7 @@ def contribute_ordering(
     ext = route.context["list_extensions"]
 
     # Schema: render SortField enum
-    sort_fields = [{"name": f.name, "value": f.name} for f in config.fields]
+    sort_fields = [{"name": f, "value": f} for f in config.fields]
     snippet = render_snippet(
         "fastapi/schema_parts/sort_field.py.j2",
         model_name=ctx.model.pascal,

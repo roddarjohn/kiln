@@ -42,9 +42,7 @@ local resource = import "kiln/resources/presets.libsonnet";
           },
           // Ordering: sort by title
           ordering: {
-            fields: [
-              { name: "title", type: "str" },
-            ],
+            fields: ["title"],
             default: "title",
             default_dir: "asc",
           },

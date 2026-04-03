@@ -40,10 +40,7 @@ local resource = import "kiln/resources/presets.libsonnet";
           },
           // Ordering: sort by name or unit_price
           ordering: {
-            fields: [
-              { name: "name", type: "str" },
-              { name: "unit_price", type: "float" },
-            ],
+            fields: ["name", "unit_price"],
             default: "name",
             default_dir: "asc",
           },
