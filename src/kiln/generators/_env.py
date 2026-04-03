@@ -21,3 +21,22 @@ env = jinja2.Environment(
     undefined=jinja2.StrictUndefined,
     autoescape=False,  # noqa: S701 — generating Python source, not HTML
 )
+
+
+def render_snippet(template_name: str, **ctx: object) -> str:
+    """Render a template snippet and return it as a string.
+
+    Used by :class:`~kiln.generators.fastapi.operations.Operation`
+    classes to render per-operation handler and schema fragments
+    that are then assembled into the outer file template.
+
+    Args:
+        template_name: Template path relative to the templates
+            directory, e.g. ``"fastapi/ops/get.py.j2"``.
+        **ctx: Template context variables.
+
+    Returns:
+        Rendered template string.
+
+    """
+    return env.get_template(template_name).render(**ctx)

@@ -1,0 +1,6 @@
+class {{ model_name }}Resource(BaseModel):
+    """Resource schema for {{ model_name }}."""
+
+{% for f in fields %}
+    {{ f.name }}: {{ f.py_type }}
+{% endfor %}
