@@ -6,17 +6,12 @@ from pathlib import Path
 import pytest
 
 from kiln.config.schema import (
-    ActionRouteConfig,
+    ActionConfig,
     AuthConfig,
-    CrudConfig,
-    CRUDRouteConfig,
-    FieldConfig,
+    FieldsConfig,
+    FieldSpec,
     KilnConfig,
-    ModelConfig,
-    ViewColumn,
-    ViewConfig,
-    ViewParam,
-    ViewRouteConfig,
+    ResourceConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -29,9 +24,7 @@ def test_kiln_config_defaults():
     assert cfg.version == "1"
     assert cfg.module == "app"
     assert cfg.auth is None
-    assert cfg.models == []
-    assert cfg.views == []
-    assert cfg.routes == []
+    assert cfg.resources == []
 
 
 def test_auth_config_defaults():
@@ -42,123 +35,99 @@ def test_auth_config_defaults():
     assert "/docs" in auth.exclude_paths
 
 
-def test_field_config_primary_key():
-    f = FieldConfig(name="id", type="uuid", primary_key=True)
-    assert f.primary_key is True
-    assert f.nullable is False
-    assert f.exclude_from_api is False
-
-
-def test_field_config_primary_key_dotted_path():
-    f = FieldConfig(
-        name="id",
-        type="uuid",
-        primary_key="pgcraft.plugins.pk.UUIDV7PKPlugin",
-    )
-    assert f.primary_key == "pgcraft.plugins.pk.UUIDV7PKPlugin"
-
-
-def test_model_config_schema_default():
-    m = ModelConfig(
-        name="User",
-        table="users",
-        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-    )
-    assert m.schema == "public"
-    assert m.pgcraft_type == "pgcraft.factory.dimension.simple.PGCraftSimple"
-
-
-def test_model_config_no_crud_field():
-    """ModelConfig no longer has a crud field."""
-    m = ModelConfig(
-        name="User",
-        table="users",
-        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-    )
-    assert not hasattr(m, "crud")
-
-
-def test_model_config_no_db_key_field():
-    """ModelConfig no longer has a db_key field."""
-    m = ModelConfig(
-        name="User",
-        table="users",
-        fields=[FieldConfig(name="id", type="uuid", primary_key=True)],
-    )
-    assert not hasattr(m, "db_key")
-
-
-def test_crud_config_defaults():
-    c = CrudConfig()
-    assert c.create is True
-    assert c.paginated is True
-    assert c.require_auth == []
-
-
-def test_view_config_is_parameterised():
-    v = ViewConfig(
-        name="summary",
-        parameters=[ViewParam(name="start_date", type="date")],
-        returns=[],
-    )
-    assert v.parameters != []
-
-
-def test_view_config_non_parameterised():
-    v = ViewConfig(name="stats", returns=[])
-    assert v.parameters == []
-
-
-def test_view_config_no_http_fields():
-    """ViewConfig is a DB-layer model — no HTTP config fields."""
-    v = ViewConfig(name="stats", returns=[])
-    assert not hasattr(v, "require_auth")
-    assert not hasattr(v, "http_method")
-    assert not hasattr(v, "query_fn")
-
-
-def test_crud_route_config():
-    r = CRUDRouteConfig(model="User", crud=CrudConfig())
-    assert r.type == "crud"
-    assert r.model == "User"
+def test_resource_config_defaults():
+    r = ResourceConfig(model="myapp.models.User")
+    assert r.pk == "id"
+    assert r.pk_type == "uuid"
+    assert r.route_prefix is None
     assert r.db_key is None
-
-
-def test_view_route_config_defaults():
-    r = ViewRouteConfig(view="my_view")
-    assert r.type == "view"
-    assert r.http_method == "GET"
     assert r.require_auth is True
-    assert r.description == ""
+    assert r.get is False
+    assert r.list is False
+    assert r.create is False
+    assert r.update is False
+    assert r.delete is False
+    assert r.actions == []
 
 
-def test_action_route_config():
-    r = ActionRouteConfig(
-        name="publish_article",
-        fn="public.publish_article",
-        params=[ViewParam(name="article_id", type="uuid")],
-        returns=[ViewColumn(name="status", type="str")],
+def test_resource_config_get_true():
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    assert r.get is True
+
+
+def test_resource_config_get_fields_config():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        get={
+            "fields": [
+                {"name": "id", "type": "uuid"},
+                {"name": "email", "type": "email"},
+            ]
+        },
     )
-    assert r.type == "action"
-    assert r.fn == "public.publish_article"
+    assert isinstance(r.get, FieldsConfig)
+    assert len(r.get.fields) == 2
+    assert r.get.fields[0].name == "id"
+    assert r.get.fields[1].type == "email"
 
 
-def test_route_config_discriminated_union():
-    """Routes list uses a discriminated union on the 'type' field."""
-    cfg = KilnConfig(
-        routes=[
-            {"type": "crud", "model": "User", "crud": {}},
-            {"type": "view", "view": "my_view"},
-            {
-                "type": "action",
-                "name": "do_thing",
-                "fn": "public.do_thing",
-            },
-        ]
+def test_resource_config_require_auth_list():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        require_auth=["create", "update", "delete"],
     )
-    assert isinstance(cfg.routes[0], CRUDRouteConfig)
-    assert isinstance(cfg.routes[1], ViewRouteConfig)
-    assert isinstance(cfg.routes[2], ActionRouteConfig)
+    assert r.require_auth == ["create", "update", "delete"]
+
+
+def test_resource_config_require_auth_false():
+    r = ResourceConfig(model="myapp.models.User", require_auth=False)
+    assert r.require_auth is False
+
+
+def test_resource_config_custom_route_prefix():
+    r = ResourceConfig(model="myapp.models.User", route_prefix="/people")
+    assert r.route_prefix == "/people"
+
+
+def test_resource_config_int_pk():
+    r = ResourceConfig(model="myapp.models.Tag", pk="id", pk_type="int")
+    assert r.pk_type == "int"
+
+
+def test_action_config():
+    a = ActionConfig(
+        name="publish",
+        fn="myapp.actions.publish",
+        params=[FieldSpec(name="notify", type="bool")],
+    )
+    assert a.fn == "myapp.actions.publish"
+    assert a.params[0].name == "notify"
+    assert a.require_auth is True
+
+
+def test_resource_config_with_actions():
+    r = ResourceConfig(
+        model="blog.models.Article",
+        actions=[
+            ActionConfig(
+                name="publish",
+                fn="blog.actions.publish_article",
+            ),
+        ],
+    )
+    assert len(r.actions) == 1
+    assert r.actions[0].name == "publish"
+
+
+def test_field_spec():
+    f = FieldSpec(name="title", type="str")
+    assert f.name == "title"
+    assert f.type == "str"
+
+
+def test_fields_config():
+    fc = FieldsConfig(fields=[FieldSpec(name="id", type="uuid")])
+    assert len(fc.fields) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +139,11 @@ def test_load_json(tmp_path: Path):
     data = {
         "version": "1",
         "module": "myapp",
-        "models": [
+        "resources": [
             {
-                "name": "Widget",
-                "table": "widgets",
-                "fields": [{"name": "id", "type": "int", "primary_key": True}],
+                "model": "myapp.models.Widget",
+                "get": True,
+                "list": True,
             }
         ],
     }
@@ -184,8 +153,8 @@ def test_load_json(tmp_path: Path):
 
     cfg = load(cfg_file)
     assert cfg.module == "myapp"
-    assert len(cfg.models) == 1
-    assert cfg.models[0].name == "Widget"
+    assert len(cfg.resources) == 1
+    assert cfg.resources[0].model == "myapp.models.Widget"
 
 
 def test_load_unsupported_extension(tmp_path: Path):
@@ -200,8 +169,7 @@ def test_load_unsupported_extension(tmp_path: Path):
 def test_load_jsonnet(tmp_path: Path):
     from kiln.config.loader import load
 
-    # Minimal inline jsonnet (no kiln/ stdlib imports needed).
-    jsonnet_src = '{ module: "jsonnet_app", models: [] }'
+    jsonnet_src = '{ module: "jsonnet_app", resources: [] }'
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
     cfg = load(cfg_file)
@@ -211,7 +179,6 @@ def test_load_jsonnet(tmp_path: Path):
 def test_load_jsonnet_relative_import(tmp_path: Path):
     from kiln.config.loader import load
 
-    # Tests the non-kiln/ branch of _import_callback.
     helper = tmp_path / "helper.libsonnet"
     helper.write_text('{ mod: "helper_app" }')
     jsonnet_src = 'local h = import "helper.libsonnet"; { module: h.mod }'
@@ -224,13 +191,33 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
 def test_load_validation_error(tmp_path: Path):
     from kiln.config.loader import load
 
-    # missing required 'fields' on model
-    data = {
-        "models": [{"name": "Bad", "table": "bad"}],
-    }
+    # model is required in ResourceConfig
+    data = {"resources": [{"get": True}]}
     cfg_file = tmp_path / "bad.json"
     cfg_file.write_text(json.dumps(data))
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         load(cfg_file)
+
+
+def test_load_jsonnet_stdlib_resources(tmp_path: Path):
+    from kiln.config.loader import load
+
+    src = """
+    local resource = import "kiln/resources/presets.libsonnet";
+    {
+      module: "blog",
+      resources: [
+        resource.read_only("blog.models.Article"),
+      ],
+    }
+    """
+    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file.write_text(src)
+    cfg = load(cfg_file)
+    assert cfg.module == "blog"
+    assert len(cfg.resources) == 1
+    assert cfg.resources[0].model == "blog.models.Article"
+    assert cfg.resources[0].get is True
+    assert cfg.resources[0].create is False

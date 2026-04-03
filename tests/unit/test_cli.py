@@ -48,17 +48,16 @@ def test_generate_writes_app_files(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
-            "models": [
+            "resources": [
                 {
-                    "name": "Post",
-                    "table": "posts",
-                    "fields": [
-                        {"name": "id", "type": "uuid", "primary_key": True},
-                        {"name": "title", "type": "str"},
-                    ],
+                    "model": "myapp.models.Post",
+                    "get": True,
+                    "list": True,
+                    "create": {"fields": [{"name": "title", "type": "str"}]},
+                    "update": {"fields": [{"name": "title", "type": "str"}]},
+                    "delete": True,
                 }
             ],
-            "routes": [{"type": "crud", "model": "Post", "crud": {}}],
         },
     )
     out = tmp_path / "out"
@@ -67,9 +66,7 @@ def test_generate_writes_app_files(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert "Generated" in result.output
-    assert (out / "myapp" / "models" / "post.py").exists()
     assert (out / "myapp" / "routes" / "post.py").exists()
-    assert (out / "myapp" / "schemas" / "post.py").exists()
 
 
 def test_generate_with_auth_writes_scaffold(tmp_path: Path):
@@ -79,7 +76,7 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
             "module": "myapp",
             "auth": {"type": "jwt"},
             "databases": [{"key": "primary", "default": True}],
-            "models": [],
+            "resources": [],
         },
     )
     out = tmp_path / "out"
@@ -98,7 +95,7 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
         {
             "module": "myapp",
             "auth": {"type": "jwt"},
-            "models": [],
+            "resources": [],
         },
     )
     out = tmp_path / "out"
@@ -109,82 +106,40 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
     assert sentinel.read_text() != "# modified"
 
 
-def test_generate_no_validate_flag_accepted(tmp_path: Path):
-    """--no-validate is accepted for backwards compatibility."""
-    cfg = _write_json_config(
-        tmp_path,
-        {
-            "module": "myapp",
-            "views": [
-                {
-                    "name": "my_view",
-                    "returns": [{"name": "id", "type": "uuid"}],
-                }
-            ],
-            "routes": [{"type": "view", "view": "my_view"}],
-        },
-    )
-    out = tmp_path / "out"
-    result = runner.invoke(
-        app,
-        ["generate", "--config", str(cfg), "--out", str(out), "--no-validate"],
-    )
-    assert result.exit_code == 0
-
-
 # ---------------------------------------------------------------------------
 # generate — project mode (apps list)
 # ---------------------------------------------------------------------------
 
 
 def test_generate_project_mode_writes_all_apps(tmp_path: Path):
-    blog_cfg = tmp_path / "blog.json"
-    blog_cfg.write_text(
-        json.dumps(
+    blog_app = {
+        "module": "blog",
+        "resources": [
             {
-                "module": "blog",
-                "models": [
-                    {
-                        "name": "Article",
-                        "table": "articles",
-                        "fields": [
-                            {"name": "id", "type": "uuid", "primary_key": True}
-                        ],
-                    }
-                ],
-                "routes": [{"type": "crud", "model": "Article", "crud": {}}],
+                "model": "blog.models.Article",
+                "get": True,
+                "list": True,
             }
-        )
-    )
-    inv_cfg = tmp_path / "inventory.json"
-    inv_cfg.write_text(
-        json.dumps(
+        ],
+    }
+    inv_app = {
+        "module": "inventory",
+        "resources": [
             {
-                "module": "inventory",
-                "models": [
-                    {
-                        "name": "Product",
-                        "table": "products",
-                        "fields": [
-                            {"name": "id", "type": "uuid", "primary_key": True}
-                        ],
-                    }
-                ],
-                "routes": [{"type": "crud", "model": "Product", "crud": {}}],
+                "model": "inventory.models.Product",
+                "get": True,
+                "list": True,
             }
-        )
-    )
+        ],
+    }
     project_cfg = _write_json_config(
         tmp_path,
         {
             "auth": {"type": "jwt"},
             "databases": [{"key": "primary", "default": True}],
             "apps": [
-                {"config": json.loads(blog_cfg.read_text()), "prefix": "/blog"},
-                {
-                    "config": json.loads(inv_cfg.read_text()),
-                    "prefix": "/inventory",
-                },
+                {"config": blog_app, "prefix": "/blog"},
+                {"config": inv_app, "prefix": "/inventory"},
             ],
         },
     )
@@ -195,8 +150,8 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     assert result.exit_code == 0
     assert (out / "db" / "primary_session.py").exists()
     assert (out / "auth" / "dependencies.py").exists()
-    assert (out / "blog" / "models" / "article.py").exists()
-    assert (out / "inventory" / "models" / "product.py").exists()
+    assert (out / "blog" / "routes" / "article.py").exists()
+    assert (out / "inventory" / "routes" / "product.py").exists()
     assert (out / "routes" / "__init__.py").exists()
     root_router = (out / "routes" / "__init__.py").read_text()
     assert "blog_router" in root_router

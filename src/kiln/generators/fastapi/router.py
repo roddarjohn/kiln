@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
+from kiln.generators._helpers import split_dotted_class
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -12,13 +13,13 @@ if TYPE_CHECKING:
 
 
 class RouterGenerator:
-    """Produces ``api/__init__.py`` that mounts every generated router.
+    """Produces ``{module}/routes/__init__.py`` mounting every resource router.
 
-    The file imports a router from each CRUD route file and each view
-    route file, then combines them into a single ``router`` object
-    that the application's ``main.py`` can include::
+    The file imports a router from each generated resource route file and
+    combines them into a single ``router`` object that the application's
+    ``main.py`` can include::
 
-        from app.api import router
+        from app.routes import router
         app.include_router(router)
     """
 
@@ -28,13 +29,13 @@ class RouterGenerator:
         return "router"
 
     def can_generate(self, config: KilnConfig) -> bool:
-        """Return True when there are any routes to aggregate.
+        """Return True when there are any resources to aggregate.
 
         Args:
             config: The validated kiln configuration.
 
         """
-        return bool(config.routes)
+        return bool(config.resources)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
         """Generate the aggregating router file.
@@ -44,7 +45,7 @@ class RouterGenerator:
 
         Returns:
             A single :class:`~kiln.generators.base.GeneratedFile`
-            at ``api/__init__.py``.
+            at ``{module}/routes/__init__.py``.
 
         """
         return [
@@ -65,24 +66,13 @@ def _render_router(config: KilnConfig) -> str:
         Python source string.
 
     """
-    from kiln.config.schema import (  # noqa: PLC0415
-        ActionRouteConfig,
-        CRUDRouteConfig,
-        ViewRouteConfig,
-    )
-
-    route_names: list[str] = []
-    for r in config.routes:
-        if isinstance(r, CRUDRouteConfig):
-            route_names.append(r.model.lower())
-        elif isinstance(r, ViewRouteConfig):
-            route_names.append(r.view)
-        elif isinstance(r, ActionRouteConfig):
-            route_names.append(r.name)
-
-    routes = [
-        {"module_name": name, "alias": f"{name}_router"} for name in route_names
-    ]
+    routes = []
+    for resource in config.resources:
+        _, class_name = split_dotted_class(resource.model)
+        module_name = class_name.lower()
+        routes.append(
+            {"module_name": module_name, "alias": f"{module_name}_router"}
+        )
 
     tmpl = env.get_template("fastapi/router.py.j2")
     return tmpl.render(

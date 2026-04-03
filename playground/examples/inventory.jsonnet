@@ -1,13 +1,12 @@
-// Inventory example — exercises append-only pgcraft type, float/int/date
-// fields, a POST parameterised function view, and full auth on all ops.
+// Inventory example — exercises float/int/date fields, full auth, and actions.
+//
+// Consumer Python models are defined in inventory/models.py (not generated).
 //
 // Run with:
 //   uv run --group playground python playground/run_example.py examples/inventory.jsonnet
 
 local auth = import "kiln/auth/jwt.libsonnet";
-local crud = import "kiln/crud/presets.libsonnet";
-local field = import "kiln/models/fields.libsonnet";
-local factories = import "kiln/pgcraft/factories.libsonnet";
+local resource = import "kiln/resources/presets.libsonnet";
 
 {
   version: "1",
@@ -15,57 +14,74 @@ local factories = import "kiln/pgcraft/factories.libsonnet";
 
   auth: auth.jwt({ secret_env: "INVENTORY_JWT_SECRET" }),
 
-  models: [
+  resources: [
+    // Products: full CRUD, mutations require auth
     {
-      name: "Product",
-      table: "products",
-      schema: "inventory",
-      pgcraft_type: factories.simple,
-      fields: [
-        field.uuid("id", primary_key=true),
-        field.str("sku", unique=true),
-        field.str("name"),
-        field.float("unit_price"),
-        field.bool("active"),
-        field.json("attributes", nullable=true),
-        field.datetime("created_at", auto_now_add=true),
-      ],
-    },
-    {
-      name: "StockMovement",
-      table: "stock_movements",
-      schema: "inventory",
-      pgcraft_type: factories.append_only,
-      fields: [
-        field.uuid("id", primary_key=true),
-        field.uuid("product_id", foreign_key="inventory.products.id"),
-        field.int("quantity"),
-        field.str("reason", nullable=true),
-        field.date("movement_date"),
-        field.datetime("recorded_at", auto_now_add=true),
-      ],
-    },
-  ],
+      model: "inventory.models.Product",
+      pk: "id",
+      pk_type: "uuid",
+      require_auth: ["create", "update", "delete"],
 
-  views: [
+      get: true,
+      list: {
+        fields: [
+          { name: "id", type: "uuid" },
+          { name: "sku", type: "str" },
+          { name: "name", type: "str" },
+          { name: "unit_price", type: "float" },
+          { name: "active", type: "bool" },
+        ],
+      },
+      create: {
+        fields: [
+          { name: "sku", type: "str" },
+          { name: "name", type: "str" },
+          { name: "unit_price", type: "float" },
+          { name: "active", type: "bool" },
+        ],
+      },
+      update: {
+        fields: [
+          { name: "name", type: "str" },
+          { name: "unit_price", type: "float" },
+          { name: "active", type: "bool" },
+        ],
+      },
+      delete: true,
+      actions: [],
+    },
+
+    // StockMovements: create-only (append-only pattern), with a postgres action
     {
-      name: "stock_levels_by_date",
-      schema: "inventory",
-      parameters: [
-        { name: "start_date", type: "date" },
-        { name: "end_date", type: "date" },
-      ],
-      returns: [
-        { name: "product_id", type: "uuid" },
-        { name: "sku", type: "str" },
-        { name: "net_quantity", type: "int" },
+      model: "inventory.models.StockMovement",
+      pk: "id",
+      pk_type: "uuid",
+      require_auth: ["create"],
+
+      get: false,
+      list: false,
+      create: {
+        fields: [
+          { name: "product_id", type: "uuid" },
+          { name: "quantity", type: "int" },
+          { name: "reason", type: "str" },
+          { name: "movement_date", type: "date" },
+        ],
+      },
+      update: false,
+      delete: false,
+
+      actions: [
+        resource.action(
+          name="stock_levels_by_date",
+          fn="inventory.queries.stock_levels_by_date",
+          params=[
+            { name: "start_date", type: "date" },
+            { name: "end_date", type: "date" },
+          ],
+          require_auth=true,
+        ),
       ],
     },
-  ],
-
-  routes: [
-    { type: "crud", model: "Product", crud: crud.full({ require_auth: ["create", "update", "delete"] }) },
-    { type: "crud", model: "StockMovement", crud: crud.no_list({ require_auth: ["create"] }) },
-    { type: "view", view: "stock_levels_by_date", require_auth: true, http_method: "GET" },
   ],
 }
