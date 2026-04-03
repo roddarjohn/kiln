@@ -16,7 +16,9 @@ async def {{ action.handler_name }}(
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
-    return await {{ action.fn_name }}({{ action.model_param_name }}, db=db{% if action.request_class %}, body=body{% endif %})
+    result = await {{ action.fn_name }}({{ action.model_param_name }}, db=db{% if action.request_class %}, body=body{% endif %})
+    await db.commit()
+    return result
 {% else %}
 @router.post("/{{ action.slug }}", response_model={{ action.response_class }})
 async def {{ action.handler_name }}(
@@ -29,5 +31,7 @@ async def {{ action.handler_name }}(
 {% endif %}
 ) -> {{ action.response_class }}:
     """Execute the {{ action.name }} collection action."""
-    return await {{ action.fn_name }}(db=db{% if action.request_class %}, body=body{% endif %})
+    result = await {{ action.fn_name }}(db=db{% if action.request_class %}, body=body{% endif %})
+    await db.commit()
+    return result
 {% endif %}
