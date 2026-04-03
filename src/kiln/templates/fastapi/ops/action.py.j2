@@ -1,14 +1,33 @@
-@router.post("/{{ '{' }}{{ pk_name }}{{ '}' }}/{{ action.slug }}", response_model=ActionResponse)
+{% if action.is_object_action %}
+@router.post("/{{ '{' }}{{ pk_name }}{{ '}' }}/{{ action.slug }}", response_model={{ action.response_class }})
 async def {{ action.handler_name }}(
     {{ pk_name }}: {{ pk_py_type }},
-{% if action.params %}
+{% if action.request_class %}
     body: {{ action.request_class }},
 {% endif %}
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if has_auth and action.requires_auth %}
     current_user: Annotated[dict, Depends(get_current_user)],
 {% endif %}
-) -> ActionResponse:
+) -> {{ action.response_class }}:
     """Execute the {{ action.name }} action on {{ model_name }}."""
-    await {{ action.fn_name }}({{ pk_name }}, db=db{% if action.params %}, **body.model_dump(){% endif %})
-    return ActionResponse()
+    {{ action.model_param_name }} = await get_object_from_query_or_404(
+        db,
+        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        detail="{{ model_name }} not found",
+    )
+    return await {{ action.fn_name }}({{ action.model_param_name }}, db=db{% if action.request_class %}, body=body{% endif %})
+{% else %}
+@router.post("/{{ action.slug }}", response_model={{ action.response_class }})
+async def {{ action.handler_name }}(
+{% if action.request_class %}
+    body: {{ action.request_class }},
+{% endif %}
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if has_auth and action.requires_auth %}
+    current_user: Annotated[dict, Depends(get_current_user)],
+{% endif %}
+) -> {{ action.response_class }}:
+    """Execute the {{ action.name }} collection action."""
+    return await {{ action.fn_name }}(db=db{% if action.request_class %}, body=body{% endif %})
+{% endif %}

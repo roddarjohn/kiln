@@ -77,17 +77,12 @@ local resource = import "kiln/resources/presets.libsonnet";
         resource.action(
           name="stock_levels_by_date",
           fn="inventory.queries.stock_levels_by_date",
-          params=[
-            { name: "start_date", type: "date" },
-            { name: "end_date", type: "date" },
-          ],
           require_auth=true,
         ),
         // No-param action, no auth — demonstrates both booleans
         resource.action(
           name="ping",
           fn="inventory.actions.ping_product",
-          params=[],
           require_auth=false,
         ),
       ],
@@ -147,7 +142,6 @@ local resource = import "kiln/resources/presets.libsonnet";
         resource.action(
           name="ping",
           fn="inventory.actions.ping_event_log",
-          params=[],
           require_auth=false,
         ),
       ],

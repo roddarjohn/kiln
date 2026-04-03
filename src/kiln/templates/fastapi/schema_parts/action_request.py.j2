@@ -1,6 +1,0 @@
-class {{ request_class }}(BaseModel):
-    """Request body for POST {{ route_prefix }}/{pk}/{{ slug }}."""
-
-{% for p in params %}
-    {{ p.name }}: {{ p.py_type }}
-{% endfor %}

@@ -75,13 +75,11 @@ local resource = import "kiln/resources/presets.libsonnet";
         resource.action(
           name="publish",
           fn="blog.actions.publish_article",
-          params=[{ name: "notify_subscribers", type: "bool" }],
           require_auth=true,
         ),
         resource.action(
           name="archive",
           fn="blog.actions.archive_article",
-          params=[{ name: "reason", type: "str" }],
           require_auth=true,
         ),
       ],

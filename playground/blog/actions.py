@@ -2,22 +2,57 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from blog.models.article import Article
+
+
+class PublishRequest(BaseModel):
+    """Request body for the publish action."""
+
+    notify_subscribers: bool = False
+
+
+class PublishResponse(BaseModel):
+    """Response from the publish action."""
+
+    status: str
+    notified: bool
+
+
+class ArchiveRequest(BaseModel):
+    """Request body for the archive action."""
+
+    reason: str = ""
+
+
+class ArchiveResponse(BaseModel):
+    """Response from the archive action."""
+
+    status: str
+    reason: str
+
 
 async def publish_article(
-    pk: object,
-    *,
-    db: object,
-    notify_subscribers: bool = False,
-) -> dict:
+    article: Article,
+    db: AsyncSession,
+    body: PublishRequest,
+) -> PublishResponse:
     """Publish an article."""
-    return {"status": "published", "notified": notify_subscribers}
+    return PublishResponse(
+        status="published",
+        notified=body.notify_subscribers,
+    )
 
 
 async def archive_article(
-    pk: object,
-    *,
-    db: object,
-    reason: str = "",
-) -> dict:
+    article: Article,
+    db: AsyncSession,
+    body: ArchiveRequest,
+) -> ArchiveResponse:
     """Archive an article."""
-    return {"status": "archived", "reason": reason}
+    return ArchiveResponse(
+        status="archived",
+        reason=body.reason,
+    )
