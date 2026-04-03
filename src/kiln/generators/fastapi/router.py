@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators._helpers import split_dotted_class
+from kiln.generators._helpers import prefix_path, split_dotted_class
 from kiln.generators.base import GeneratedFile
 
 if TYPE_CHECKING:
@@ -50,7 +50,12 @@ class RouterGenerator:
         """
         return [
             GeneratedFile(
-                path=f"{config.module}/routes/__init__.py",
+                path=prefix_path(
+                    config.package_prefix,
+                    config.module,
+                    "routes",
+                    "__init__.py",
+                ),
                 content=_render_router(config),
             )
         ]

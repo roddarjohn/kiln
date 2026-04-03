@@ -18,6 +18,9 @@ from auth.dependencies import get_current_user
 {% endif %}
 from {{ session_module }} import {{ get_db_fn }}
 from {{ model_module }} import {{ model_name }}
+{% if uses_utils %}
+from {{ utils_module }} import get_object_from_query_or_404
+{% endif %}
 {% for imp in action_imports %}
 {{ imp }}
 {% endfor %}
@@ -63,16 +66,12 @@ async def get_{{ model_lower }}(
 ) -> {% if op_get.has_schema %}{{ model_name }}GetResponse{% else %}object{% endif %}:
     """Get a {{ model_name }} by {{ pk_name }}."""
 {% if op_get.has_schema %}
-    result = await db.execute(
+    row = await get_object_from_query_or_404(
+        db,
         select({{ op_get.sa_columns | join(", ") }})
-        .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
+        .where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        detail="{{ model_name }} not found",
     )
-    row = result.one_or_none()
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="{{ model_name }} not found",
-        )
     return _to_{{ model_lower }}_get(row)
 {% else %}
     result = await db.execute(

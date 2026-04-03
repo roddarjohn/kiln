@@ -165,6 +165,16 @@ def test_resource_generator_cannot_generate_empty():
 def test_resource_generator_output_paths(full_config):
     files = ResourceGenerator().generate(full_config)
     paths = {f.path for f in files}
+    assert "_generated/myapp/routes/user.py" in paths
+    assert "_generated/myapp/schemas/user.py" in paths
+
+
+def test_resource_generator_output_paths_no_prefix():
+    """package_prefix="" emits paths without any prefix directory."""
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    paths = {f.path for f in files}
     assert "myapp/routes/user.py" in paths
     assert "myapp/schemas/user.py" in paths
 
@@ -209,7 +219,7 @@ def test_resource_generator_update_request_optional_fields(full_config):
 def test_resource_generator_route_imports_from_schema(full_config):
     files = ResourceGenerator().generate(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
-    assert "from myapp.schemas.user import" in route.content
+    assert "from _generated.myapp.schemas.user import" in route.content
 
 
 def test_resource_generator_serializer_functions(full_config):
@@ -392,7 +402,7 @@ def test_router_generator_can_generate(full_config):
 
 def test_router_generator_output_path(full_config):
     files = RouterGenerator().generate(full_config)
-    assert any(f.path == "myapp/routes/__init__.py" for f in files)
+    assert any(f.path == "_generated/myapp/routes/__init__.py" for f in files)
 
 
 def test_router_generator_valid_python(full_config):
@@ -428,6 +438,7 @@ def test_registry_default_has_builtins():
     names = set(r._generators)
     assert "resources" in names
     assert "router" in names
+    assert "utils" in names
 
 
 def test_registry_run_returns_files(full_config):
@@ -509,7 +520,7 @@ def test_scaffold_per_db_session_uses_correct_env_var():
 
 def test_resource_route_uses_default_db_session(full_config):
     files = ResourceGenerator().generate(full_config)
-    route = next(f for f in files if "routes/user.py" in f.path)
+    route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "db.session" in route.content
     assert "get_db" in route.content
 
@@ -664,7 +675,7 @@ def test_registry_project_mode_generates_scaffold_and_apps():
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
     assert "db/primary_session.py" in paths
-    assert "blog/routes/article.py" in paths
+    assert "_generated/blog/routes/article.py" in paths
     assert "routes/__init__.py" in paths
 
 

@@ -79,6 +79,38 @@ def type_imports(field_types: list[str]) -> list[str]:
     return lines
 
 
+def prefix_path(prefix: str, *parts: str) -> str:
+    """Build a file path under *prefix* (which may be empty).
+
+    Args:
+        prefix: Optional directory prefix, e.g. ``"_generated"``.
+        *parts: Path segments to join with ``/``.
+
+    Returns:
+        A ``/``-joined path, with *prefix* prepended when non-empty.
+
+    """
+    if prefix:
+        return "/".join([prefix, *parts])
+    return "/".join(parts)
+
+
+def prefix_import(prefix: str, *parts: str) -> str:
+    """Build a Python import path under *prefix* (which may be empty).
+
+    Args:
+        prefix: Optional package prefix, e.g. ``"_generated"``.
+        *parts: Module name segments to join with ``.``.
+
+    Returns:
+        A ``.``-joined import path, with *prefix* prepended when non-empty.
+
+    """
+    if prefix:
+        return ".".join([prefix, *parts])
+    return ".".join(parts)
+
+
 def resolve_db_session(
     db_key: str | None,
     databases: list[DatabaseConfig],

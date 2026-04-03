@@ -11,11 +11,13 @@ if TYPE_CHECKING:
 from kiln.generators.fastapi.project_router import ProjectRouterGenerator
 from kiln.generators.fastapi.resource import ResourceGenerator
 from kiln.generators.fastapi.router import RouterGenerator
+from kiln.generators.fastapi.utils_gen import UtilsGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
 
 _BUILTIN_GENERATORS: list[type[Generator]] = [
     ResourceGenerator,
     RouterGenerator,
+    UtilsGenerator,
 ]
 
 

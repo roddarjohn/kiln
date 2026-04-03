@@ -9,6 +9,8 @@ from kiln.config.schema import FieldsConfig
 from kiln.generators._env import env
 from kiln.generators._helpers import (
     PYTHON_TYPES,
+    prefix_import,
+    prefix_path,
     resolve_db_session,
     split_dotted_class,
     type_imports,
@@ -217,6 +219,7 @@ class ResourceGenerator:
             file under ``{module}/routes/``.
 
         """
+        pkg = config.package_prefix
         app = config.module
         files: list[GeneratedFile] = []
         for resource in config.resources:
@@ -228,13 +231,13 @@ class ResourceGenerator:
 
             files.append(
                 GeneratedFile(
-                    path=f"{app}/schemas/{model_lower}.py",
+                    path=prefix_path(pkg, app, "schemas", f"{model_lower}.py"),
                     content=_render_schema(ctx),
                 )
             )
             files.append(
                 GeneratedFile(
-                    path=f"{app}/routes/{model_lower}.py",
+                    path=prefix_path(pkg, app, "routes", f"{model_lower}.py"),
                     content=_render_resource(ctx),
                 )
             )
@@ -353,6 +356,7 @@ def _build_ctx(
     model_module, model_name = split_dotted_class(resource.model)
     model_lower = model_name.lower()
     app = config.module
+    pkg = config.package_prefix
 
     route_prefix = resource.route_prefix or f"/{model_lower}s"
     require_auth = resource.require_auth
@@ -398,6 +402,10 @@ def _build_ctx(
         else None
     )
 
+    uses_utils = op_get["enabled"] and op_get["has_schema"]
+    utils_module = prefix_import(pkg, app, "utils")
+    schema_module = prefix_import(pkg, app, "schemas", model_lower)
+
     return {
         "model_name": model_name,
         "model_module": model_module,
@@ -418,7 +426,9 @@ def _build_ctx(
         "actions": action_ctxs,
         "has_actions": has_actions,
         "response_schema": response_schema,
-        "schema_module": f"{app}.schemas.{model_lower}",
+        "schema_module": schema_module,
+        "utils_module": utils_module,
+        "uses_utils": uses_utils,
         "schema_names": schema_names,
         "serializers": serializers,
         "sqlalchemy_imports": sa_ops,
