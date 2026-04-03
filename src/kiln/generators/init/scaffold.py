@@ -38,10 +38,8 @@ class ScaffoldGenerator:
             objects.
 
         """
-        db_base = env.get_template("init/db_base.py.j2").render()
         files: list[GeneratedFile] = [
             GeneratedFile("db/__init__.py", ""),
-            GeneratedFile("db/base.py", db_base),
         ]
         files.extend(_render_sessions(config))
         if config.auth is not None:

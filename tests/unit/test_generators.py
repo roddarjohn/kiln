@@ -129,7 +129,6 @@ def test_scaffold_generates_db_files():
     cfg = KilnConfig()
     files = ScaffoldGenerator().generate(cfg)
     paths = {f.path for f in files}
-    assert "db/base.py" in paths
     assert "db/session.py" in paths
     assert "auth/dependencies.py" not in paths
 
@@ -860,7 +859,6 @@ def test_registry_app_mode_generates_scaffold_when_auth_present(
     files = GeneratorRegistry.default().run(full_config)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
-    assert "db/base.py" in paths
 
 
 # ---------------------------------------------------------------------------

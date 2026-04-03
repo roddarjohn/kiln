@@ -92,7 +92,6 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
         app, ["generate", "--config", str(cfg), "--out", str(out)]
     )
     assert result.exit_code == 0
-    assert (out / "db" / "base.py").exists()
     assert (out / "db" / "primary_session.py").exists()
     assert (out / "auth" / "dependencies.py").exists()
 
