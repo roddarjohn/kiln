@@ -12,17 +12,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Both directories contribute to the same namespace packages.
-# playground/           → blog/db/views/ (hand-written query fns)
-# playground/generated/ → blog/models/, blog/routes/ (generated)
-# Python namespace packages merge both automatically provided neither
-# blog/__init__.py exists.
+# Both directories contribute to the same namespace packages via
+# Python namespace packages (no __init__.py in blog/ or inventory/).
+# playground/            → blog/, inventory/ (hand-written models and code)
+# playground/_generated/ → blog/routes/, inventory/routes/, auth/, db/ (generated)
 here = Path(__file__).parent
 sys.path.insert(0, str(here))
-sys.path.insert(0, str(here / "generated"))
+sys.path.insert(0, str(here / "_generated"))
 
 from fastapi import FastAPI
-from routes import router  # generated/routes/__init__.py
+from routes import router  # _generated/routes/__init__.py
 
 app = FastAPI(
     title="Kiln Playground",

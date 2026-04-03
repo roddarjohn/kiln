@@ -171,4 +171,7 @@ class AppRef(BaseModel):
     prefix: str
 
 
+# KilnConfig.apps references AppRef, which is defined after KilnConfig.
+# Pydantic cannot resolve that forward reference during class creation,
+# so we force a rebuild once AppRef is available.
 KilnConfig.model_rebuild()

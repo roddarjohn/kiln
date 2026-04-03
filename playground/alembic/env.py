@@ -1,7 +1,7 @@
 """Alembic environment for the kiln playground.
 
 Imports all playground models so that Alembic autogenerate can detect
-every table defined across the app, blog, inventory, and kitchen modules.
+every table defined across the blog and inventory modules.
 
 The database URL is read from the ``DATABASE_URL`` environment variable
 at migration time; ``alembic.ini`` provides a fallback for development.
@@ -25,10 +25,8 @@ from sqlalchemy import create_engine, pool
 # Import all models so that Base.metadata is fully populated before
 # autogenerate runs.  The order matters for foreign-key resolution.
 # ---------------------------------------------------------------------------
-import app.models  # noqa: F401
 import blog.models  # noqa: F401
 import inventory.models  # noqa: F401
-import kitchen.models  # noqa: F401
 
 from db.base import Base
 
