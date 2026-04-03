@@ -1663,7 +1663,7 @@ def test_introspect_non_basemodel_return_raises():
         introspect_action_fn,
     )
 
-    with pytest.raises(ValueError, match="BaseModel"):
+    with pytest.raises(TypeError, match="BaseModel"):
         introspect_action_fn(
             f"{_STUB}.action_no_return",
             f"{_STUB}.StubModel",
@@ -1675,7 +1675,7 @@ def test_introspect_no_annotations_raises():
         introspect_action_fn,
     )
 
-    with pytest.raises(ValueError, match="BaseModel"):
+    with pytest.raises(TypeError, match="BaseModel"):
         introspect_action_fn(
             f"{_STUB}.action_no_annotations",
             f"{_STUB}.StubModel",

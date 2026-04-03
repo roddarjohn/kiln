@@ -225,7 +225,7 @@ def introspect_action_fn(
     fn = _import_callable(fn_dotted)
     model_cls = _import_callable(model_class_path)
     hints = _resolve_hints(fn, fn_dotted)
-    sig = inspect.signature(fn)
+    sig = inspect.signature(fn)  # type: ignore[arg-type]
 
     is_object_action = False
     model_param_name: str | None = None
