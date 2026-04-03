@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import inspect
+import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -52,6 +54,7 @@ from kiln.generators.fastapi.list_extensions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from kiln.config.schema import (
@@ -172,6 +175,169 @@ def build_shared_context(
         response_schema=response_schema,
         package_prefix=config.package_prefix,
     )
+
+
+# -------------------------------------------------------------------
+# Action introspection
+# -------------------------------------------------------------------
+
+
+@dataclass
+class IntrospectedAction:
+    """Result of inspecting a consumer's action function.
+
+    Produced by :func:`introspect_action_fn` and consumed by
+    :class:`ActionOperation` to decide what code to generate.
+    """
+
+    is_object_action: bool
+    model_param_name: str | None
+    request_class: str | None
+    request_module: str | None
+    response_class: str
+    response_module: str
+
+
+def introspect_action_fn(
+    fn_dotted: str,
+    model_class_path: str,
+) -> IntrospectedAction:
+    """Import an action function and inspect its annotations.
+
+    Determines whether the function is an *object action* (has
+    a parameter matching the resource model) or a *collection
+    action*, and extracts request body and response types.
+
+    Args:
+        fn_dotted: Dotted import path to the function,
+            e.g. ``"blog.actions.publish_article"``.
+        model_class_path: Dotted import path to the resource
+            model, e.g. ``"blog.models.Article"``.
+
+    Returns:
+        An :class:`IntrospectedAction` with classified params.
+
+    Raises:
+        ValueError: If the function cannot be imported, lacks
+            annotations, has multiple body params, or returns
+            a non-``BaseModel`` type.
+
+    """
+    fn = _import_callable(fn_dotted)
+    model_cls = _import_callable(model_class_path)
+    hints = _resolve_hints(fn, fn_dotted)
+    sig = inspect.signature(fn)
+
+    is_object_action = False
+    model_param_name: str | None = None
+    request_class: str | None = None
+    request_module: str | None = None
+
+    for param_name in sig.parameters:
+        hint = hints.get(param_name)
+        if hint is None or _is_async_session(hint):
+            continue
+        if hint is model_cls:
+            is_object_action = True
+            model_param_name = param_name
+        elif _is_pydantic_model(hint):
+            if request_class is not None:
+                msg = (
+                    f"Action '{fn_dotted}' has multiple "
+                    f"BaseModel parameters. Only one "
+                    f"request body is allowed."
+                )
+                raise ValueError(msg)
+            request_class = hint.__name__
+            request_module = hint.__module__
+
+    response_class, response_module = _validate_return_type(hints, fn_dotted)
+
+    return IntrospectedAction(
+        is_object_action=is_object_action,
+        model_param_name=model_param_name,
+        request_class=request_class,
+        request_module=request_module,
+        response_class=response_class,
+        response_module=response_module,
+    )
+
+
+def _import_callable(dotted: str) -> Callable[..., object]:
+    """Import a name from a dotted path."""
+    mod_path, _, attr = dotted.rpartition(".")
+    if not mod_path:
+        msg = f"'{dotted}' is not a valid dotted path."
+        raise ValueError(msg)
+    try:
+        mod = importlib.import_module(mod_path)
+    except ModuleNotFoundError as exc:
+        msg = (
+            f"Cannot import module '{mod_path}' for "
+            f"'{dotted}'. Ensure the consumer code is "
+            f"on sys.path."
+        )
+        raise ValueError(msg) from exc
+    obj = getattr(mod, attr, None)
+    if obj is None:
+        msg = f"'{attr}' not found in module '{mod_path}'."
+        raise ValueError(msg)
+    return obj
+
+
+def _resolve_hints(
+    fn: object,
+    fn_dotted: str,
+) -> dict[str, type]:
+    """Resolve type hints for a callable."""
+    try:
+        return typing.get_type_hints(fn)
+    except Exception as exc:
+        msg = f"Cannot resolve type annotations for '{fn_dotted}': {exc}"
+        raise ValueError(msg) from exc
+
+
+def _is_async_session(hint: object) -> bool:
+    """Check whether *hint* is ``AsyncSession``."""
+    return isinstance(hint, type) and hint.__name__ == "AsyncSession"
+
+
+def _is_pydantic_model(hint: object) -> bool:
+    """Check whether *hint* is a ``BaseModel`` subclass."""
+    return isinstance(hint, type) and issubclass(hint, BaseModel)
+
+
+def _validate_return_type(
+    hints: dict[str, type],
+    fn_dotted: str,
+) -> tuple[str, str]:
+    """Extract and validate the return type annotation.
+
+    Returns:
+        ``(class_name, module_path)`` tuple.
+
+    Raises:
+        TypeError: If the return annotation is missing or
+            not a ``BaseModel`` subclass.
+
+    """
+    return_hint = hints.get("return")
+    if return_hint is None:
+        msg = (
+            f"Action '{fn_dotted}' has no return type "
+            f"annotation. A BaseModel return type is "
+            f"required."
+        )
+        raise TypeError(msg)
+    if not _is_pydantic_model(return_hint):
+        msg = (
+            f"Action '{fn_dotted}' return type "
+            f"'{return_hint}' is not a BaseModel "
+            f"subclass. A BaseModel return type is "
+            f"required."
+        )
+        raise TypeError(msg)
+    return return_hint.__name__, return_hint.__module__
 
 
 # -------------------------------------------------------------------
@@ -742,11 +908,12 @@ class DeleteOperation:
 
 
 class ActionOperation:
-    """POST /{pk}/{action_slug} — custom action endpoint.
+    """Custom action endpoint via function introspection.
 
-    Each action is a separate operation entry in the config.
-    The operation's name is the action slug; the ``fn`` option
-    provides the dotted import path to the async callable.
+    Inspects the consumer's action function at generation time
+    to determine whether it is an *object action* (receives the
+    hydrated model instance) or a *collection action*, and
+    extracts request/response types from annotations.
     """
 
     name = "action"
@@ -755,7 +922,6 @@ class ActionOperation:
         """Options for action operations."""
 
         fn: str
-        params: list[FieldSpec] = []
 
     def contribute(
         self,
@@ -765,46 +931,40 @@ class ActionOperation:
         op_config: OperationConfig,
         options: Options,
     ) -> None:
-        """Emit action schema and route handler."""
-        schema = specs["schema"]
+        """Emit route handler from introspected function."""
         route = specs["route"]
         action_name = Name(op_config.name)
 
-        # Schema contribution
-        if options.params:
-            field_dicts = _field_dicts(options.params)
-            snippet = render_snippet(
-                "fastapi/schema_parts/action_request.py.j2",
-                request_class=action_name.suffixed("Request"),
-                route_prefix=ctx.route_prefix,
-                slug=action_name.slug,
-                params=field_dicts,
-            )
-            schema.context["schema_classes"].append(snippet)
-            schema.exports.append(
-                action_name.suffixed("Request"),
-            )
-            _add_field_type_imports(schema.imports, options.params)
+        # Introspect the consumer function.
+        info = introspect_action_fn(options.fn, resource.model)
 
-        # ActionResponse (guard against duplicates)
-        if "ActionResponse" not in schema.exports:
-            snippet = render_snippet(
-                "fastapi/schema_parts/action_response.py.j2",
-            )
-            schema.context["schema_classes"].append(snippet)
-            schema.exports.append("ActionResponse")
-
-        # Route contribution
+        # Import the action function itself.
         fn_module, fn_name = Name.from_dotted(options.fn)
         route.imports.add_from(fn_module, fn_name.raw)
+
+        # Import request / response classes.
+        if info.request_class and info.request_module:
+            route.imports.add_from(info.request_module, info.request_class)
+        route.imports.add_from(info.response_module, info.response_class)
+
+        # Object actions need select + model + 404 helper.
+        if info.is_object_action:
+            route.imports.add_from("sqlalchemy", "select")
+            route.imports.add_from(ctx.model_module, ctx.model.pascal)
+            route.imports.add_from(
+                route.context["utils_module"],
+                "get_object_from_query_or_404",
+            )
 
         action_ctx = {
             "name": action_name.raw,
             "fn_name": fn_name.raw,
             "slug": action_name.slug,
-            "handler_name": f"{action_name.raw}_action",
-            "request_class": action_name.suffixed("Request"),
-            "params": (_field_dicts(options.params) if options.params else []),
+            "handler_name": (f"{action_name.raw}_action"),
+            "is_object_action": info.is_object_action,
+            "model_param_name": info.model_param_name,
+            "request_class": info.request_class,
+            "response_class": info.response_class,
             "requires_auth": _op_requires_auth(resource, op_config),
         }
         handler = render_snippet(

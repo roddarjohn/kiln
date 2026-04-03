@@ -48,11 +48,11 @@
 
   // Shorthand for an action entry in the operations list.
   // fn is a dotted Python import path, e.g. "myapp.actions.publish".
-  // The callable receives (pk, db=db, **params).
-  action(name, fn, params=[], require_auth=true):: {
+  // The callable's type annotations are inspected at generation
+  // time to determine the request body and response model.
+  action(name, fn, require_auth=true):: {
     name: name,
     fn: fn,
-    [if std.length(params) > 0 then "params"]: params,
     [if require_auth != true then "require_auth"]: require_auth,
   },
 }

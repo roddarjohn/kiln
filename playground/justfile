@@ -1,6 +1,8 @@
 config := "examples/project.jsonnet"
 out    := "_generated"
 
+export PYTHONPATH := "."
+
 # List available recipes
 default:
     @just --list

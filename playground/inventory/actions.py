@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from inventory.models import EventLog, Product
+
+
+class PingResponse(BaseModel):
+    """Response from a ping action."""
+
+    status: str
+
 
 async def ping_product(
-    pk: object,
-    *,
-    db: object,
-) -> dict:
+    product: Product,
+    db: AsyncSession,
+) -> PingResponse:
     """Ping a product."""
-    return {"status": "pong"}
+    return PingResponse(status="pong")
 
 
 async def ping_event_log(
-    pk: object,
-    *,
-    db: object,
-) -> dict:
+    event_log: EventLog,
+    db: AsyncSession,
+) -> PingResponse:
     """Ping an event log."""
-    return {"status": "pong"}
+    return PingResponse(status="pong")

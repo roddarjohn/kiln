@@ -61,7 +61,7 @@ def simple_resource() -> ResourceConfig:
 @pytest.fixture
 def action_resource() -> ResourceConfig:
     return ResourceConfig(
-        model="blog.models.Article",
+        model="tests.unit._action_stubs.StubModel",
         pk="id",
         pk_type="uuid",
         require_auth=False,
@@ -81,14 +81,12 @@ def action_resource() -> ResourceConfig:
             OperationConfig(name="delete", require_auth=True),
             OperationConfig(
                 name="publish",
-                fn="blog.actions.publish_article",
-                params=[{"name": "notify", "type": "bool"}],
+                fn="tests.unit._action_stubs.object_action_with_body",
                 require_auth=True,
             ),
             OperationConfig(
                 name="archive",
-                fn="blog.actions.archive_article",
-                params=[{"name": "reason", "type": "str"}],
+                fn="tests.unit._action_stubs.object_action_no_body",
                 require_auth=True,
             ),
         ],
@@ -317,35 +315,26 @@ def test_resource_generator_route_prefix_custom():
 def test_resource_generator_python_action(action_resource):
     cfg = KilnConfig(resources=[action_resource])
     files = ResourceGenerator().generate(cfg)
-    route = next(f for f in files if "routes/article.py" in f.path)
-    schema = next(f for f in files if "schemas/article.py" in f.path)
+    route = next(f for f in files if "routes/stubmodel.py" in f.path)
     assert "publish_action" in route.content
-    # top-level import, not deferred
-    assert "from blog.actions import" in route.content
-    assert "publish_article" in route.content
-    # no deferred import inside the function
-    assert "# noqa: PLC0415" not in route.content
-    # request class lives in the schema file
-    assert "class PublishRequest(BaseModel):" in schema.content
+    # top-level import of the action function
+    assert "object_action_with_body" in route.content
+    # introspected response model
+    assert "response_model=StubResponse" in route.content
+    # object action fetches the instance
+    assert "get_object_from_query_or_404" in route.content
+    # request body passed as typed object
+    assert "body: StubRequest" in route.content
 
 
 def test_resource_generator_archive_action(action_resource):
     cfg = KilnConfig(resources=[action_resource])
     files = ResourceGenerator().generate(cfg)
-    route = next(f for f in files if "routes/article.py" in f.path)
+    route = next(f for f in files if "routes/stubmodel.py" in f.path)
     assert "archive_action" in route.content
-    # both actions from the same module -> one import line
-    assert "from blog.actions import" in route.content
-
-
-def test_resource_generator_action_response(action_resource):
-    cfg = KilnConfig(resources=[action_resource])
-    files = ResourceGenerator().generate(cfg)
-    schema = next(f for f in files if "schemas/article.py" in f.path)
-    route = next(f for f in files if "routes/article.py" in f.path)
-    assert "class ActionResponse(BaseModel):" in schema.content
-    assert "response_model=ActionResponse" in route.content
-    assert "return ActionResponse()" in route.content
+    # object action without a body
+    assert "object_action_no_body" in route.content
+    assert "response_model=StubResponse" in route.content
 
 
 def test_resource_generator_valid_python_with_actions(action_resource):
@@ -1274,59 +1263,78 @@ def test_action_operation_validate_requires_fn():
         ActionOperation.Options(**oc.options)
 
 
-def test_action_operation_schema(specs, shared_ctx):
+def test_action_operation_object_action(specs, shared_ctx):
     from kiln.generators.fastapi.operations import ActionOperation
 
+    stub = "tests.unit._action_stubs"
     r = ResourceConfig(
-        model="m.M",
+        model=f"{stub}.StubModel",
         operations=[
             OperationConfig(
                 name="publish",
-                fn="m.publish",
-                params=[{"name": "notify", "type": "bool"}],
+                fn=f"{stub}.object_action_with_body",
                 require_auth=True,
             ),
         ],
     )
-    oc = OperationConfig(
-        name="publish",
-        fn="m.publish",
-        params=[{"name": "notify", "type": "bool"}],
-        require_auth=True,
-    )
-    opts = ActionOperation.Options(**oc.options)
-    ActionOperation().contribute(specs, r, shared_ctx, oc, opts)
-    assert "PublishRequest" in specs["schema"].exports
-    assert "ActionResponse" in specs["schema"].exports
-
-
-def test_action_operation_route(specs, shared_ctx):
-    from kiln.generators.fastapi.operations import ActionOperation
-
-    r = ResourceConfig(
-        model="m.M",
-        operations=[
-            OperationConfig(
-                name="publish",
-                fn="blog.actions.publish_article",
-                params=[{"name": "notify", "type": "bool"}],
-                require_auth=True,
-            ),
-        ],
-    )
-    oc = OperationConfig(
-        name="publish",
-        fn="blog.actions.publish_article",
-        params=[{"name": "notify", "type": "bool"}],
-        require_auth=True,
-    )
+    oc = r.operations[0]
     opts = ActionOperation.Options(**oc.options)
     ActionOperation().contribute(specs, r, shared_ctx, oc, opts)
     handler = specs["route"].context["route_handlers"][0]
     assert "@router.post" in handler
-    assert "publish" in handler
+    assert "get_object_from_query_or_404" in handler
+    assert "body: StubRequest" in handler
+    assert "response_model=StubResponse" in handler
     lines = "\n".join(specs["route"].imports.lines())
-    assert "publish_article" in lines
+    assert "object_action_with_body" in lines
+    assert "StubRequest" in lines
+    assert "StubResponse" in lines
+    # No schema exports — types come from consumer code
+    assert "ActionResponse" not in specs["schema"].exports
+
+
+def test_action_operation_collection_action(specs, shared_ctx):
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    stub = "tests.unit._action_stubs"
+    r = ResourceConfig(
+        model=f"{stub}.StubModel",
+        operations=[
+            OperationConfig(
+                name="cleanup",
+                fn=f"{stub}.collection_action_with_body",
+            ),
+        ],
+    )
+    oc = r.operations[0]
+    opts = ActionOperation.Options(**oc.options)
+    ActionOperation().contribute(specs, r, shared_ctx, oc, opts)
+    handler = specs["route"].context["route_handlers"][0]
+    assert "@router.post" in handler
+    assert "get_object_from_query_or_404" not in handler
+    assert "body: StubRequest" in handler
+    assert "response_model=StubResponse" in handler
+
+
+def test_action_operation_no_body(specs, shared_ctx):
+    from kiln.generators.fastapi.operations import ActionOperation
+
+    stub = "tests.unit._action_stubs"
+    r = ResourceConfig(
+        model=f"{stub}.StubModel",
+        operations=[
+            OperationConfig(
+                name="ping",
+                fn=f"{stub}.object_action_no_body",
+            ),
+        ],
+    )
+    oc = r.operations[0]
+    opts = ActionOperation.Options(**oc.options)
+    ActionOperation().contribute(specs, r, shared_ctx, oc, opts)
+    handler = specs["route"].context["route_handlers"][0]
+    assert "body:" not in handler
+    assert "response_model=StubResponse" in handler
 
 
 # ---------------------------------------------------------------------------
@@ -1501,7 +1509,7 @@ def test_pipeline_action_resource_valid_python(action_resource):
     from kiln.generators.fastapi.pipeline import ResourcePipeline
 
     cfg = KilnConfig(
-        module="blog",
+        module="tests",
         auth=AuthConfig(),
         resources=[action_resource],
     )
@@ -1580,3 +1588,107 @@ def test_resource_generator_delegates_to_pipeline(full_config):
     paths = [f.path for f in files]
     assert "myapp/schemas/user.py" in paths
     assert "myapp/routes/user.py" in paths
+
+
+# ---------------------------------------------------------------------------
+# Action introspection
+# ---------------------------------------------------------------------------
+
+_STUB = "tests.unit._action_stubs"
+
+
+def test_introspect_object_action_with_body():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_with_body",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is True
+    assert info.model_param_name == "obj"
+    assert info.request_class == "StubRequest"
+    assert info.request_module == _STUB
+    assert info.response_class == "StubResponse"
+    assert info.response_module == _STUB
+
+
+def test_introspect_object_action_no_body():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_no_body",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is True
+    assert info.model_param_name == "obj"
+    assert info.request_class is None
+    assert info.response_class == "StubResponse"
+
+
+def test_introspect_collection_action():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_with_body",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is False
+    assert info.model_param_name is None
+    assert info.request_class == "StubRequest"
+    assert info.response_class == "StubResponse"
+
+
+def test_introspect_collection_no_body():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_no_body",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is False
+    assert info.request_class is None
+    assert info.response_class == "StubResponse"
+
+
+def test_introspect_non_basemodel_return_raises():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    with pytest.raises(TypeError, match="BaseModel"):
+        introspect_action_fn(
+            f"{_STUB}.action_no_return",
+            f"{_STUB}.StubModel",
+        )
+
+
+def test_introspect_no_annotations_raises():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    with pytest.raises(TypeError, match="BaseModel"):
+        introspect_action_fn(
+            f"{_STUB}.action_no_annotations",
+            f"{_STUB}.StubModel",
+        )
+
+
+def test_introspect_bad_module_raises():
+    from kiln.generators.fastapi.operations import (
+        introspect_action_fn,
+    )
+
+    with pytest.raises(ValueError, match="Cannot import"):
+        introspect_action_fn(
+            "nonexistent.module.fn",
+            f"{_STUB}.StubModel",
+        )
