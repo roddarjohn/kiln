@@ -66,7 +66,7 @@ def test_generate_writes_app_files(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert "Generated" in result.output
-    assert (out / "myapp" / "routes" / "post.py").exists()
+    assert (out / "_generated" / "myapp" / "routes" / "post.py").exists()
 
 
 def test_generate_with_auth_writes_scaffold(tmp_path: Path):
@@ -86,7 +86,7 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
     assert result.exit_code == 0
     assert (out / "db" / "base.py").exists()
     assert (out / "db" / "primary_session.py").exists()
-    assert (out / "auth" / "dependencies.py").exists()
+    assert (out / "auth" / "dependencies.py").exists()  # scaffold not prefixed
 
 
 def test_generate_overwrites_on_rerun(tmp_path: Path):
@@ -150,8 +150,8 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     assert result.exit_code == 0
     assert (out / "db" / "primary_session.py").exists()
     assert (out / "auth" / "dependencies.py").exists()
-    assert (out / "blog" / "routes" / "article.py").exists()
-    assert (out / "inventory" / "routes" / "product.py").exists()
+    assert (out / "_generated" / "blog" / "routes" / "article.py").exists()
+    assert (out / "_generated" / "inventory" / "routes" / "product.py").exists()
     assert (out / "routes" / "__init__.py").exists()
     root_router = (out / "routes" / "__init__.py").read_text()
     assert "blog_router" in root_router

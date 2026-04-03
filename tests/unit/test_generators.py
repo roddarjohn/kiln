@@ -19,6 +19,7 @@ from kiln.generators.base import GeneratedFile, Generator
 from kiln.generators.fastapi.project_router import ProjectRouterGenerator
 from kiln.generators.fastapi.resource import ResourceGenerator
 from kiln.generators.fastapi.router import RouterGenerator
+from kiln.generators.fastapi.utils_gen import UtilsGenerator
 from kiln.generators.init.scaffold import ScaffoldGenerator
 from kiln.generators.registry import GeneratorRegistry
 
@@ -426,6 +427,68 @@ def test_router_generator_multiple_resources():
     (f,) = RouterGenerator().generate(cfg)
     assert "user_router" in f.content
     assert "article_router" in f.content
+
+
+# ---------------------------------------------------------------------------
+# UtilsGenerator
+# ---------------------------------------------------------------------------
+
+
+def test_utils_generator_can_generate(full_config):
+    assert UtilsGenerator().can_generate(full_config)
+
+
+def test_utils_generator_cannot_generate_empty():
+    assert not UtilsGenerator().can_generate(KilnConfig())
+
+
+def test_utils_generator_output_path(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    assert f.path == "_generated/myapp/utils.py"
+
+
+def test_utils_generator_output_path_no_prefix():
+    cfg = KilnConfig(
+        module="myapp",
+        package_prefix="",
+        resources=[ResourceConfig(model="myapp.models.User", get=True)],
+    )
+    (f,) = UtilsGenerator().generate(cfg)
+    assert f.path == "myapp/utils.py"
+
+
+def test_utils_generator_valid_python(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    ast.parse(f.content)
+
+
+def test_utils_generator_contains_helper(full_config):
+    (f,) = UtilsGenerator().generate(full_config)
+    assert "get_object_from_query_or_404" in f.content
+
+
+def test_resource_generator_uses_utils_for_get_with_schema():
+    """GET route with has_schema uses get_object_from_query_or_404."""
+    r = ResourceConfig(
+        model="myapp.models.User",
+        get=FieldsConfig(fields=[FieldSpec(name="id", type="uuid")]),
+    )
+    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if f.path.endswith("routes/user.py"))
+    assert "get_object_from_query_or_404" in route.content
+    assert (
+        "from myapp.utils import get_object_from_query_or_404" in route.content
+    )
+
+
+def test_resource_generator_no_utils_for_get_without_schema():
+    """GET route with get=True (no schema) does NOT import utils."""
+    r = ResourceConfig(model="myapp.models.User", get=True)
+    cfg = KilnConfig(module="myapp", package_prefix="", resources=[r])
+    files = ResourceGenerator().generate(cfg)
+    route = next(f for f in files if f.path.endswith("routes/user.py"))
+    assert "get_object_from_query_or_404" not in route.content
 
 
 # ---------------------------------------------------------------------------
