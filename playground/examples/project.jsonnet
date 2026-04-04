@@ -16,6 +16,7 @@ local db = import "kiln/db/databases.libsonnet";
     secret_env: "JWT_SECRET",
     token_url: "/auth/token",
     exclude_paths: ["/docs", "/openapi.json", "/health", "/metrics"],
+    verify_credentials_fn: "myapp.auth.verify_credentials",
   }),
 
   // -------------------------------------------------------------------------
