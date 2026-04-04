@@ -70,6 +70,6 @@ See [LICENSE](LICENSE) for details.
 
 - [done] filtering / pagination
 
-- spin up sample kiln app
+- [done] spin up sample kiln app
 
-- autogenerate tests
+- [done] autogenerate tests
