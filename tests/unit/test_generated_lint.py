@@ -43,7 +43,7 @@ def _ruff_toml() -> str:
 
 FULL_CRUD = KilnConfig(
     module="myapp",
-    auth=AuthConfig(),
+    auth=AuthConfig(verify_credentials_fn="myapp.auth.verify"),
     resources=[
         ResourceConfig(
             model="myapp.models.User",
@@ -200,7 +200,7 @@ MULTI_DB = KilnConfig(
 
 CREATE_ONLY = KilnConfig(
     module="logs",
-    auth=AuthConfig(),
+    auth=AuthConfig(verify_credentials_fn="myapp.auth.verify"),
     resources=[
         ResourceConfig(
             model="logs.models.AuditEntry",
