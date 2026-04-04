@@ -160,6 +160,9 @@ class ResourceConfig(BaseModel):
     operations: list[str | OperationConfig] | None = None
     """Ordered list of operations to run.  ``None`` inherits from
     the parent :class:`KilnConfig`."""
+    generate_tests: bool = False
+    """When ``True``, emit a pytest test file for this resource's
+    generated routes and serializers."""
 
 
 class KilnConfig(BaseModel):

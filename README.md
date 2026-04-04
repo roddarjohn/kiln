@@ -64,12 +64,12 @@ See [LICENSE](LICENSE) for details.
   - e.g. filter list endpoints
   - should be rego I'd think
 
-- enums
+- [done] enums
 
 - related models in dumps
 
-- filtering / pagination
+- [done] filtering / pagination
 
-- spin up sample kiln app
+- [done] spin up sample kiln app
 
-- autogenerate tests
+- [done] autogenerate tests

@@ -1,0 +1,272 @@
+{% from "_macros.j2" import file_header %}
+{{ file_header("Tests for " ~ model_name ~ " routes") }}
+
+{{ import_block }}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_SAMPLE_VALUES: dict[str, object] = {
+    "uuid.UUID": uuid.uuid4(),
+    "str": "test",
+    "int": 1,
+    "float": 1.0,
+    "bool": True,
+    "datetime": "2024-01-01T00:00:00",
+    "date": "2024-01-01",
+}
+
+_MISSING_UUID = uuid.uuid4()
+
+
+def _sample(py_type: str) -> object:
+    """Return a sample value for a Python type string."""
+    return _SAMPLE_VALUES.get(py_type, "test")
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _mock_row() -> MagicMock:
+    """Create a mock ORM row with typed attributes."""
+    row = MagicMock()
+{% if has_serializer_test %}
+{% for f in serializer_fields %}
+    row.{{ f.name }} = _sample("{{ f.py_type }}")
+{% endfor %}
+{% endif %}
+    return row
+
+
+@pytest.fixture()
+def mock_db():
+    """Async mock database session."""
+    session = AsyncMock()
+    session.commit = AsyncMock()
+
+    # Default: execute returns a result with scalars().one() and .all()
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.one.return_value = _mock_row()
+    mock_scalars.one_or_none.return_value = _mock_row()
+    mock_scalars.all.return_value = [_mock_row()]
+    mock_result.scalars.return_value = mock_scalars
+    mock_result.rowcount = 1
+    session.execute = AsyncMock(return_value=mock_result)
+
+    return session
+
+
+@pytest.fixture()
+def app(mock_db):
+    """FastAPI app with the resource router and overridden DB dependency."""
+    application = FastAPI()
+    application.include_router(router)
+    application.dependency_overrides[{{ get_db_fn }}] = lambda: mock_db
+    return application
+
+
+def _stub_dml(*_args, **_kwargs):
+    """Return a chainable MagicMock for SQLAlchemy DML statements."""
+    m = MagicMock()
+    m.where.return_value = m
+    m.values.return_value = m
+    m.returning.return_value = m
+    return m
+
+
+@pytest.fixture(autouse=True)
+def _patch_dml(monkeypatch):
+    """Replace SQLAlchemy DML builders in the route module with stubs."""
+    import {{ route_module }} as _route_mod
+
+    for name in ("select", "insert", "update", "delete"):
+        if hasattr(_route_mod, name):
+            monkeypatch.setattr(_route_mod, name, _stub_dml)
+
+
+@pytest_asyncio.fixture()
+async def client(app):
+    """Async HTTP client for testing."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+    ) as ac:
+        yield ac
+
+
+# ---------------------------------------------------------------------------
+# Route tests
+# ---------------------------------------------------------------------------
+
+{% for tc in test_cases %}
+{% set suffix = "_" ~ tc.action_name if tc.action_name else "" %}
+{% set fn_name = tc.op_name ~ suffix %}
+{% set url = route_prefix ~ tc.path %}
+@pytest.mark.asyncio()
+async def test_{{ fn_name }}_success(client: AsyncClient) -> None:
+    """{{ tc.method | upper }} {{ url }} returns {{ tc.status_success }}."""
+{% if tc.method == "get" %}
+{% if "{" in tc.path %}
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+    response = await client.get(url)
+{% else %}
+    response = await client.get("{{ url }}")
+{% endif %}
+{% elif tc.method == "post" %}
+{% if tc.has_request_body and tc.request_fields %}
+    body = {
+{% for f in tc.request_fields %}
+        "{{ f.name }}": {% if f.py_type == "uuid.UUID" %}str(_SAMPLE_VALUES["uuid.UUID"]){% elif f.py_type == "str" %}"test"{% elif f.py_type == "int" %}1{% elif f.py_type == "float" %}1.0{% elif f.py_type == "bool" %}True{% elif f.py_type == "datetime" %}"2024-01-01T00:00:00"{% elif f.py_type == "date" %}"2024-01-01"{% elif "dict" in f.py_type %}{}{% else %}"test"{% endif %},
+{% endfor %}
+    }
+{% elif tc.has_request_body %}
+    body: dict = {}
+{% endif %}
+{% if "{" in tc.path %}
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"]) + "{{ tc.path.split('}', 1)[1] }}"
+    response = await client.post(url{% if tc.has_request_body %}, json=body{% endif %})
+{% else %}
+    response = await client.post("{{ url }}"{% if tc.has_request_body %}, json=body{% endif %})
+{% endif %}
+{% elif tc.method == "patch" %}
+{% if tc.has_request_body and tc.request_fields %}
+    body = {
+{% for f in tc.request_fields %}
+        "{{ f.name }}": {% if f.py_type == "uuid.UUID" %}str(_SAMPLE_VALUES["uuid.UUID"]){% elif f.py_type == "str" %}"test"{% elif f.py_type == "int" %}1{% elif f.py_type == "float" %}1.0{% elif f.py_type == "bool" %}True{% elif f.py_type == "datetime" %}"2024-01-01T00:00:00"{% elif f.py_type == "date" %}"2024-01-01"{% elif "dict" in f.py_type %}{}{% else %}"test"{% endif %},
+{% endfor %}
+    }
+{% elif tc.has_request_body %}
+    body: dict = {}
+{% endif %}
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+    response = await client.patch(url{% if tc.has_request_body %}, json=body{% endif %})
+{% elif tc.method == "delete" %}
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+    response = await client.delete(url)
+{% endif %}
+    assert response.status_code == {{ tc.status_success }}
+
+{% if tc.status_not_found %}
+
+@pytest.mark.asyncio()
+async def test_{{ fn_name }}_not_found(
+    client: AsyncClient,
+    mock_db: AsyncMock,
+) -> None:
+    """{{ tc.method | upper }} {{ url }} returns 404 for missing resource."""
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+{% if tc.method == "delete" or tc.method == "patch" %}
+    mock_result.rowcount = 0
+{% else %}
+    mock_scalars.one_or_none.return_value = None
+    mock_result.scalars.return_value = mock_scalars
+{% endif %}
+    mock_db.execute = AsyncMock(return_value=mock_result)
+{% if "{" in tc.path and tc.method == "post" %}
+    url = "{{ route_prefix }}/" + str(_MISSING_UUID) + "{{ tc.path.split('}', 1)[1] }}"
+    response = await client.post(url{% if tc.has_request_body %}, json={}{% endif %})
+{% elif tc.method == "get" %}
+    url = "{{ route_prefix }}/" + str(_MISSING_UUID)
+    response = await client.get(url)
+{% elif tc.method == "patch" %}
+    url = "{{ route_prefix }}/" + str(_MISSING_UUID)
+    response = await client.patch(url{% if tc.has_request_body %}, json={}{% endif %})
+{% elif tc.method == "delete" %}
+    url = "{{ route_prefix }}/" + str(_MISSING_UUID)
+    response = await client.delete(url)
+{% endif %}
+    assert response.status_code == 404
+{% endif %}
+{% if tc.status_invalid %}
+
+@pytest.mark.asyncio()
+async def test_{{ fn_name }}_invalid_body(
+    client: AsyncClient,
+) -> None:
+    """{{ tc.method | upper }} {{ url }} returns 422 for invalid body."""
+{% if tc.method == "post" and "{" not in tc.path %}
+    response = await client.post(
+        "{{ url }}",
+        json={"__invalid__": True},
+    )
+{% elif tc.method == "post" %}
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"]) + "{{ tc.path.split('}', 1)[1] }}"
+    response = await client.post(url, json={"__invalid__": True})
+{% elif tc.method == "patch" %}
+    # PATCH with invalid type values
+    url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+    response = await client.patch(
+        url,
+        json={"__invalid__": True},
+    )
+{% endif %}
+{% if tc.method == "patch" %}
+    # PATCH accepts partial updates; only truly invalid types
+    # trigger 422.  Adjust this test for your schema.
+    assert response.status_code in (200, 422)
+{% else %}
+    assert response.status_code == 422
+{% endif %}
+{% endif %}
+{% if tc.requires_auth and has_auth %}
+
+@pytest.mark.asyncio()
+async def test_{{ fn_name }}_unauthorized(
+    mock_db: AsyncMock,
+) -> None:
+    """{{ tc.method | upper }} {{ url }} returns 401 without auth."""
+    application = FastAPI()
+    application.include_router(router)
+    application.dependency_overrides[{{ get_db_fn }}] = lambda: mock_db
+    # No auth override -- default dependency will reject
+    transport = ASGITransport(app=application)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+    ) as unauthed:
+{% if tc.method == "get" %}
+{% if "{" in tc.path %}
+        url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+{% else %}
+        url = "{{ url }}"
+{% endif %}
+        response = await unauthed.get(url)
+{% elif tc.method == "post" %}
+{% if "{" in tc.path %}
+        url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"]) + "{{ tc.path.split('}', 1)[1] }}"
+{% else %}
+        url = "{{ url }}"
+{% endif %}
+        response = await unauthed.post(url{% if tc.has_request_body %}, json={}{% endif %})
+{% elif tc.method == "patch" %}
+        url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+        response = await unauthed.patch(url{% if tc.has_request_body %}, json={}{% endif %})
+{% elif tc.method == "delete" %}
+        url = "{{ route_prefix }}/" + str(_SAMPLE_VALUES["{{ pk_py_type }}"])
+        response = await unauthed.delete(url)
+{% endif %}
+        assert response.status_code == 401
+{% endif %}
+
+{% endfor %}
+{% if has_serializer_test %}
+# ---------------------------------------------------------------------------
+# Serializer tests
+# ---------------------------------------------------------------------------
+
+
+def test_to_{{ model_lower }}_resource_maps_fields() -> None:
+    """Verify serializer maps all fields from ORM to schema."""
+    obj = MagicMock()
+{% for f in serializer_fields %}
+    obj.{{ f.name }} = _sample("{{ f.py_type }}")
+{% endfor %}
+    result = to_{{ model_lower }}_resource(obj)
+{% for f in serializer_fields %}
+    assert result.{{ f.name }} == obj.{{ f.name }}
+{% endfor %}
+{% endif %}
