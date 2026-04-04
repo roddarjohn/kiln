@@ -17,8 +17,15 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+{% set _env_line = 'os.environ.get("' ~ url_env ~ '", "postgresql+asyncpg://localhost/dev"),' %}
 _engine = create_async_engine(
-    os.environ.get("{{ url_env }}", "postgresql+asyncpg://localhost/dev"),
+{% if _env_line | length + 4 > 80 %}
+    os.environ.get(
+        "{{ url_env }}", "postgresql+asyncpg://localhost/dev"
+    ),
+{% else %}
+    {{ _env_line }}
+{% endif %}
     echo={{ echo }},
     pool_size={{ pool_size }},
     max_overflow={{ max_overflow }},

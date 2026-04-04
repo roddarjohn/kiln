@@ -116,6 +116,8 @@ ignore = [
   "PLC0415", # local imports acceptable in test methods
   "RUF059",  # unpacked dummy variables are fine in tests
   "SLF001",  # testing private methods is fine in tests
+  "S603",    # subprocess calls use trusted, hardcoded commands
+  "S607",    # partial paths (uv, ruff) are intentional
 ]
 
 [tool.ty.analysis]

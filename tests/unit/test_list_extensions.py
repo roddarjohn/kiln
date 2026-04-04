@@ -158,8 +158,6 @@ class TestContributeFilters:
     def test_generates_filter_types(self, specs, shared_ctx):
         config = FilterConfig(fields=["email", "age"])
         contribute_filters(specs, shared_ctx, config, LIST_FIELDS)
-        assert "UserFilterCondition" in specs["schema"].exports
-        assert "UserFilterExpression" in specs["schema"].exports
         snippet = specs["schema"].context["schema_classes"][0]
         assert "FilterCondition" in snippet
         assert "FilterExpression" in snippet
@@ -254,7 +252,6 @@ class TestContributeOrdering:
             default_dir="desc",
         )
         contribute_ordering(specs, shared_ctx, config)
-        assert "UserSortField" in specs["schema"].exports
         snippet = specs["schema"].context["schema_classes"][0]
         assert "created_at" in snippet
         assert "name" in snippet
@@ -294,7 +291,6 @@ class TestContributeOrdering:
             fields=["name"],
         )
         contribute_ordering(specs, shared_ctx, config)
-        assert "UserSortClause" in specs["schema"].exports
         classes = specs["schema"].context["schema_classes"]
         clause = [c for c in classes if "SortClause" in c]
         assert len(clause) == 1

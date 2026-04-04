@@ -7,11 +7,18 @@ Python objects.
 
 from __future__ import annotations
 
+import sys
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kiln.config.schema import DatabaseConfig
+
+#: Maximum line length for generated import statements.
+_MAX_LINE = 80
+
+#: Top-level module names that belong to the standard library.
+_STDLIB: frozenset[str] = frozenset(sys.stdlib_module_names)
 
 # Python type annotation strings for Pydantic schemas and route
 # parameters.
@@ -163,26 +170,75 @@ class ImportCollector:
     def lines(self) -> list[str]:
         """Return the collected import statements as strings.
 
-        ``from __future__`` imports are always emitted first
-        (required by Python), then bare imports, then remaining
-        from-imports.  Within each group insertion order is
-        preserved.
+        Imports are grouped and sorted following :pep:`8` /
+        isort conventions:
+
+        1. ``from __future__`` imports (required first by Python).
+        2. Standard-library imports (bare then from, sorted).
+        3. Third-party / local imports (bare then from, sorted).
+
+        Blank lines separate the groups.  Long ``from`` lines are
+        wrapped with parentheses to stay within 80 characters.
 
         Returns:
             List of import lines (no trailing newlines).
 
         """
-        result: list[str] = []
-        # __future__ must come first
+        future: list[str] = []
+        stdlib: list[str] = []
+        third: list[str] = []
+
+        # --- from __future__ ---
         if "__future__" in self._from:
-            names = self._from["__future__"]
-            result.append(f"from __future__ import {', '.join(names)}")
-        result.extend(f"import {m}" for m in self._bare)
-        for mod, names in self._from.items():
+            names = sorted(self._from["__future__"])
+            future.append(
+                _format_from_import("__future__", names),
+            )
+
+        # --- bare imports ---
+        for mod in sorted(self._bare):
+            bucket = stdlib if mod.split(".")[0] in _STDLIB else third
+            bucket.append(f"import {mod}")
+
+        # --- from imports ---
+        for mod in sorted(self._from):
             if mod == "__future__":
                 continue
-            result.append(f"from {mod} import {', '.join(names)}")
+            names = sorted(self._from[mod])
+            line = _format_from_import(mod, names)
+            bucket = stdlib if mod.split(".")[0] in _STDLIB else third
+            bucket.append(line)
+
+        # Assemble groups with blank-line separators.
+        groups = [g for g in (future, stdlib, third) if g]
+        result: list[str] = []
+        for i, group in enumerate(groups):
+            if i > 0:
+                result.append("")
+            result.extend(group)
         return result
+
+
+def _format_from_import(module: str, names: list[str]) -> str:
+    """Format a ``from module import ...`` statement.
+
+    If the single-line form fits within :data:`_MAX_LINE`, it is
+    returned as-is.  Otherwise the names are wrapped across
+    multiple lines using parentheses.
+
+    Args:
+        module: Module to import from.
+        names: Sorted list of names to import.
+
+    Returns:
+        One or more lines of Python import code.
+
+    """
+    single = f"from {module} import {', '.join(names)}"
+    if len(single) <= _MAX_LINE:
+        return single
+    joined = ",\n    ".join(names)
+    return f"from {module} import (\n    {joined},\n)"
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,10 @@
-@router.post("/", {% if response_schema %}response_model={{ response_schema }}, {% endif %}status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+{% if response_schema %}
+    response_model={{ response_schema }},
+{% endif %}
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_{{ model_lower }}(
 {% if has_schema %}
     body: {{ model_name }}CreateRequest,
@@ -11,15 +17,11 @@ async def create_{{ model_lower }}(
     """Create a {{ model_name }}."""
 {% if response_schema %}
     result = await db.execute(
-        insert({{ model_name }})
-        .values({% if has_schema %}**body.model_dump(){% endif %})
-        .returning({{ model_name }})
+        insert({{ model_name }}).values({% if has_schema %}**body.model_dump(){% endif %}).returning({{ model_name }})
     )
     await db.commit()
     return to_{{ model_lower }}_resource(result.scalars().one())
 {% else %}
-    await db.execute(
-        insert({{ model_name }}).values({% if has_schema %}**body.model_dump(){% endif %})
-    )
+    await db.execute(insert({{ model_name }}).values({% if has_schema %}**body.model_dump(){% endif %}))
     await db.commit()
 {% endif %}
