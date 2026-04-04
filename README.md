@@ -64,7 +64,7 @@ See [LICENSE](LICENSE) for details.
   - e.g. filter list endpoints
   - should be rego I'd think
 
-- enums
+- [done] enums
 
 - related models in dumps
 
