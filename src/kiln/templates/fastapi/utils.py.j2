@@ -74,10 +74,7 @@ def _build_filter_clause(
     """
     and_nodes = getattr(node, "and_", None)
     if and_nodes is not None:
-        children = [
-            _build_filter_clause(child, model)
-            for child in and_nodes
-        ]
+        children = [_build_filter_clause(child, model) for child in and_nodes]
         children = [c for c in children if c is not None]
         if not children:
             return None
@@ -85,10 +82,7 @@ def _build_filter_clause(
 
     or_nodes = getattr(node, "or_", None)
     if or_nodes is not None:
-        children = [
-            _build_filter_clause(child, model)
-            for child in or_nodes
-        ]
+        children = [_build_filter_clause(child, model) for child in or_nodes]
         children = [c for c in children if c is not None]
         if not children:
             return None
@@ -210,13 +204,9 @@ async def apply_offset_pagination(
 
     """
     limit = min(limit, max_page_size)
-    count_result = await db.execute(
-        stmt.with_only_columns(func.count())
-    )
+    count_result = await db.execute(stmt.with_only_columns(func.count()))
     total = count_result.scalar_one()
-    result = await db.execute(
-        stmt.offset(offset).limit(limit)
-    )
+    result = await db.execute(stmt.offset(offset).limit(limit))
     return total, list(result.scalars())
 
 

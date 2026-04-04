@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.3.0...kiln-v0.4.0) (2026-04-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* changing actions ([#13](https://github.com/roddarjohn/kiln/issues/13))
+* filtering + sorting + pagination ([#12](https://github.com/roddarjohn/kiln/issues/12))
+* making pipelines generic ([#11](https://github.com/roddarjohn/kiln/issues/11))
+* pipelines ([#10](https://github.com/roddarjohn/kiln/issues/10))
+* playground changes ([#8](https://github.com/roddarjohn/kiln/issues/8))
+
+### Features
+
+* changing actions ([#13](https://github.com/roddarjohn/kiln/issues/13)) ([b6767eb](https://github.com/roddarjohn/kiln/commit/b6767ebb00a0f72c35bf5a114301f1a8e4c79925))
+* changing main.py structure ([d8631ab](https://github.com/roddarjohn/kiln/commit/d8631ab8cb4bd6b0fa41f754c02bf6113ffab1fe))
+* filtering + sorting + pagination ([#12](https://github.com/roddarjohn/kiln/issues/12)) ([f4533f7](https://github.com/roddarjohn/kiln/commit/f4533f78a8d059b2a20d953bceba997dab0318d4))
+* making pipelines generic ([#11](https://github.com/roddarjohn/kiln/issues/11)) ([c1562f8](https://github.com/roddarjohn/kiln/commit/c1562f8a68a8abf3b0167f071b3caee7b1da0ad9))
+* ordering fix ([c93f0ad](https://github.com/roddarjohn/kiln/commit/c93f0adc6a3145ff847b32003181962d9dd78099))
+* pipelines ([#10](https://github.com/roddarjohn/kiln/issues/10)) ([9ece059](https://github.com/roddarjohn/kiln/commit/9ece0594adb76e65f1c542d9e86c5f4b25c11e98))
+* playground changes ([#8](https://github.com/roddarjohn/kiln/issues/8)) ([eb91d23](https://github.com/roddarjohn/kiln/commit/eb91d2314472f09ceb455610759e4eef47153bc2))
+
 ## [0.3.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.2.1...kiln-v0.3.0) (2026-04-03)
 
 

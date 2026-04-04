@@ -39,4 +39,4 @@ def render_snippet(template_name: str, **ctx: object) -> str:
         Rendered template string.
 
     """
-    return env.get_template(template_name).render(**ctx)
+    return env.get_template(template_name).render(**ctx).strip()

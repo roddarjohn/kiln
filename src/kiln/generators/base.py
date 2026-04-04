@@ -84,9 +84,10 @@ class FileSpec:
             import_block += "\n"
         ctx = {**self.context, "import_block": import_block}
         tmpl = env.get_template(self.template)
+        content = tmpl.render(**ctx).rstrip() + "\n"
         return GeneratedFile(
             path=self.path,
-            content=tmpl.render(**ctx),
+            content=content,
         )
 
 

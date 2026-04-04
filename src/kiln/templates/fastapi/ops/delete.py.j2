@@ -7,8 +7,6 @@ async def delete_{{ model_lower }}(
 {% endif %}
 ) -> None:
     """Delete a {{ model_name }}."""
-    result = await db.execute(
-        delete({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-    )
+    result = await db.execute(delete({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}))
     assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()

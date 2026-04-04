@@ -629,6 +629,8 @@ class GetOperation:
                     serializer.context["resource_fields"] = field_dicts
 
         # Route contribution
+        if "uuid" in ctx.pk_py_type:
+            route.imports.add("uuid")
         route.imports.add_from("sqlalchemy", "select")
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
         route.imports.add_from(
@@ -891,6 +893,7 @@ class CreateOperation:
             _add_field_type_imports(schema.imports, options.fields)
 
         # Route contribution
+        route.imports.add_from("fastapi", "status")
         route.imports.add_from("sqlalchemy", "insert")
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
         handler = render_snippet(
@@ -966,6 +969,8 @@ class UpdateOperation:
             _add_field_type_imports(schema.imports, options.fields)
 
         # Route contribution
+        if "uuid" in ctx.pk_py_type:
+            route.imports.add("uuid")
         route.imports.add_from("sqlalchemy", "update")
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
         route.imports.add_from(
@@ -1029,6 +1034,9 @@ class DeleteOperation:
     ) -> None:
         """Emit the DELETE /{pk} handler."""
         route = specs["route"]
+        if "uuid" in ctx.pk_py_type:
+            route.imports.add("uuid")
+        route.imports.add_from("fastapi", "status")
         route.imports.add_from("sqlalchemy", "delete")
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
         route.imports.add_from(
@@ -1110,6 +1118,8 @@ class ActionOperation:
 
         # Object actions need select + model + 404 helper.
         if info.is_object_action:
+            if "uuid" in ctx.pk_py_type:
+                route.imports.add("uuid")
             route.imports.add_from("sqlalchemy", "select")
             route.imports.add_from(ctx.model_module, ctx.model.pascal)
             route.imports.add_from(
@@ -1236,12 +1246,8 @@ def _make_route_spec(
         },
     )
     spec.imports.add_from("__future__", "annotations")
-
-    if "uuid" in ctx.pk_py_type:
-        spec.imports.add("uuid")
-
     spec.imports.add_from("typing", "Annotated")
-    spec.imports.add_from("fastapi", "APIRouter", "Depends", "status")
+    spec.imports.add_from("fastapi", "APIRouter", "Depends")
     spec.imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
 
     if ctx.has_auth:

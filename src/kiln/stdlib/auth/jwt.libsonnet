@@ -18,5 +18,12 @@
     // e.g. get_current_user_fn: "myapp.auth.custom.get_current_user"
     [if std.objectHas(opts, "get_current_user_fn") then "get_current_user_fn"]:
       std.get(opts, "get_current_user_fn"),
+    // Dotted path to a credential-verification function.
+    // Must accept (username, password) and return a dict (JWT
+    // payload) on success or None on failure.
+    // Required when get_current_user_fn is not set.
+    // e.g. verify_credentials_fn: "myapp.auth.verify_credentials"
+    [if std.objectHas(opts, "verify_credentials_fn") then "verify_credentials_fn"]:
+      std.get(opts, "verify_credentials_fn"),
   },
 }

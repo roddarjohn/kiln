@@ -82,7 +82,10 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
-            "auth": {"type": "jwt"},
+            "auth": {
+                "type": "jwt",
+                "verify_credentials_fn": "myapp.auth.verify",
+            },
             "databases": [{"key": "primary", "default": True}],
             "resources": [],
         },
@@ -101,7 +104,10 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
-            "auth": {"type": "jwt"},
+            "auth": {
+                "type": "jwt",
+                "verify_credentials_fn": "myapp.auth.verify",
+            },
             "resources": [],
         },
     )
@@ -140,7 +146,10 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     project_cfg = _write_json_config(
         tmp_path,
         {
-            "auth": {"type": "jwt"},
+            "auth": {
+                "type": "jwt",
+                "verify_credentials_fn": "myapp.auth.verify",
+            },
             "databases": [{"key": "primary", "default": True}],
             "apps": [
                 {"config": blog_app, "prefix": "/blog"},

@@ -55,7 +55,9 @@ def test_resource() -> ResourceConfig:
 def test_config(test_resource) -> KilnConfig:
     return KilnConfig(
         module="myapp",
-        auth=AuthConfig(),
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
         resources=[test_resource],
     )
 
