@@ -48,7 +48,11 @@ class ProjectRouterGenerator:
         """
         tmpl = env.get_template("fastapi/project_router.py.j2")
         pkg = config.package_prefix
+        has_auth = config.auth is not None
+        auth_module = f"{pkg}.auth" if pkg else "auth"
         content = tmpl.render(
+            has_auth=has_auth,
+            auth_module=auth_module,
             apps=[
                 {
                     "module": (
@@ -60,6 +64,6 @@ class ProjectRouterGenerator:
                     "prefix": app_ref.prefix,
                 }
                 for app_ref in config.apps
-            ]
+            ],
         )
         return [GeneratedFile(path="routes/__init__.py", content=content)]

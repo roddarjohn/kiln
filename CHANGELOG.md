@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.4.0...kiln-v0.5.0) (2026-04-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* tests ([#17](https://github.com/roddarjohn/kiln/issues/17))
+* lint ([#15](https://github.com/roddarjohn/kiln/issues/15))
+
+### Features
+
+* auth ([#14](https://github.com/roddarjohn/kiln/issues/14)) ([2dd6471](https://github.com/roddarjohn/kiln/commit/2dd647174a40a2df3efae99c74a5241e50916238))
+* lint ([#15](https://github.com/roddarjohn/kiln/issues/15)) ([70e5e0a](https://github.com/roddarjohn/kiln/commit/70e5e0a0ac659cc5b67629a15d3b5c9fb3564951))
+* tests ([#17](https://github.com/roddarjohn/kiln/issues/17)) ([8bbd2d8](https://github.com/roddarjohn/kiln/commit/8bbd2d850aa46b03b6d2e81b9085d2c969002186))
+
 ## [0.4.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.3.0...kiln-v0.4.0) (2026-04-03)
 
 
