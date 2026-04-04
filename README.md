@@ -68,7 +68,7 @@ See [LICENSE](LICENSE) for details.
 
 - related models in dumps
 
-- filtering / pagination
+- [done] filtering / pagination
 
 - spin up sample kiln app
 

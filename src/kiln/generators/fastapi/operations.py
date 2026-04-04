@@ -117,6 +117,15 @@ def _add_field_type_imports(
             imports.add_from("typing", "Any")
 
 
+def _contribute_test_case(
+    specs: dict[str, FileSpecType],
+    test_case: dict[str, object],
+) -> None:
+    """Append a test case to the test spec if it exists."""
+    if "test" in specs:
+        specs["test"].context["test_cases"].append(test_case)
+
+
 def _op_requires_auth(
     resource: ResourceConfig,
     op_config: OperationConfig,
@@ -528,7 +537,8 @@ class SetupOperation:
     This operation runs first and initialises the ``"schema"``
     and ``"route"`` specs that other operations contribute to.
     When the resource has explicit fields on get or list, a
-    ``"serializer"`` spec is also created.
+    ``"serializer"`` spec is also created.  When the resource
+    has ``generate_tests=True``, a ``"test"`` spec is created.
     """
 
     name = "setup"
@@ -537,7 +547,7 @@ class SetupOperation:
     def contribute(
         self,
         specs: dict[str, FileSpecType],
-        resource: ResourceConfig,  # noqa: ARG002
+        resource: ResourceConfig,
         ctx: SharedContext,
         op_config: OperationConfig,  # noqa: ARG002
         options: EmptyOptions,  # noqa: ARG002
@@ -572,6 +582,15 @@ class SetupOperation:
             "return_type": None,
             "result_expression": None,
         }
+
+        # Test spec (only when generate_tests is enabled)
+        if resource.generate_tests:
+            specs["test"] = _make_test_spec(
+                ctx.model,
+                app,
+                pkg,
+                ctx,
+            )
 
 
 class GetOperation:
@@ -628,6 +647,35 @@ class GetOperation:
             has_resource_schema=ctx.has_resource_schema,
         )
         route.context["route_handlers"].append(handler)
+
+        # Test contribution
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "get",
+                "method": "get",
+                "path": f"/{{{ctx.pk_name}}}",
+                "status_success": 200,
+                "status_not_found": 404,
+                "status_invalid": None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": False,
+                "request_schema": None,
+                "request_fields": [],
+                "response_schema": ctx.response_schema,
+                "is_list_response": False,
+                "action_name": None,
+            },
+        )
+        if (
+            "test" in specs
+            and options.fields
+            and not specs["test"].context["has_serializer_test"]
+        ):
+            specs["test"].context["has_serializer_test"] = True
+            specs["test"].context["serializer_fields"] = _field_dicts(
+                options.fields
+            )
 
 
 def _list_response_types(
@@ -735,7 +783,13 @@ class ListOperation:
             )
 
         # Route contribution
-        self._contribute_route(specs, resource, ctx, op_config)
+        self._contribute_route(
+            specs,
+            resource,
+            ctx,
+            op_config,
+            options,
+        )
 
     def _contribute_route(
         self,
@@ -743,6 +797,7 @@ class ListOperation:
         resource: ResourceConfig,
         ctx: SharedContext,
         op_config: OperationConfig,
+        options: Options,
     ) -> None:
         """Render the list route handler."""
         route = specs["route"]
@@ -750,6 +805,7 @@ class ListOperation:
         route.imports.add_from(ctx.model_module, ctx.model.pascal)
         ext = route.context.get("list_extensions", {})
         response_model, return_type = _list_response_types(ext, ctx)
+        http_method = ext.get("http_method", "get")
         handler = render_snippet(
             "fastapi/ops/list.py.j2",
             model_name=ctx.model.pascal,
@@ -760,13 +816,46 @@ class ListOperation:
             has_resource_schema=ctx.has_resource_schema,
             response_model=response_model,
             return_type=return_type,
-            http_method=ext.get("http_method", "get"),
+            http_method=http_method,
             route_path=ext.get("route_path", "/"),
             extra_params=ext.get("extra_params", []),
             query_modifiers=ext.get("query_modifiers", []),
             result_expression=ext.get("result_expression"),
         )
         route.context["route_handlers"].append(handler)
+
+        # Test contribution
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "list",
+                "method": http_method,
+                "path": ext.get("route_path", "/"),
+                "status_success": 200,
+                "status_not_found": None,
+                "status_invalid": None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": http_method == "post",
+                "request_schema": (
+                    ctx.model.suffixed("SearchRequest")
+                    if http_method == "post"
+                    else None
+                ),
+                "request_fields": [],
+                "response_schema": None,
+                "is_list_response": True,
+                "action_name": None,
+            },
+        )
+        if (
+            "test" in specs
+            and options.fields
+            and not specs["test"].context["has_serializer_test"]
+        ):
+            specs["test"].context["has_serializer_test"] = True
+            specs["test"].context["serializer_fields"] = _field_dicts(
+                options.fields
+            )
 
 
 class CreateOperation:
@@ -816,6 +905,32 @@ class CreateOperation:
             response_schema=ctx.response_schema,
         )
         route.context["route_handlers"].append(handler)
+
+        # Test contribution
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "create",
+                "method": "post",
+                "path": "/",
+                "status_success": 201,
+                "status_not_found": None,
+                "status_invalid": 422 if options.fields else None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": has_schema,
+                "request_schema": (
+                    ctx.model.suffixed("CreateRequest")
+                    if options.fields
+                    else None
+                ),
+                "request_fields": (
+                    _field_dicts(options.fields) if options.fields else []
+                ),
+                "response_schema": ctx.response_schema,
+                "is_list_response": False,
+                "action_name": None,
+            },
+        )
 
 
 class UpdateOperation:
@@ -871,6 +986,32 @@ class UpdateOperation:
         )
         route.context["route_handlers"].append(handler)
 
+        # Test contribution
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "update",
+                "method": "patch",
+                "path": f"/{{{ctx.pk_name}}}",
+                "status_success": 200,
+                "status_not_found": 404,
+                "status_invalid": 422 if options.fields else None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": has_schema,
+                "request_schema": (
+                    ctx.model.suffixed("UpdateRequest")
+                    if options.fields
+                    else None
+                ),
+                "request_fields": (
+                    _field_dicts(options.fields) if options.fields else []
+                ),
+                "response_schema": ctx.response_schema,
+                "is_list_response": False,
+                "action_name": None,
+            },
+        )
+
 
 class DeleteOperation:
     """DELETE /{pk} — delete a resource."""
@@ -905,6 +1046,26 @@ class DeleteOperation:
             requires_auth=_op_requires_auth(resource, op_config),
         )
         route.context["route_handlers"].append(handler)
+
+        # Test contribution
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "delete",
+                "method": "delete",
+                "path": f"/{{{ctx.pk_name}}}",
+                "status_success": 204,
+                "status_not_found": 404,
+                "status_invalid": None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": False,
+                "request_schema": None,
+                "request_fields": [],
+                "response_schema": None,
+                "is_list_response": False,
+                "action_name": None,
+            },
+        )
 
 
 class ActionOperation:
@@ -977,6 +1138,30 @@ class ActionOperation:
             has_auth=ctx.has_auth,
         )
         route.context["route_handlers"].append(handler)
+
+        # Test contribution
+        if info.is_object_action:
+            path = f"/{{{ctx.pk_name}}}/{action_name.slug}"
+        else:
+            path = f"/{action_name.slug}"
+        _contribute_test_case(
+            specs,
+            {
+                "op_name": "action",
+                "method": "post",
+                "path": path,
+                "status_success": 200,
+                "status_not_found": (404 if info.is_object_action else None),
+                "status_invalid": None,
+                "requires_auth": _op_requires_auth(resource, op_config),
+                "has_request_body": bool(info.request_class),
+                "request_schema": info.request_class,
+                "request_fields": [],
+                "response_schema": None,
+                "is_list_response": False,
+                "action_name": action_name.raw,
+            },
+        )
 
 
 # -------------------------------------------------------------------
@@ -1062,6 +1247,51 @@ def _make_route_spec(
     if ctx.has_auth:
         auth_module = prefix_import(pkg, "auth", "dependencies")
         spec.imports.add_from(auth_module, "get_current_user")
+
+    session_module = prefix_import(pkg, ctx.session_module)
+    spec.imports.add_from(session_module, ctx.get_db_fn)
+    return spec
+
+
+def _make_test_spec(
+    model: Name,
+    app: str,
+    pkg: str,
+    ctx: SharedContext,
+) -> FileSpecType:
+    """Create the test FileSpec with base imports and fixtures."""
+    spec = FileSpecType(
+        path=f"{app}/tests/test_{model.lower}.py",
+        template="fastapi/test_outer.py.j2",
+        imports=ImportCollector(),
+        package_prefix=pkg,
+        context={
+            "model_name": model.pascal,
+            "model_lower": model.lower,
+            "pk_name": ctx.pk_name,
+            "pk_py_type": ctx.pk_py_type,
+            "route_prefix": ctx.route_prefix,
+            "has_auth": ctx.has_auth,
+            "get_db_fn": ctx.get_db_fn,
+            "test_cases": [],
+            "has_serializer_test": False,
+            "serializer_fields": [],
+        },
+    )
+    spec.imports.add_from("__future__", "annotations")
+    spec.imports.add("uuid")
+    spec.imports.add("pytest")
+    spec.imports.add_from(
+        "unittest.mock",
+        "AsyncMock",
+        "MagicMock",
+    )
+    spec.imports.add_from(
+        "httpx",
+        "ASGITransport",
+        "AsyncClient",
+    )
+    spec.imports.add_from("fastapi", "FastAPI")
 
     session_module = prefix_import(pkg, ctx.session_module)
     spec.imports.add_from(session_module, ctx.get_db_fn)

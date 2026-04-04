@@ -147,11 +147,25 @@ def _wire_imports(specs: dict[str, FileSpec]) -> None:
     spec_list = list(specs.items())
     for i, (dst_key, dst_spec) in enumerate(spec_list):
         for _src_key, src_spec in spec_list[:i]:
-            if not src_spec.exports:
-                continue
-            if dst_key == "serializer":
+            if dst_key == "test":
+                # Test imports router from route, exports from others
+                if _src_key == "route":
+                    dst_spec.imports.add_from(
+                        src_spec.module,
+                        "router",
+                    )
+                elif src_spec.exports:
+                    dst_spec.imports.add_from(
+                        src_spec.module,
+                        *src_spec.exports,
+                    )
+            elif dst_key == "serializer":
+                if not src_spec.exports:
+                    continue
                 resource_cls = dst_spec.context["model_name"] + "Resource"
                 if resource_cls in src_spec.exports:
                     dst_spec.imports.add_from(src_spec.module, resource_cls)
             else:
+                if not src_spec.exports:
+                    continue
                 dst_spec.imports.add_from(src_spec.module, *src_spec.exports)
