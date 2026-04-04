@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 FieldType = Literal[
     "uuid",
@@ -37,6 +37,29 @@ class AuthConfig(BaseModel):
     generated ``auth/dependencies.py`` re-exports this function instead
     of containing the default JWT implementation.
     """
+    verify_credentials_fn: str | None = None
+    """Dotted import path to a credential-verification function,
+    e.g. ``"myapp.auth.verify_credentials"``.  The function must
+    accept ``(username: str, password: str)`` and return a ``dict``
+    (the JWT payload) on success or ``None`` on failure.
+
+    Required when using the default JWT auth flow
+    (``get_current_user_fn`` is not set).
+    """
+
+    @model_validator(mode="after")
+    def _require_verify_credentials(self) -> AuthConfig:
+        if (
+            self.get_current_user_fn is None
+            and self.verify_credentials_fn is None
+        ):
+            msg = (
+                "verify_credentials_fn is required when using "
+                "the default JWT auth flow "
+                "(get_current_user_fn is not set)"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class DatabaseConfig(BaseModel):

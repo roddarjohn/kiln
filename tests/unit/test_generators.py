@@ -97,7 +97,9 @@ def action_resource() -> ResourceConfig:
 def full_config(simple_resource) -> KilnConfig:
     return KilnConfig(
         module="myapp",
-        auth=AuthConfig(),
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
         resources=[simple_resource],
     )
 
@@ -132,14 +134,22 @@ def test_scaffold_generates_db_files():
 
 
 def test_scaffold_with_auth_generates_deps():
-    cfg = KilnConfig(auth=AuthConfig())
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        )
+    )
     files = ScaffoldGenerator().generate(cfg)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
 
 
 def test_scaffold_auth_deps_valid_python():
-    cfg = KilnConfig(auth=AuthConfig())
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        )
+    )
     files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
     src = files["auth/dependencies.py"].content
     ast.parse(src)
@@ -155,6 +165,62 @@ def test_scaffold_auth_deps_injection():
     src = files["auth/dependencies.py"].content
     assert "from myapp.auth.custom import get_current_user" in src
     assert "jwt.decode" not in src
+
+
+def test_scaffold_with_auth_generates_router():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        )
+    )
+    files = ScaffoldGenerator().generate(cfg)
+    paths = {f.path for f in files}
+    assert "auth/router.py" in paths
+
+
+def test_scaffold_auth_router_valid_python():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        )
+    )
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    src = files["auth/router.py"].content
+    ast.parse(src)
+
+
+def test_scaffold_auth_router_imports_verify_fn():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        )
+    )
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    src = files["auth/router.py"].content
+    assert "from myapp.auth import verify" in src
+
+
+def test_scaffold_auth_router_contains_token_url():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+            token_url="/api/login",  # noqa: S106
+        )
+    )
+    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    src = files["auth/router.py"].content
+    assert "/api/login" in src
+
+
+def test_scaffold_custom_auth_no_router():
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            get_current_user_fn="myapp.auth.custom.get_current_user"
+        )
+    )
+    files = ScaffoldGenerator().generate(cfg)
+    paths = {f.path for f in files}
+    assert "auth/router.py" not in paths
 
 
 # ---------------------------------------------------------------------------
@@ -830,7 +896,9 @@ def test_registry_project_mode_generates_scaffold_and_apps():
         ],
     )
     cfg = KilnConfig(
-        auth=AuthConfig(),
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
         databases=[DatabaseConfig(key="primary", default=True)],
         apps=[AppRef(config=blog_app, prefix="/blog")],
     )
@@ -1510,7 +1578,9 @@ def test_pipeline_action_resource_valid_python(action_resource):
 
     cfg = KilnConfig(
         module="tests",
-        auth=AuthConfig(),
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
         resources=[action_resource],
     )
     files = ResourcePipeline().build(action_resource, cfg)
@@ -1543,7 +1613,9 @@ def test_pipeline_with_package_prefix(simple_resource):
 
     cfg = KilnConfig(
         module="myapp",
-        auth=AuthConfig(),
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
         package_prefix="_generated",
         resources=[simple_resource],
     )

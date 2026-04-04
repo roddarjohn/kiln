@@ -49,6 +49,13 @@ class ScaffoldGenerator:
                     "auth/dependencies.py", _render_auth_deps(config.auth)
                 ),
             ]
+            if config.auth.get_current_user_fn is None:
+                files.append(
+                    GeneratedFile(
+                        "auth/router.py",
+                        _render_auth_router(config.auth),
+                    )
+                )
         return files
 
 
@@ -105,6 +112,22 @@ def _render_auth_deps(auth: AuthConfig) -> str:
     return env.get_template("init/auth_dependencies.py.j2").render(
         gcu_module=gcu_module,
         gcu_name=gcu_name,
+        secret_env=auth.secret_env,
+        algorithm=auth.algorithm,
+        token_url=auth.token_url,
+    )
+
+
+def _render_auth_router(auth: AuthConfig) -> str:
+    """Render ``auth/router.py`` from *auth* config."""
+    vcf = auth.verify_credentials_fn
+    if vcf is None:  # pragma: no cover - guarded by validator
+        msg = "verify_credentials_fn is required"
+        raise ValueError(msg)
+    vcf_module, vcf_name = vcf.rsplit(".", 1)
+    return env.get_template("init/auth_router.py.j2").render(
+        vcf_module=vcf_module,
+        vcf_name=vcf_name,
         secret_env=auth.secret_env,
         algorithm=auth.algorithm,
         token_url=auth.token_url,

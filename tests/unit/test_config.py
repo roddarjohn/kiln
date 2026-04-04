@@ -28,11 +28,25 @@ def test_kiln_config_defaults():
 
 
 def test_auth_config_defaults():
-    auth = AuthConfig()
+    auth = AuthConfig(
+        verify_credentials_fn="myapp.auth.verify",
+    )
     assert auth.type == "jwt"
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
     assert "/docs" in auth.exclude_paths
+
+
+def test_auth_config_verify_credentials_required():
+    with pytest.raises(ValueError, match="verify_credentials_fn"):
+        AuthConfig()
+
+
+def test_auth_config_verify_not_required_with_custom_auth():
+    auth = AuthConfig(
+        get_current_user_fn="myapp.auth.get_user",
+    )
+    assert auth.verify_credentials_fn is None
 
 
 def test_resource_config_defaults():
