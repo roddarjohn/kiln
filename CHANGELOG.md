@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.5.0...kiln-v0.5.1) (2026-04-04)
+
+
+### Bug fixes
+
+* fixing the auth issues ([#18](https://github.com/roddarjohn/kiln/issues/18)) ([9d30bdd](https://github.com/roddarjohn/kiln/commit/9d30bdd52f82e9b18b537054f4526550c06d69d6))
+
 ## [0.5.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.4.0...kiln-v0.5.0) (2026-04-04)
 
 
