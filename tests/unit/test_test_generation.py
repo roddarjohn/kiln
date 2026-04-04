@@ -129,7 +129,7 @@ def test_no_test_file_when_disabled(no_test_config):
 def test_test_file_path(test_config):
     """Test file is at the expected path."""
     path = _get_test_path(test_config)
-    assert path == "myapp/tests/test_user.py"
+    assert path == "tests/test_myapp_user.py"
 
 
 # ---------------------------------------------------------------------------

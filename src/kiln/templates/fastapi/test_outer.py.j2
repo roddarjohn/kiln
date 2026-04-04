@@ -30,6 +30,17 @@ def _sample(py_type: str) -> object:
 # ---------------------------------------------------------------------------
 
 
+def _mock_row() -> MagicMock:
+    """Create a mock ORM row with typed attributes."""
+    row = MagicMock()
+{% if has_serializer_test %}
+{% for f in serializer_fields %}
+    row.{{ f.name }} = _sample("{{ f.py_type }}")
+{% endfor %}
+{% endif %}
+    return row
+
+
 @pytest.fixture()
 def mock_db():
     """Async mock database session."""
@@ -39,9 +50,9 @@ def mock_db():
     # Default: execute returns a result with scalars().one() and .all()
     mock_result = MagicMock()
     mock_scalars = MagicMock()
-    mock_scalars.one.return_value = MagicMock()
-    mock_scalars.one_or_none.return_value = MagicMock()
-    mock_scalars.all.return_value = [MagicMock()]
+    mock_scalars.one.return_value = _mock_row()
+    mock_scalars.one_or_none.return_value = _mock_row()
+    mock_scalars.all.return_value = [_mock_row()]
     mock_result.scalars.return_value = mock_scalars
     mock_result.rowcount = 1
     session.execute = AsyncMock(return_value=mock_result)
@@ -58,7 +69,26 @@ def app(mock_db):
     return application
 
 
-@pytest.fixture()
+def _stub_dml(*_args, **_kwargs):
+    """Return a chainable MagicMock for SQLAlchemy DML statements."""
+    m = MagicMock()
+    m.where.return_value = m
+    m.values.return_value = m
+    m.returning.return_value = m
+    return m
+
+
+@pytest.fixture(autouse=True)
+def _patch_dml(monkeypatch):
+    """Replace SQLAlchemy DML builders in the route module with stubs."""
+    import {{ route_module }} as _route_mod
+
+    for name in ("select", "insert", "update", "delete"):
+        if hasattr(_route_mod, name):
+            monkeypatch.setattr(_route_mod, name, _stub_dml)
+
+
+@pytest_asyncio.fixture()
 async def client(app):
     """Async HTTP client for testing."""
     transport = ASGITransport(app=app)

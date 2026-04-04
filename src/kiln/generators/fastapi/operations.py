@@ -1260,8 +1260,14 @@ def _make_test_spec(
     ctx: SharedContext,
 ) -> FileSpecType:
     """Create the test FileSpec with base imports and fixtures."""
+    route_module = prefix_import(
+        pkg,
+        app,
+        "routes",
+        model.lower,
+    )
     spec = FileSpecType(
-        path=f"{app}/tests/test_{model.lower}.py",
+        path=f"tests/test_{app}_{model.lower}.py",
         template="fastapi/test_outer.py.j2",
         imports=ImportCollector(),
         package_prefix=pkg,
@@ -1273,6 +1279,7 @@ def _make_test_spec(
             "route_prefix": ctx.route_prefix,
             "has_auth": ctx.has_auth,
             "get_db_fn": ctx.get_db_fn,
+            "route_module": route_module,
             "test_cases": [],
             "has_serializer_test": False,
             "serializer_fields": [],
@@ -1281,6 +1288,7 @@ def _make_test_spec(
     spec.imports.add_from("__future__", "annotations")
     spec.imports.add("uuid")
     spec.imports.add("pytest")
+    spec.imports.add("pytest_asyncio")
     spec.imports.add_from(
         "unittest.mock",
         "AsyncMock",
