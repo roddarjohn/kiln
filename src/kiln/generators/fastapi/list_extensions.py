@@ -137,8 +137,6 @@ def contribute_filters(
         allowed_fields=allowed,
     )
     schema.context["schema_classes"].append(snippet)
-    schema.exports.append(ctx.model.suffixed("FilterCondition"))
-    schema.exports.append(ctx.model.suffixed("FilterExpression"))
     schema.imports.add_from("typing", "Any", "Literal")
     schema.imports.add_from("pydantic", "ConfigDict", "Field")
 
@@ -194,7 +192,6 @@ def contribute_ordering(
         sort_fields=sort_fields,
     )
     schema.context["schema_classes"].append(snippet)
-    schema.exports.append(ctx.model.suffixed("SortField"))
     schema.imports.add_from("enum", "Enum")
 
     has_search_body = ext.get("http_method") == "post"
@@ -207,7 +204,6 @@ def contribute_ordering(
             model_name=ctx.model.pascal,
         )
         schema.context["schema_classes"].append(clause_snippet)
-        schema.exports.append(ctx.model.suffixed("SortClause"))
         schema.imports.add_from("typing", "Literal")
 
         # Route: import apply_ordering from utils
@@ -215,11 +211,9 @@ def contribute_ordering(
         route.imports.add_from(utils_module, "apply_ordering")
 
         ext["query_modifiers"].append(
-            "stmt = apply_ordering(\n"
-            f"        stmt, body.sort, {ctx.model.pascal},"
-            f' "{default_col}",'
-            f' "{config.default_dir}"\n'
-            "    )"
+            "stmt = apply_ordering("
+            f"stmt, body.sort, {ctx.model.pascal},"
+            f' "{default_col}", "{config.default_dir}")'
         )
     else:
         # Ordering via query parameters (single column)
@@ -333,8 +327,12 @@ def _contribute_keyset(
         f"raw_cursor = {raw_cursor}",
         f"cursor_val = {cast_expr} if raw_cursor else None",
         "stmt, page_size = apply_keyset_pagination(",
-        f'    stmt, {ctx.model.pascal}, cursor_val, "{cursor_field}",',
-        f"    {page_size_src}, {config.max_page_size},",
+        "    stmt,",
+        f"    {ctx.model.pascal},",
+        "    cursor_val,",
+        f'    "{cursor_field}",',
+        f"    {page_size_src},",
+        f"    {config.max_page_size},",
         ")",
         "result = await db.execute(stmt)",
         "rows = list(result.scalars())",
@@ -349,13 +347,10 @@ def _contribute_keyset(
     else:
         result_lines.append(f"return {page_cls}(")
         result_lines.append("    items=items,")
+    next_cur = f"str(items[-1].{cursor_field}) if has_more and items else None"
     result_lines.extend(
         [
-            "    next_cursor=(",
-            f"        str(items[-1].{cursor_field})",
-            "        if has_more and items",
-            "        else None",
-            "    ),",
+            f"    next_cursor=({next_cur}),",
             ")",
         ]
     )
@@ -409,7 +404,11 @@ def _contribute_offset(
     # Result expression (pagination + return)
     result_lines = [
         "total, rows = await apply_offset_pagination(",
-        f"    db, stmt, {offset_var}, {limit_var}, {config.max_page_size},",
+        "    db,",
+        "    stmt,",
+        f"    {offset_var},",
+        f"    {limit_var},",
+        f"    {config.max_page_size},",
         ")",
     ]
     if ctx.has_resource_schema:

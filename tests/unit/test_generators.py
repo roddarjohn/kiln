@@ -726,7 +726,7 @@ def test_import_collector_from():
 
     c = ImportCollector()
     c.add_from("datetime", "datetime", "date")
-    assert c.lines() == ["from datetime import datetime, date"]
+    assert c.lines() == ["from datetime import date, datetime"]
 
 
 def test_import_collector_merges_from():
@@ -735,7 +735,7 @@ def test_import_collector_merges_from():
     c = ImportCollector()
     c.add_from("datetime", "datetime")
     c.add_from("datetime", "date")
-    assert c.lines() == ["from datetime import datetime, date"]
+    assert c.lines() == ["from datetime import date, datetime"]
 
 
 def test_import_collector_deduplicates():

@@ -7,8 +7,8 @@ router = APIRouter(prefix="{{ route_prefix }}", tags=["{{ model_name | lower }}"
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-
 {% for handler in route_handlers %}
-{{ handler }}
 
+
+{{ handler }}
 {% endfor %}

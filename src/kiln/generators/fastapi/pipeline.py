@@ -143,6 +143,10 @@ def _wire_imports(specs: dict[str, FileSpec]) -> None:
 
     The ``"serializer"`` spec is special-cased: it only
     imports the ``Resource`` class, not all schema exports.
+
+    Other specs only import names that are actually referenced
+    in their template context (route handlers, result
+    expressions, etc.) to avoid unused-import warnings.
     """
     spec_list = list(specs.items())
     for i, (dst_key, dst_spec) in enumerate(spec_list):
@@ -152,6 +156,50 @@ def _wire_imports(specs: dict[str, FileSpec]) -> None:
             if dst_key == "serializer":
                 resource_cls = dst_spec.context["model_name"] + "Resource"
                 if resource_cls in src_spec.exports:
-                    dst_spec.imports.add_from(src_spec.module, resource_cls)
+                    dst_spec.imports.add_from(
+                        src_spec.module,
+                        resource_cls,
+                    )
             else:
-                dst_spec.imports.add_from(src_spec.module, *src_spec.exports)
+                needed = _referenced_exports(
+                    dst_spec,
+                    src_spec.exports,
+                )
+                if needed:
+                    dst_spec.imports.add_from(
+                        src_spec.module,
+                        *needed,
+                    )
+
+
+def _referenced_exports(
+    spec: FileSpec,
+    exports: list[str],
+) -> list[str]:
+    """Return the subset of *exports* referenced in *spec*.
+
+    Scans string values in the spec's context (route handlers,
+    extra params, result expressions, etc.) for occurrences of
+    each export name.
+
+    Args:
+        spec: The destination file spec.
+        exports: Candidate export names.
+
+    Returns:
+        Export names that appear in the spec's textual context.
+
+    """
+    text = _context_text(spec.context)
+    return [name for name in exports if name in text]
+
+
+def _context_text(obj: object) -> str:
+    """Recursively collect all string values from *obj*."""
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, dict):
+        return " ".join(_context_text(v) for v in obj.values())
+    if isinstance(obj, list):
+        return " ".join(_context_text(v) for v in obj)
+    return ""
