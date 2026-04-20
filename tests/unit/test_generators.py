@@ -17,7 +17,10 @@ from kiln.generators.fastapi.project_router import (
 from kiln.generators.fastapi.router import generate_app_router
 from kiln.generators.fastapi.utils_gen import generate_utils
 from kiln.generators.generate import (
+    EntryType,
+    ResourceEntryType,
     generate,
+    get_entry_types,
 )
 from kiln.generators.init.scaffold import generate_scaffold
 from kiln_core import GeneratedFile
@@ -518,6 +521,87 @@ def test_resource_generator_uses_utils_for_all_get_routes():
         "from _generated.utils import"
         " get_object_from_query_or_404" in route.content
     )
+
+
+# ---------------------------------------------------------------------------
+# EntryType protocol and registry
+# ---------------------------------------------------------------------------
+
+
+def test_entry_type_protocol_is_runtime_checkable():
+    assert isinstance(ResourceEntryType(), EntryType)
+
+
+def test_resource_entry_type_registered():
+    types = get_entry_types()
+    assert any(isinstance(t, ResourceEntryType) for t in types)
+
+
+def test_resource_entry_type_entries(full_config):
+    et = ResourceEntryType()
+    entries = et.entries(full_config)
+    assert len(entries) == 1
+
+
+def test_resource_entry_type_entries_empty():
+    et = ResourceEntryType()
+    entries = et.entries(KilnConfig())
+    assert entries == []
+
+
+def test_resource_entry_type_generate_one(simple_resource, full_config):
+    et = ResourceEntryType()
+    files = et.generate_one(simple_resource, full_config)
+    assert len(files) > 0
+    paths = {f.path for f in files}
+    assert "myapp/routes/user.py" in paths
+
+
+def test_resource_entry_type_after_all(full_config):
+    et = ResourceEntryType()
+    files = et.after_all(full_config)
+    paths = {f.path for f in files}
+    assert "myapp/routes/__init__.py" in paths
+    assert "utils.py" in paths
+
+
+def test_resource_entry_type_before_apps_with_auth():
+    et = ResourceEntryType()
+    cfg = KilnConfig(
+        auth=AuthConfig(
+            verify_credentials_fn="myapp.auth.verify",
+        ),
+    )
+    files = et.before_apps(cfg)
+    paths = {f.path for f in files}
+    assert "auth/dependencies.py" in paths
+
+
+def test_resource_entry_type_before_apps_empty():
+    et = ResourceEntryType()
+    files = et.before_apps(KilnConfig())
+    assert files == []
+
+
+def test_resource_entry_type_after_apps_multi_app():
+    et = ResourceEntryType()
+    cfg = KilnConfig(
+        apps=[
+            AppRef(
+                config=KilnConfig(module="blog"),
+                prefix="/blog",
+            ),
+        ]
+    )
+    files = et.after_apps(cfg)
+    assert len(files) == 1
+    assert files[0].path == "routes/__init__.py"
+
+
+def test_resource_entry_type_after_apps_single_app():
+    et = ResourceEntryType()
+    files = et.after_apps(KilnConfig())
+    assert files == []
 
 
 # ---------------------------------------------------------------------------

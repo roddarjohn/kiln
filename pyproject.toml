@@ -32,6 +32,9 @@ Issues = "https://github.com/roddarjohn/kiln/issues"
 [project.scripts]
 kiln = "kiln.cli:app"
 
+[project.entry-points."kiln.entry_types"]
+resource = "kiln.generators.generate:ResourceEntryType"
+
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"

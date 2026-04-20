@@ -4,10 +4,14 @@ Config in, files out.  Registered :class:`EntryType` instances
 drive generation: each entry type extracts entries from the
 config, generates files per entry, runs per-app post-hooks,
 and optionally contributes project-level scaffold or routing.
+
+Entry types are discovered via the ``kiln.entry_types`` entry
+point group in ``pyproject.toml``.
 """
 
 from __future__ import annotations
 
+import importlib.metadata
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kiln.generators.fastapi.pipeline import generate_resource
@@ -99,16 +103,28 @@ class EntryType(Protocol):
 # Registry
 # -------------------------------------------------------------------
 
-_ENTRY_TYPES: list[EntryType] = []
+ENTRY_POINT_GROUP = "kiln.entry_types"
+
+_ENTRY_TYPES: list[EntryType] | None = None
 
 
-def register_entry_type(entry_type: EntryType) -> None:
-    """Register an :class:`EntryType` for generation."""
-    _ENTRY_TYPES.append(entry_type)
+def _discover_entry_types() -> list[EntryType]:
+    """Load entry types from the ``kiln.entry_types`` group."""
+    types: list[EntryType] = []
+    eps = importlib.metadata.entry_points(
+        group=ENTRY_POINT_GROUP,
+    )
+    for ep in eps:
+        cls = ep.load()
+        types.append(cls())
+    return types
 
 
 def get_entry_types() -> list[EntryType]:
-    """Return the registered entry types (read-only copy)."""
+    """Return discovered entry types, loading on first call."""
+    global _ENTRY_TYPES  # noqa: PLW0603
+    if _ENTRY_TYPES is None:
+        _ENTRY_TYPES = _discover_entry_types()
     return list(_ENTRY_TYPES)
 
 
@@ -122,6 +138,9 @@ class ResourceEntryType:
 
     Handles scaffold generation, per-resource file generation,
     app-level routing, and project-level routing.
+
+    Registered via the ``kiln.entry_types`` entry point in
+    ``pyproject.toml``.
     """
 
     def before_apps(
@@ -168,9 +187,6 @@ class ResourceEntryType:
         return []
 
 
-register_entry_type(ResourceEntryType())
-
-
 # -------------------------------------------------------------------
 # Main entry point
 # -------------------------------------------------------------------
@@ -187,21 +203,22 @@ def generate(config: KilnConfig) -> list[GeneratedFile]:
 
     """
     files: list[GeneratedFile] = []
+    entry_types = get_entry_types()
 
-    for entry_type in _ENTRY_TYPES:
+    for entry_type in entry_types:
         files.extend(entry_type.before_apps(config))
 
     app_configs = _resolve_apps(config)
 
     for app_cfg in app_configs:
-        for entry_type in _ENTRY_TYPES:
+        for entry_type in entry_types:
             items = entry_type.entries(app_cfg)
             for item in items:
                 files.extend(entry_type.generate_one(item, app_cfg))
             if items:
                 files.extend(entry_type.after_all(app_cfg))
 
-    for entry_type in _ENTRY_TYPES:
+    for entry_type in entry_types:
         files.extend(entry_type.after_apps(config))
 
     return files
