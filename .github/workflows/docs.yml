@@ -24,7 +24,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.14"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Cache versioned tag builds
         uses: actions/cache@v5
         with:
@@ -32,7 +32,7 @@ jobs:
           key: docs-tags-${{ hashFiles('.release-please-manifest.json') }}
           restore-keys: docs-tags-
       - run: just docs
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_build/html
 
