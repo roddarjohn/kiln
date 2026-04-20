@@ -2,19 +2,7 @@
 
 Each operation class contributes to a ``dict[str, FileSpec]`` bag,
 adding imports, schema classes, route handlers, or entirely new
-files.  Extensions can add, replace, or remove operations to
-customize the generated output.
-
-Operations are discovered via the ``kiln.operations`` entry-point
-group.  kiln registers its own built-in operations in
-``pyproject.toml``; third-party packages do the same::
-
-    # pyproject.toml
-    [project.entry-points."kiln.operations"]
-    bulk_create = "my_package.ops:BulkCreateOperation"
-
-Operations can also be referenced by dotted class path in the
-config, or via an explicit ``class`` key in operation options.
+files.
 
 Each operation defines an ``Options`` inner class (a Pydantic
 model) that declares and validates its configuration.  The
@@ -25,7 +13,6 @@ pipeline parses options via Pydantic before calling
 from __future__ import annotations
 
 import importlib
-import importlib.metadata
 import inspect
 import typing
 from dataclasses import dataclass
@@ -35,14 +22,7 @@ from pydantic import BaseModel
 
 from kiln.config.schema import FieldSpec  # noqa: TC001
 from kiln.generators._env import render_snippet
-from kiln.generators._helpers import (
-    PYTHON_TYPES,
-    ImportCollector,
-    Name,
-    prefix_import,
-    resolve_db_session,
-)
-from kiln.generators.base import FileSpec as FileSpecType
+from kiln.generators._helpers import PYTHON_TYPES, resolve_db_session
 from kiln.generators.fastapi.list_extensions import (
     FilterConfig,
     OrderConfig,
@@ -52,6 +32,9 @@ from kiln.generators.fastapi.list_extensions import (
     contribute_pagination,
     contribute_search_request,
 )
+from kiln_core import FileSpec as FileSpecType
+from kiln_core import ImportCollector, Name
+from kiln_core.naming import prefix_import
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -371,9 +354,6 @@ class Operation(Protocol):
     ``BaseModel``) that declares and validates configuration.
     The pipeline parses ``op_config.options`` via this model and
     passes the result to ``contribute()``.
-
-    Operations are discovered via the ``kiln.operations``
-    entry-point group and resolved by name or dotted class path.
     """
 
     name: str
@@ -402,120 +382,6 @@ class Operation(Protocol):
 
 
 # -------------------------------------------------------------------
-# Operation registry
-# -------------------------------------------------------------------
-
-
-class OperationRegistry:
-    """Discovers and caches operation classes from entry points.
-
-    Mirrors :class:`~kiln.generators.registry.GeneratorRegistry`
-    but for individual pipeline operations.
-
-    Usage::
-
-        registry = OperationRegistry.default()
-        op = registry.resolve("get", {})
-
-    Third-party packages register operations via
-    ``pyproject.toml``::
-
-        [project.entry-points."kiln.operations"]
-        bulk_create = "my_package.ops:BulkCreateOperation"
-
-    """
-
-    def __init__(self) -> None:  # noqa: D107
-        self._registry: dict[str, type[Operation]] = {}
-
-    def discover(self) -> None:
-        """Load all operations from ``kiln.operations`` entry points."""
-        for ep in importlib.metadata.entry_points(
-            group="kiln.operations",
-        ):
-            self._registry[ep.name] = ep.load()
-
-    def register(self, name: str, cls: type[Operation]) -> None:
-        """Manually register an operation class.
-
-        Useful for tests that need to register operations without
-        entry points.
-
-        Args:
-            name: Short name for the operation.
-            cls: The operation class.
-
-        """
-        self._registry[name] = cls
-
-    def resolve(self, name: str, options: dict[str, Any]) -> Operation:
-        """Resolve an operation by name, entry point, or class path.
-
-        Resolution order:
-
-        1. Explicit ``class`` key in *options* — import and
-           instantiate the class.
-        2. Entry-point registry lookup by *name*.
-        3. If *name* is not registered but *options* contains
-           ``fn`` — use the ``"action"`` entry point.
-        4. Dotted class path fallback — if *name* contains a
-           dot, treat it as an importable class.
-
-        Args:
-            name: Operation name or dotted class path.
-            options: The operation's options dict.
-
-        Returns:
-            An instantiated :class:`Operation`.
-
-        Raises:
-            ValueError: When the operation cannot be resolved.
-
-        """
-        if "class" in options:
-            return _import_class(options["class"])()
-        if name in self._registry:
-            return self._registry[name]()
-        if "fn" in options and "action" in self._registry:
-            return self._registry["action"]()
-        if "." in name:
-            return _import_class(name)()
-        msg = (
-            f"Unknown operation '{name}'. Register it via a "
-            f"kiln.operations entry point or use a dotted class "
-            f"path."
-        )
-        raise ValueError(msg)
-
-    @classmethod
-    def default(cls) -> OperationRegistry:
-        """Return a registry pre-loaded from entry points.
-
-        Returns:
-            A ready-to-use :class:`OperationRegistry`.
-
-        """
-        registry = cls()
-        registry.discover()
-        return registry
-
-
-def _import_class(dotted_path: str) -> type[Operation]:
-    """Import a class from a dotted path.
-
-    Args:
-        dotted_path: E.g. ``"my_package.ops.BulkCreateOperation"``.
-
-    Returns:
-        The imported class.
-
-    """
-    module, cls_name = dotted_path.rsplit(".", 1)
-    mod = importlib.import_module(module)
-    return getattr(mod, cls_name)
-
-
-# -------------------------------------------------------------------
 # Common options models
 # -------------------------------------------------------------------
 
@@ -527,74 +393,73 @@ class FieldsOptions(BaseModel):
 
 
 # -------------------------------------------------------------------
+# Setup (initialises base specs, not a pluggable operation)
+# -------------------------------------------------------------------
+
+
+def setup_specs(
+    resource: ResourceConfig,
+    ctx: SharedContext,
+) -> dict[str, FileSpecType]:
+    """Create the base FileSpec objects for schema, route, etc.
+
+    This runs before any operation and initialises the specs
+    dict that operations contribute to.
+
+    Args:
+        resource: The resource configuration.
+        ctx: Shared context for this resource.
+
+    Returns:
+        Populated ``specs`` dict with ``"schema"`` and
+        ``"route"`` keys (plus ``"serializer"`` and ``"test"``
+        when applicable).
+
+    """
+    specs: dict[str, FileSpecType] = {}
+    pkg = ctx.package_prefix
+
+    parts = ctx.model_module.rsplit(".", 1)
+    app = parts[0] if len(parts) > 1 else ctx.model_module
+
+    specs["schema"] = _make_schema_spec(ctx.model, app, pkg)
+
+    if ctx.has_resource_schema:
+        specs["serializer"] = _make_serializer_spec(
+            ctx.model,
+            ctx.model_module,
+            app,
+            pkg,
+        )
+
+    specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
+
+    specs["route"].context["list_extensions"] = {
+        "extra_params": [],
+        "query_modifiers": [],
+        "response_model": None,
+        "return_type": None,
+        "result_expression": None,
+    }
+
+    if resource.generate_tests:
+        specs["test"] = _make_test_spec(
+            ctx.model,
+            app,
+            pkg,
+            ctx,
+        )
+
+    return specs
+
+
+# -------------------------------------------------------------------
 # Built-in operations
 # -------------------------------------------------------------------
 
 
-class SetupOperation:
-    """Creates the base FileSpec objects for schema and route.
-
-    This operation runs first and initialises the ``"schema"``
-    and ``"route"`` specs that other operations contribute to.
-    When the resource has explicit fields on get or list, a
-    ``"serializer"`` spec is also created.  When the resource
-    has ``generate_tests=True``, a ``"test"`` spec is created.
-    """
-
-    name = "setup"
-    Options = EmptyOptions
-
-    def contribute(
-        self,
-        specs: dict[str, FileSpecType],
-        resource: ResourceConfig,
-        ctx: SharedContext,
-        op_config: OperationConfig,  # noqa: ARG002
-        options: EmptyOptions,  # noqa: ARG002
-    ) -> None:
-        """Create base schema, route, and optional serializer."""
-        pkg = ctx.package_prefix
-
-        # Derive app from the file paths (model module parent)
-        parts = ctx.model_module.rsplit(".", 1)
-        app = parts[0] if len(parts) > 1 else ctx.model_module
-
-        # Schema spec
-        specs["schema"] = _make_schema_spec(ctx.model, app, pkg)
-
-        # Serializer spec (only when resource schema exists)
-        if ctx.has_resource_schema:
-            specs["serializer"] = _make_serializer_spec(
-                ctx.model,
-                ctx.model_module,
-                app,
-                pkg,
-            )
-
-        # Route spec
-        specs["route"] = _make_route_spec(ctx.model, app, pkg, ctx)
-
-        # Extension points for list operation plugins
-        specs["route"].context["list_extensions"] = {
-            "extra_params": [],
-            "query_modifiers": [],
-            "response_model": None,
-            "return_type": None,
-            "result_expression": None,
-        }
-
-        # Test spec (only when generate_tests is enabled)
-        if resource.generate_tests:
-            specs["test"] = _make_test_spec(
-                ctx.model,
-                app,
-                pkg,
-                ctx,
-            )
-
-
 class GetOperation:
-    """GET /{pk} — retrieve a single resource by primary key."""
+    """GET /{pk} -- retrieve a single resource by primary key."""
 
     name = "get"
     Options = FieldsOptions
@@ -622,7 +487,6 @@ class GetOperation:
             schema.context["schema_classes"].append(snippet)
             schema.exports.append(ctx.model.suffixed("Resource"))
             _add_field_type_imports(schema.imports, options.fields)
-            # Populate serializer fields if present
             if "serializer" in specs:
                 serializer = specs["serializer"]
                 if not serializer.context["resource_fields"]:
@@ -681,10 +545,10 @@ class GetOperation:
 
 
 def _list_response_types(
-    ext: dict,
+    ext: dict[str, Any],
     ctx: SharedContext,
 ) -> tuple[str, str]:
-    """Resolve response_model and return_type for the list handler.
+    """Resolve response_model and return_type for list handler.
 
     When a pagination extension sets overrides they take
     precedence; otherwise the default list types are used.
@@ -713,7 +577,7 @@ def _list_response_types(
 
 
 class ListOperation:
-    """GET / — list all resources.
+    """GET / -- list all resources.
 
     Supports optional filtering, ordering, and pagination via
     sub-configuration keys.  When present, these delegate to
@@ -756,7 +620,6 @@ class ListOperation:
             schema.context["schema_classes"].append(snippet)
             schema.exports.append(ctx.model.suffixed("Resource"))
             _add_field_type_imports(schema.imports, options.fields)
-            # Populate serializer fields if present
             if "serializer" in specs:
                 serializer = specs["serializer"]
                 if not serializer.context["resource_fields"]:
@@ -861,7 +724,7 @@ class ListOperation:
 
 
 class CreateOperation:
-    """POST / — create a new resource."""
+    """POST / -- create a new resource."""
 
     name = "create"
     Options = FieldsOptions
@@ -918,7 +781,7 @@ class CreateOperation:
                 "path": "/",
                 "status_success": 201,
                 "status_not_found": None,
-                "status_invalid": 422 if options.fields else None,
+                "status_invalid": (422 if options.fields else None),
                 "requires_auth": _op_requires_auth(resource, op_config),
                 "has_request_body": has_schema,
                 "request_schema": (
@@ -937,7 +800,7 @@ class CreateOperation:
 
 
 class UpdateOperation:
-    """PATCH /{pk} — partially update a resource."""
+    """PATCH /{pk} -- partially update a resource."""
 
     name = "update"
     Options = FieldsOptions
@@ -1000,7 +863,7 @@ class UpdateOperation:
                 "path": f"/{{{ctx.pk_name}}}",
                 "status_success": 200,
                 "status_not_found": 404,
-                "status_invalid": 422 if options.fields else None,
+                "status_invalid": (422 if options.fields else None),
                 "requires_auth": _op_requires_auth(resource, op_config),
                 "has_request_body": has_schema,
                 "request_schema": (
@@ -1019,7 +882,7 @@ class UpdateOperation:
 
 
 class DeleteOperation:
-    """DELETE /{pk} — delete a resource."""
+    """DELETE /{pk} -- delete a resource."""
 
     name = "delete"
     Options = EmptyOptions
@@ -1131,7 +994,7 @@ class ActionOperation:
             "name": action_name.raw,
             "fn_name": fn_name.raw,
             "slug": action_name.slug,
-            "handler_name": (f"{action_name.raw}_action"),
+            "handler_name": f"{action_name.raw}_action",
             "is_object_action": info.is_object_action,
             "model_param_name": info.model_param_name,
             "request_class": info.request_class,
@@ -1175,7 +1038,48 @@ class ActionOperation:
 
 
 # -------------------------------------------------------------------
-# FileSpec factories (used by SetupOperation)
+# Built-in operation lookup
+# -------------------------------------------------------------------
+
+BUILTIN_OPERATIONS: dict[str, type[Operation]] = {
+    "get": GetOperation,
+    "list": ListOperation,
+    "create": CreateOperation,
+    "update": UpdateOperation,
+    "delete": DeleteOperation,
+    "action": ActionOperation,
+}
+
+
+def resolve_operation(
+    name: str,
+    options: dict[str, Any],
+) -> Operation:
+    """Resolve an operation by name.
+
+    Args:
+        name: Operation name (e.g. ``"get"``, ``"create"``).
+        options: The operation's options dict.  If ``fn`` is
+            present and *name* is not a built-in, the
+            ``"action"`` operation is used.
+
+    Returns:
+        An instantiated :class:`Operation`.
+
+    Raises:
+        ValueError: When the operation cannot be resolved.
+
+    """
+    if name in BUILTIN_OPERATIONS:
+        return BUILTIN_OPERATIONS[name]()
+    if "fn" in options and "action" in BUILTIN_OPERATIONS:
+        return BUILTIN_OPERATIONS["action"]()
+    msg = f"Unknown operation '{name}'."
+    raise ValueError(msg)
+
+
+# -------------------------------------------------------------------
+# FileSpec factories (used by setup_specs)
 # -------------------------------------------------------------------
 
 
@@ -1207,6 +1111,7 @@ def _make_serializer_spec(
     Resource fields are populated later by GetOperation or
     ListOperation when they have explicit fields.
     """
+    resource_class = model.suffixed("Resource")
     spec = FileSpecType(
         path=f"{app}/serializers/{model.lower}.py",
         template="fastapi/serializer_outer.py.j2",
@@ -1217,6 +1122,7 @@ def _make_serializer_spec(
             "model_name": model.pascal,
             "model_lower": model.lower,
             "resource_fields": [],
+            "resource_class": resource_class,
         },
     )
     spec.imports.add_from("__future__", "annotations")
@@ -1236,6 +1142,7 @@ def _make_route_spec(
         path=f"{app}/routes/{model.lower}.py",
         template="fastapi/route.py.j2",
         imports=ImportCollector(),
+        exports=["router"],
         package_prefix=pkg,
         context={
             "model_name": model.pascal,
@@ -1306,6 +1213,7 @@ def _make_test_spec(
         "AsyncClient",
     )
     spec.imports.add_from("fastapi", "FastAPI")
+    spec.imports.add_from(route_module, "router")
 
     session_module = prefix_import(pkg, ctx.session_module)
     spec.imports.add_from(session_module, ctx.get_db_fn)

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.generators._env import env
-from kiln.generators.base import GeneratedFile
+from kiln_core import GeneratedFile
 
 if TYPE_CHECKING:
     from kiln.config.schema import AuthConfig, KilnConfig

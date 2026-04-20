@@ -32,15 +32,6 @@ Issues = "https://github.com/roddarjohn/kiln/issues"
 [project.scripts]
 kiln = "kiln.cli:app"
 
-[project.entry-points."kiln.operations"]
-setup = "kiln.generators.fastapi.operations:SetupOperation"
-get = "kiln.generators.fastapi.operations:GetOperation"
-list = "kiln.generators.fastapi.operations:ListOperation"
-create = "kiln.generators.fastapi.operations:CreateOperation"
-update = "kiln.generators.fastapi.operations:UpdateOperation"
-delete = "kiln.generators.fastapi.operations:DeleteOperation"
-action = "kiln.generators.fastapi.operations:ActionOperation"
-
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"

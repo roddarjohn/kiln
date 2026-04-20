@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig
-    from kiln.generators.base import GeneratedFile, Generator
+    from kiln.generators.base import Generator
+    from kiln_core import GeneratedFile
 from kiln.generators.fastapi.project_router import ProjectRouterGenerator
 from kiln.generators.fastapi.resource import ResourceGenerator
 from kiln.generators.fastapi.router import RouterGenerator

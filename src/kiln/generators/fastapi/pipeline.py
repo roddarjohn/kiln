@@ -1,17 +1,12 @@
 """Resource generation pipeline.
 
-Composes :class:`~kiln.generators.base.FileSpec` objects and runs
-:class:`~kiln.generators.fastapi.operations.Operation` classes
-against them to produce the final generated files.
+Given a resource config and its operations, produces the
+final generated files.  The pipeline:
 
-Operations are resolved from configuration via
-:class:`~kiln.generators.fastapi.operations.OperationRegistry`,
-which discovers operations from ``kiln.operations`` entry points.
-
-The pipeline is completely generic — it manages a
-``dict[str, FileSpec]`` bag.  Operations create and populate
-specs by key; the pipeline auto-wires cross-file imports and
-renders.
+1. Sets up base specs (schema, route, serializer, test).
+2. Resolves and runs each operation's ``contribute()``.
+3. Wires cross-file imports via :func:`kiln_core.wire_exports`.
+4. Renders each spec to a :class:`GeneratedFile`.
 """
 
 from __future__ import annotations
@@ -21,92 +16,51 @@ from typing import TYPE_CHECKING
 from kiln.config.schema import OperationConfig
 from kiln.generators._env import env
 from kiln.generators.fastapi.operations import (
-    Operation,
-    OperationRegistry,
-    SetupOperation,
     build_shared_context,
+    resolve_operation,
+    setup_specs,
 )
+from kiln_core import wire_exports
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from kiln.config.schema import KilnConfig, ResourceConfig
-    from kiln.generators.base import FileSpec, GeneratedFile
+    from kiln_core import GeneratedFile
 
 
-class ResourcePipeline:
-    """Composable pipeline that builds files for one resource.
-
-    For each resource the pipeline:
-
-    1. Resolves operation configs from resource/config inheritance.
-    2. Validates all operations before any generation begins.
-    3. Runs every operation against a shared ``specs`` dict.
-    4. Auto-wires cross-file imports.
-    5. Renders each spec to a :class:`GeneratedFile`.
+def generate_resource(
+    resource: ResourceConfig,
+    config: KilnConfig,
+) -> list[GeneratedFile]:
+    """Build all generated files for a single *resource*.
 
     Args:
-        registry: Operation registry for resolving operation
-            names to classes.  Defaults to entry-point discovery.
+        resource: The resource configuration.
+        config: The top-level kiln configuration.
+
+    Returns:
+        List of :class:`GeneratedFile` objects.
 
     """
+    op_configs = _resolve_op_configs(resource, config)
+    ctx = build_shared_context(resource, config, op_configs)
+    specs = setup_specs(resource, ctx)
 
-    def __init__(  # noqa: D107
-        self,
-        registry: OperationRegistry | None = None,
-    ) -> None:
-        self.registry = registry or OperationRegistry.default()
+    for oc in op_configs:
+        op = resolve_operation(oc.name, oc.options)
+        opts = op.Options(**oc.options)
+        op.contribute(specs, resource, ctx, oc, opts)
 
-    def build(
-        self,
-        resource: ResourceConfig,
-        config: KilnConfig,
-    ) -> list[GeneratedFile]:
-        """Build all generated files for a single *resource*.
-
-        Args:
-            resource: The resource configuration.
-            config: The top-level kiln configuration.
-
-        Returns:
-            List of :class:`GeneratedFile` objects.
-
-        """
-        op_configs = _resolve_op_configs(resource, config)
-        ctx = build_shared_context(resource, config, op_configs)
-        specs: dict[str, FileSpec] = {}
-
-        # Always run setup (internal, not user-configurable)
-        setup_config = OperationConfig(name="setup")
-        setup_op = SetupOperation()
-        setup_opts = setup_op.Options()
-        setup_op.contribute(specs, resource, ctx, setup_config, setup_opts)
-
-        # Pass 1: resolve and parse options (Pydantic validation)
-        resolved: list[tuple[Operation, OperationConfig, BaseModel]] = []
-        for oc in op_configs:
-            op = self.registry.resolve(oc.name, oc.options)
-            parsed = op.Options(**oc.options)
-            resolved.append((op, oc, parsed))
-
-        # Pass 2: contribute
-        for op, oc, parsed in resolved:
-            op.contribute(specs, resource, ctx, oc, parsed)
-
-        # Auto-wire cross-file imports
-        _wire_imports(specs)
-
-        # Render all specs in insertion order
-        return [spec.render(env) for spec in specs.values()]
+    wire_exports(specs)
+    return [spec.render(env) for spec in specs.values()]
 
 
 def _resolve_op_configs(
     resource: ResourceConfig,
     config: KilnConfig,
 ) -> list[OperationConfig]:
-    """Resolve operation configs with three-level inheritance.
+    """Resolve operation configs with inheritance.
 
-    Resource-level operations override app/config-level.  String
+    Resource-level operations override config-level.  String
     entries are normalised to :class:`OperationConfig`.
 
     Args:
@@ -132,87 +86,3 @@ def _normalize_entry(
     if isinstance(entry, str):
         return OperationConfig(name=entry)
     return entry
-
-
-def _wire_imports(specs: dict[str, FileSpec]) -> None:
-    """Wire cross-file imports between specs.
-
-    Each spec can import from specs that appear **before** it
-    in insertion order.  This avoids circular imports — the
-    first spec (typically ``"schema"``) never receives wired
-    imports.
-
-    The ``"serializer"`` spec is special-cased: it only
-    imports the ``Resource`` class, not all schema exports.
-
-    Other specs only import names that are actually referenced
-    in their template context (route handlers, result
-    expressions, etc.) to avoid unused-import warnings.
-    """
-    spec_list = list(specs.items())
-    for i, (dst_key, dst_spec) in enumerate(spec_list):
-        for _src_key, src_spec in spec_list[:i]:
-            if dst_key == "test":
-                # Test imports router from route, exports from others
-                if _src_key == "route":
-                    dst_spec.imports.add_from(
-                        src_spec.module,
-                        "router",
-                    )
-                elif src_spec.exports:
-                    dst_spec.imports.add_from(
-                        src_spec.module,
-                        *src_spec.exports,
-                    )
-            elif dst_key == "serializer":
-                if not src_spec.exports:
-                    continue
-                resource_cls = dst_spec.context["model_name"] + "Resource"
-                if resource_cls in src_spec.exports:
-                    dst_spec.imports.add_from(
-                        src_spec.module,
-                        resource_cls,
-                    )
-            else:
-                needed = _referenced_exports(
-                    dst_spec,
-                    src_spec.exports,
-                )
-                if needed:
-                    dst_spec.imports.add_from(
-                        src_spec.module,
-                        *needed,
-                    )
-
-
-def _referenced_exports(
-    spec: FileSpec,
-    exports: list[str],
-) -> list[str]:
-    """Return the subset of *exports* referenced in *spec*.
-
-    Scans string values in the spec's context (route handlers,
-    extra params, result expressions, etc.) for occurrences of
-    each export name.
-
-    Args:
-        spec: The destination file spec.
-        exports: Candidate export names.
-
-    Returns:
-        Export names that appear in the spec's textual context.
-
-    """
-    text = _context_text(spec.context)
-    return [name for name in exports if name in text]
-
-
-def _context_text(obj: object) -> str:
-    """Recursively collect all string values from *obj*."""
-    if isinstance(obj, str):
-        return obj
-    if isinstance(obj, dict):
-        return " ".join(_context_text(v) for v in obj.values())
-    if isinstance(obj, list):
-        return " ".join(_context_text(v) for v in obj)
-    return ""

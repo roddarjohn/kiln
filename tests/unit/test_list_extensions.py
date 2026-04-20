@@ -4,8 +4,6 @@ import pytest
 
 from kiln.config.schema import FieldSpec, OperationConfig, ResourceConfig
 from kiln.generators._env import env
-from kiln.generators._helpers import ImportCollector, Name
-from kiln.generators.base import FileSpec
 from kiln.generators.fastapi.list_extensions import (
     FilterConfig,
     OrderConfig,
@@ -16,6 +14,7 @@ from kiln.generators.fastapi.list_extensions import (
     contribute_search_request,
 )
 from kiln.generators.fastapi.operations import ListOperation, SharedContext
+from kiln_core import FileSpec, ImportCollector, Name
 
 # -------------------------------------------------------------------
 # Fixtures

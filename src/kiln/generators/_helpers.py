@@ -1,32 +1,11 @@
-"""Shared naming, import, and type-mapping helpers for code generators.
-
-Re-exports core primitives from :mod:`kiln_core` and provides
-kiln-specific helpers (type mappings, database session resolution).
-
-All type mappings produce *strings* -- the textual representation
-of the corresponding type in generated Python source code, not
-runtime Python objects.
-"""
+"""Kiln-specific type mappings and database helpers."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from kiln_core.imports import ImportCollector
-from kiln_core.naming import Name, prefix_import, split_dotted_class
-
 if TYPE_CHECKING:
     from kiln.config.schema import DatabaseConfig
-
-# Re-export core primitives so existing imports keep working.
-__all__ = [
-    "PYTHON_TYPES",
-    "ImportCollector",
-    "Name",
-    "prefix_import",
-    "resolve_db_session",
-    "split_dotted_class",
-]
 
 # Python type annotation strings for Pydantic schemas and route
 # parameters.

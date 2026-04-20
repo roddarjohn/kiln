@@ -22,11 +22,12 @@ from pydantic import BaseModel
 
 from kiln.config.schema import FieldSpec, FieldType  # noqa: TC001
 from kiln.generators._env import render_snippet
-from kiln.generators._helpers import PYTHON_TYPES, prefix_import
+from kiln.generators._helpers import PYTHON_TYPES
+from kiln_core.naming import prefix_import
 
 if TYPE_CHECKING:
-    from kiln.generators.base import FileSpec
     from kiln.generators.fastapi.operations import SharedContext
+    from kiln_core import FileSpec
 
 # -------------------------------------------------------------------
 # Operator defaults per field type

@@ -4,6 +4,9 @@
 description of a file being built up by multiple contributors.
 Once all contributors have run, call :meth:`FileSpec.render` to
 produce an immutable :class:`GeneratedFile`.
+
+:func:`wire_exports` connects specs by scanning context text
+for export references and adding the corresponding imports.
 """
 
 from __future__ import annotations
@@ -102,3 +105,45 @@ class FileSpec:
             path=self.path,
             content=content,
         )
+
+
+# -------------------------------------------------------------------
+# Cross-file wiring
+# -------------------------------------------------------------------
+
+
+def wire_exports(specs: dict[str, FileSpec]) -> None:
+    """Wire imports between specs based on export references.
+
+    For each pair of specs where *src* appears before *dst* in
+    insertion order, scans *dst*'s context values for occurrences
+    of *src*'s export names and adds the corresponding import.
+
+    This handles the common case where a route file references
+    schema class names in its handler text.  Edge cases (e.g.
+    names constructed at template render time) must be wired
+    explicitly by the caller.
+
+    Args:
+        specs: Ordered dict of file specs.  Insertion order
+            determines which specs can import from which.
+
+    """
+    spec_list = list(specs.items())
+    for i, (_, dst) in enumerate(spec_list):
+        text = _flatten_context(dst.context)
+        for _, src in spec_list[:i]:
+            for name in src.exports:
+                if name in text:
+                    dst.imports.add_from(src.module, name)
+
+
+def _flatten_context(obj: object) -> str:
+    """Recursively collect all string values from *obj*."""
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, dict):
+        return " ".join(_flatten_context(v) for v in obj.values())
+    if isinstance(obj, list):
+        return " ".join(_flatten_context(v) for v in obj)
+    return ""

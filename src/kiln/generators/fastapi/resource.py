@@ -1,34 +1,27 @@
-"""Generator that produces FastAPI schema and route files for resources."""
+"""Generator that produces FastAPI files for resources."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from kiln.generators.fastapi.pipeline import ResourcePipeline
+from kiln.generators.fastapi.pipeline import generate_resource
 
 if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig
-    from kiln.generators.base import GeneratedFile
+    from kiln_core import GeneratedFile
 
 
 class ResourceGenerator:
     """Produces schema, serializer, and route files per resource.
 
-    For each resource up to three files are emitted:
+    For each resource up to four files are emitted:
 
-    * ``{module}/schemas/{model}.py`` -- Pydantic request/response
-      schemas.
+    * ``{module}/schemas/{model}.py`` -- Pydantic schemas.
     * ``{module}/serializers/{model}.py`` -- serializer function
-      that converts an ORM model instance to the resource schema
       (only when a resource schema is generated).
-    * ``{module}/routes/{model}.py`` -- async FastAPI route handlers
-      using SQLAlchemy ``select``, ``insert``, ``update``,
-      ``delete``.
-
-    Generated files are always overwritten on re-generation.
-
-    Operations are resolved from the config's ``operations`` field
-    via entry-point discovery.
+    * ``{module}/routes/{model}.py`` -- async route handlers.
+    * ``tests/test_{module}_{model}.py`` -- route tests
+      (only when ``generate_tests`` is enabled).
     """
 
     @property
@@ -37,7 +30,7 @@ class ResourceGenerator:
         return "resources"
 
     def can_generate(self, config: KilnConfig) -> bool:
-        """Return True when the config defines at least one resource.
+        """Return True when the config has resources.
 
         Args:
             config: The validated kiln configuration.
@@ -46,18 +39,16 @@ class ResourceGenerator:
         return bool(config.resources)
 
     def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Generate schema, serializer, and route files per resource.
+        """Generate files for all resources.
 
         Args:
             config: The validated kiln configuration.
 
         Returns:
-            Up to three :class:`~kiln.generators.base.GeneratedFile`
-            instances per resource.
+            List of generated files across all resources.
 
         """
-        pipeline = ResourcePipeline()
         files: list[GeneratedFile] = []
         for resource in config.resources:
-            files.extend(pipeline.build(resource, config))
+            files.extend(generate_resource(resource, config))
         return files

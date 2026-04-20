@@ -1,22 +1,12 @@
-"""Base types shared by all kiln generators.
-
-Re-exports :class:`~kiln_core.spec.FileSpec` and
-:class:`~kiln_core.spec.GeneratedFile` from :mod:`kiln_core`
-and defines the kiln-specific :class:`Generator` protocol.
-"""
+"""Kiln-specific generator protocol."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from kiln_core.spec import FileSpec, GeneratedFile
-
 if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig
-
-# Re-export so existing ``from kiln.generators.base import ...``
-# continues to work.
-__all__ = ["FileSpec", "GeneratedFile", "Generator"]
+    from kiln_core import GeneratedFile
 
 
 @runtime_checkable
@@ -50,7 +40,10 @@ class Generator(Protocol):
         """
         ...
 
-    def generate(self, config: KilnConfig) -> list[GeneratedFile]:
+    def generate(
+        self,
+        config: KilnConfig,
+    ) -> list[GeneratedFile]:
         """Produce files from *config*.
 
         Args:

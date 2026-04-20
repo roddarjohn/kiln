@@ -21,7 +21,7 @@ from kiln_core.env import create_jinja_env, render_snippet
 from kiln_core.imports import ImportCollector
 from kiln_core.naming import Name, prefix_import, split_dotted_class
 from kiln_core.output import write_files
-from kiln_core.spec import FileSpec, GeneratedFile
+from kiln_core.spec import FileSpec, GeneratedFile, wire_exports
 
 __all__ = [
     "FileSpec",
@@ -32,5 +32,6 @@ __all__ = [
     "prefix_import",
     "render_snippet",
     "split_dotted_class",
+    "wire_exports",
     "write_files",
 ]
