@@ -11,13 +11,15 @@ from kiln.config.schema import (
     OperationConfig,
     ResourceConfig,
 )
-from kiln.generators.base import Generator
-from kiln.generators.fastapi.project_router import ProjectRouterGenerator
-from kiln.generators.fastapi.resource import ResourceGenerator
-from kiln.generators.fastapi.router import RouterGenerator
-from kiln.generators.fastapi.utils_gen import UtilsGenerator
-from kiln.generators.init.scaffold import ScaffoldGenerator
-from kiln.generators.registry import GeneratorRegistry
+from kiln.generators.fastapi.project_router import (
+    generate_project_router,
+)
+from kiln.generators.fastapi.router import generate_app_router
+from kiln.generators.fastapi.utils_gen import generate_utils
+from kiln.generators.generate import (
+    generate,
+)
+from kiln.generators.init.scaffold import generate_scaffold
 from kiln_core import GeneratedFile
 
 # ---------------------------------------------------------------------------
@@ -106,7 +108,22 @@ def full_config(simple_resource) -> KilnConfig:
 
 
 # ---------------------------------------------------------------------------
-# GeneratedFile + Generator protocol
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _generate_resources(config):
+    """Generate only resource files (no scaffold, router, utils)."""
+    from kiln.generators.fastapi.pipeline import generate_resource
+
+    files = []
+    for resource in config.resources:
+        files.extend(generate_resource(resource, config))
+    return files
+
+
+# ---------------------------------------------------------------------------
+# GeneratedFile
 # ---------------------------------------------------------------------------
 
 
@@ -116,11 +133,6 @@ def test_generated_file():
     assert f.content == "# hi"
 
 
-def test_generator_protocol():
-    assert isinstance(ResourceGenerator(), Generator)
-    assert isinstance(RouterGenerator(), Generator)
-
-
 # ---------------------------------------------------------------------------
 # ScaffoldGenerator
 # ---------------------------------------------------------------------------
@@ -128,7 +140,7 @@ def test_generator_protocol():
 
 def test_scaffold_generates_db_files():
     cfg = KilnConfig()
-    files = ScaffoldGenerator().generate(cfg)
+    files = generate_scaffold(cfg)
     paths = {f.path for f in files}
     assert "db/session.py" in paths
     assert "auth/dependencies.py" not in paths
@@ -140,7 +152,7 @@ def test_scaffold_with_auth_generates_deps():
             verify_credentials_fn="myapp.auth.verify",
         )
     )
-    files = ScaffoldGenerator().generate(cfg)
+    files = generate_scaffold(cfg)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
 
@@ -151,7 +163,7 @@ def test_scaffold_auth_deps_valid_python():
             verify_credentials_fn="myapp.auth.verify",
         )
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     src = files["auth/dependencies.py"].content
     ast.parse(src)
 
@@ -162,7 +174,7 @@ def test_scaffold_auth_deps_injection():
             get_current_user_fn="myapp.auth.custom.get_current_user"
         )
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     src = files["auth/dependencies.py"].content
     assert "from myapp.auth.custom import get_current_user" in src
     assert "jwt.decode" not in src
@@ -174,7 +186,7 @@ def test_scaffold_with_auth_generates_router():
             verify_credentials_fn="myapp.auth.verify",
         )
     )
-    files = ScaffoldGenerator().generate(cfg)
+    files = generate_scaffold(cfg)
     paths = {f.path for f in files}
     assert "auth/router.py" in paths
 
@@ -185,7 +197,7 @@ def test_scaffold_auth_router_valid_python():
             verify_credentials_fn="myapp.auth.verify",
         )
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     src = files["auth/router.py"].content
     ast.parse(src)
 
@@ -196,7 +208,7 @@ def test_scaffold_auth_router_imports_verify_fn():
             verify_credentials_fn="myapp.auth.verify",
         )
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     src = files["auth/router.py"].content
     assert "from myapp.auth import verify" in src
 
@@ -208,7 +220,7 @@ def test_scaffold_auth_router_contains_token_url():
             token_url="/api/login",  # noqa: S106
         )
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     src = files["auth/router.py"].content
     assert "/api/login" in src
 
@@ -219,26 +231,26 @@ def test_scaffold_custom_auth_no_router():
             get_current_user_fn="myapp.auth.custom.get_current_user"
         )
     )
-    files = ScaffoldGenerator().generate(cfg)
+    files = generate_scaffold(cfg)
     paths = {f.path for f in files}
     assert "auth/router.py" not in paths
 
 
 # ---------------------------------------------------------------------------
-# ResourceGenerator
+# Resource generation
 # ---------------------------------------------------------------------------
 
 
-def test_resource_generator_can_generate(full_config):
-    assert ResourceGenerator().can_generate(full_config)
+def test_resource_generation_produces_files(full_config):
+    assert _generate_resources(full_config)
 
 
-def test_resource_generator_cannot_generate_empty():
-    assert not ResourceGenerator().can_generate(KilnConfig())
+def test_resource_generation_empty_config():
+    assert _generate_resources(KilnConfig()) == []
 
 
 def test_resource_generator_output_paths(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     paths = {f.path for f in files}
     assert "myapp/routes/user.py" in paths
     assert "myapp/schemas/user.py" in paths
@@ -247,12 +259,12 @@ def test_resource_generator_output_paths(full_config):
 
 
 def test_resource_generator_valid_python(full_config):
-    for f in ResourceGenerator().generate(full_config):
+    for f in _generate_resources(full_config):
         ast.parse(f.content)
 
 
 def test_resource_generator_no_build_schema(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
     assert "_build_schema" not in schema.content
     assert "class UserGetResponse" not in schema.content
@@ -260,7 +272,7 @@ def test_resource_generator_no_build_schema(full_config):
 
 
 def test_resource_generator_specific_fields_static_class(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
     # list has specific fields -> unified Resource schema
     assert "class UserResource(BaseModel):" in schema.content
@@ -268,13 +280,13 @@ def test_resource_generator_specific_fields_static_class(full_config):
 
 
 def test_resource_generator_create_request_class(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
     assert "class UserCreateRequest(BaseModel):" in schema.content
 
 
 def test_resource_generator_update_request_optional_fields(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     schema = next(f for f in files if "schemas/user.py" in f.path)
     assert "class UserUpdateRequest(BaseModel):" in schema.content
     # update fields are all optional (| None = None)
@@ -282,14 +294,14 @@ def test_resource_generator_update_request_optional_fields(full_config):
 
 
 def test_resource_generator_route_imports_from_schema(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "from _generated.myapp.schemas.user import" in route.content
     # import path uses package_prefix even though file path does not
 
 
 def test_resource_generator_serializer_file(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     serializer = next(f for f in files if "serializers/user.py" in f.path)
     assert "def to_user_resource" in serializer.content
     assert "-> UserResource:" in serializer.content
@@ -304,27 +316,27 @@ def test_resource_generator_serializer_file(full_config):
 
 
 def test_resource_generator_route_uses_insert(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "insert(User)" in route.content
     assert "db.add(" not in route.content
 
 
 def test_resource_generator_route_uses_update(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "update(User)" in route.content
     assert "db.merge(" not in route.content
 
 
 def test_resource_generator_route_uses_delete(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "delete(User)" in route.content
 
 
 def test_resource_generator_auth_injected(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "current_user" in route.content
     assert "get_current_user" in route.content
@@ -334,13 +346,13 @@ def test_resource_generator_auth_injected(full_config):
 
 def test_resource_generator_no_auth_when_unconfigured(simple_resource):
     cfg = KilnConfig(resources=[simple_resource])  # no auth in config
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "get_current_user" not in route.content
 
 
 def test_resource_generator_delete_route_present(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "router.delete" in route.content
 
@@ -351,7 +363,7 @@ def test_resource_generator_no_delete_when_disabled():
         operations=["get", "list"],
     )
     cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "router.delete" not in route.content
 
@@ -362,7 +374,7 @@ def test_resource_generator_route_prefix_default():
         operations=["get"],
     )
     cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/article.py" in f.path)
     assert 'prefix="/articles"' in route.content
 
@@ -374,14 +386,14 @@ def test_resource_generator_route_prefix_custom():
         operations=["get"],
     )
     cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert 'prefix="/people"' in route.content
 
 
 def test_resource_generator_python_action(action_resource):
     cfg = KilnConfig(resources=[action_resource])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/stubmodel.py" in f.path)
     assert "publish_action" in route.content
     # top-level import of the action function
@@ -396,7 +408,7 @@ def test_resource_generator_python_action(action_resource):
 
 def test_resource_generator_archive_action(action_resource):
     cfg = KilnConfig(resources=[action_resource])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/stubmodel.py" in f.path)
     assert "archive_action" in route.content
     # object action without a body
@@ -406,7 +418,7 @@ def test_resource_generator_archive_action(action_resource):
 
 def test_resource_generator_valid_python_with_actions(action_resource):
     cfg = KilnConfig(resources=[action_resource])
-    for f in ResourceGenerator().generate(cfg):
+    for f in _generate_resources(cfg):
         ast.parse(f.content)
 
 
@@ -418,7 +430,7 @@ def test_resource_generator_int_pk():
         operations=["get", "list"],
     )
     cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/tag.py" in f.path)
     assert "id: int" in route.content
 
@@ -437,37 +449,33 @@ def test_resource_generator_always_select_model():
         ],
     )
     cfg = KilnConfig(resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/user.py" in f.path)
     assert "select(User)" in route.content
     assert "select(User.id" not in route.content
 
 
 # ---------------------------------------------------------------------------
-# RouterGenerator
+# App router
 # ---------------------------------------------------------------------------
 
 
-def test_router_generator_can_generate(full_config):
-    assert RouterGenerator().can_generate(full_config)
-
-
-def test_router_generator_output_path(full_config):
-    files = RouterGenerator().generate(full_config)
+def test_app_router_output_path(full_config):
+    files = generate_app_router(full_config)
     assert any(f.path == "myapp/routes/__init__.py" for f in files)
 
 
-def test_router_generator_valid_python(full_config):
-    (f,) = RouterGenerator().generate(full_config)
+def test_app_router_valid_python(full_config):
+    (f,) = generate_app_router(full_config)
     ast.parse(f.content)
 
 
-def test_router_generator_includes_all_resources(full_config):
-    (f,) = RouterGenerator().generate(full_config)
+def test_app_router_includes_all_resources(full_config):
+    (f,) = generate_app_router(full_config)
     assert "user_router" in f.content
 
 
-def test_router_generator_multiple_resources():
+def test_app_router_multiple_resources():
     cfg = KilnConfig(
         module="myapp",
         resources=[
@@ -475,43 +483,35 @@ def test_router_generator_multiple_resources():
             ResourceConfig(model="myapp.models.Article", operations=["list"]),
         ],
     )
-    (f,) = RouterGenerator().generate(cfg)
+    (f,) = generate_app_router(cfg)
     assert "user_router" in f.content
     assert "article_router" in f.content
 
 
 # ---------------------------------------------------------------------------
-# UtilsGenerator
+# Utils
 # ---------------------------------------------------------------------------
 
 
-def test_utils_generator_can_generate(full_config):
-    assert UtilsGenerator().can_generate(full_config)
-
-
-def test_utils_generator_cannot_generate_empty():
-    assert not UtilsGenerator().can_generate(KilnConfig())
-
-
-def test_utils_generator_output_path(full_config):
-    (f,) = UtilsGenerator().generate(full_config)
+def test_utils_output_path():
+    (f,) = generate_utils()
     assert f.path == "utils.py"
 
 
-def test_utils_generator_valid_python(full_config):
-    (f,) = UtilsGenerator().generate(full_config)
+def test_utils_valid_python():
+    (f,) = generate_utils()
     ast.parse(f.content)
 
 
-def test_utils_generator_contains_helper(full_config):
-    (f,) = UtilsGenerator().generate(full_config)
+def test_utils_contains_helper():
+    (f,) = generate_utils()
     assert "get_object_from_query_or_404" in f.content
 
 
 def test_resource_generator_uses_utils_for_all_get_routes():
     r = ResourceConfig(model="myapp.models.User", operations=["get"])
     cfg = KilnConfig(module="myapp", resources=[r])
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "get_object_from_query_or_404" in route.content
     assert (
@@ -521,45 +521,19 @@ def test_resource_generator_uses_utils_for_all_get_routes():
 
 
 # ---------------------------------------------------------------------------
-# GeneratorRegistry
+# Full generation
 # ---------------------------------------------------------------------------
 
 
-def test_registry_default_has_builtins():
-    r = GeneratorRegistry.default()
-    names = set(r._generators)
-    assert "resources" in names
-    assert "router" in names
-    assert "utils" in names
-
-
-def test_registry_run_returns_files(full_config):
-    files = GeneratorRegistry.default().run(full_config)
+def test_generate_returns_files(full_config):
+    files = generate(full_config)
     assert len(files) > 0
 
 
-def test_registry_custom_generator(full_config):
-    class NoOpGenerator:
-        @property
-        def name(self) -> str:
-            return "noop"
-
-        def can_generate(self, _config: KilnConfig) -> bool:
-            return True
-
-        def generate(self, _config: KilnConfig) -> list[GeneratedFile]:
-            return [GeneratedFile("noop.txt", "hi")]
-
-    r = GeneratorRegistry()
-    r.register(NoOpGenerator())
-    files = r.run(full_config)
-    assert any(f.path == "noop.txt" for f in files)
-
-
-def test_registry_write_files(full_config, tmp_path: Path):
+def test_generate_write_files(full_config, tmp_path: Path):
     from kiln_core import write_files
 
-    files = GeneratorRegistry.default().run(full_config)
+    files = generate(full_config)
     written = write_files(files, tmp_path)
     assert written > 0
     written2 = write_files(files, tmp_path)
@@ -572,7 +546,7 @@ def test_registry_write_files(full_config, tmp_path: Path):
 
 
 def test_scaffold_generates_single_session_without_databases():
-    files = ScaffoldGenerator().generate(KilnConfig())
+    files = generate_scaffold(KilnConfig())
     paths = {f.path for f in files}
     assert "db/session.py" in paths
     assert not any("primary" in p for p in paths)
@@ -593,7 +567,7 @@ def test_scaffold_generates_per_db_sessions():
             ),
         ]
     )
-    files = ScaffoldGenerator().generate(cfg)
+    files = generate_scaffold(cfg)
     paths = {f.path for f in files}
     assert "db/primary_session.py" in paths
     assert "db/analytics_session.py" in paths
@@ -610,14 +584,14 @@ def test_scaffold_per_db_session_uses_correct_env_var():
             )
         ]
     )
-    files = {f.path: f for f in ScaffoldGenerator().generate(cfg)}
+    files = {f.path: f for f in generate_scaffold(cfg)}
     content = files["db/analytics_session.py"].content
     assert "ANALYTICS_DB_URL" in content
     assert "get_analytics_db" in content
 
 
 def test_resource_route_uses_default_db_session(full_config):
-    files = ResourceGenerator().generate(full_config)
+    files = _generate_resources(full_config)
     route = next(f for f in files if f.path.endswith("routes/user.py"))
     assert "db.session" in route.content
     assert "get_db" in route.content
@@ -640,7 +614,7 @@ def test_resource_route_uses_named_db_session():
         databases=[db_primary, db_analytics],
         resources=[r],
     )
-    files = ResourceGenerator().generate(cfg)
+    files = _generate_resources(cfg)
     route = next(f for f in files if "routes/report.py" in f.path)
     assert "db.analytics_session" in route.content
     assert "get_analytics_db" in route.content
@@ -836,23 +810,20 @@ def _make_app_ref(module: str, prefix: str) -> AppRef:
     return AppRef(config=KilnConfig(module=module), prefix=prefix)
 
 
-def test_project_router_can_generate():
+def test_project_router_output_for_multi_app():
     cfg = KilnConfig(
         apps=[
             _make_app_ref("blog", "/blog"),
             _make_app_ref("inventory", "/inventory"),
         ]
     )
-    assert ProjectRouterGenerator().can_generate(cfg)
-
-
-def test_project_router_cannot_generate_without_apps():
-    assert not ProjectRouterGenerator().can_generate(KilnConfig())
+    files = generate_project_router(cfg)
+    assert len(files) == 1
 
 
 def test_project_router_output_path():
     cfg = KilnConfig(apps=[_make_app_ref("blog", "/blog")])
-    (f,) = ProjectRouterGenerator().generate(cfg)
+    (f,) = generate_project_router(cfg)
     assert f.path == "routes/__init__.py"
 
 
@@ -863,7 +834,7 @@ def test_project_router_valid_python():
             _make_app_ref("inventory", "/inventory"),
         ]
     )
-    (f,) = ProjectRouterGenerator().generate(cfg)
+    (f,) = generate_project_router(cfg)
     ast.parse(f.content)
 
 
@@ -874,7 +845,7 @@ def test_project_router_mounts_all_apps():
             _make_app_ref("inventory", "/inventory"),
         ]
     )
-    (f,) = ProjectRouterGenerator().generate(cfg)
+    (f,) = generate_project_router(cfg)
     assert "blog_router" in f.content
     assert 'prefix="/blog"' in f.content
     assert "inventory_router" in f.content
@@ -882,11 +853,11 @@ def test_project_router_mounts_all_apps():
 
 
 # ---------------------------------------------------------------------------
-# Registry — project mode
+# generate() — multi-app
 # ---------------------------------------------------------------------------
 
 
-def test_registry_project_mode_generates_scaffold_and_apps():
+def test_generate_multi_app_scaffold_and_apps():
     blog_app = KilnConfig(
         module="blog",
         resources=[
@@ -903,7 +874,7 @@ def test_registry_project_mode_generates_scaffold_and_apps():
         databases=[DatabaseConfig(key="primary", default=True)],
         apps=[AppRef(config=blog_app, prefix="/blog")],
     )
-    files = GeneratorRegistry.default().run(cfg)
+    files = generate(cfg)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
     assert "db/primary_session.py" in paths
@@ -911,10 +882,8 @@ def test_registry_project_mode_generates_scaffold_and_apps():
     assert "routes/__init__.py" in paths
 
 
-def test_registry_app_mode_generates_scaffold_when_auth_present(
-    full_config,
-):
-    files = GeneratorRegistry.default().run(full_config)
+def test_generate_scaffold_when_auth_present(full_config):
+    files = generate(full_config)
     paths = {f.path for f in files}
     assert "auth/dependencies.py" in paths
 
@@ -1613,9 +1582,8 @@ def test_pipeline_custom_route_prefix():
     assert "/custom-items" in route.content
 
 
-def test_resource_generator_delegates_to_pipeline(full_config):
-    gen = ResourceGenerator()
-    files = gen.generate(full_config)
+def test_generate_resources_produces_expected_paths(full_config):
+    files = _generate_resources(full_config)
     paths = [f.path for f in files]
     assert "myapp/schemas/user.py" in paths
     assert "myapp/routes/user.py" in paths

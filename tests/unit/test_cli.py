@@ -39,7 +39,7 @@ def _write_json_config(tmp_path: Path, data: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# generate — app mode (no apps list)
+# generate
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +120,7 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# generate — project mode (apps list)
+# generate — multi-app
 # ---------------------------------------------------------------------------
 
 

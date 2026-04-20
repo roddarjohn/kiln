@@ -166,12 +166,7 @@ class ResourceConfig(BaseModel):
 
 
 class KilnConfig(BaseModel):
-    """Top-level kiln configuration.
-
-    Can be used as either an app-level config or a project-level config.
-    When ``apps`` is non-empty kiln treats the file as a project config
-    and runs generation for every listed app.
-    """
+    """Top-level kiln configuration."""
 
     version: str = "1"
     module: str = "app"

@@ -18,7 +18,7 @@ from kiln.config.schema import (
     OperationConfig,
     ResourceConfig,
 )
-from kiln.generators.registry import GeneratorRegistry
+from kiln.generators.generate import generate
 
 
 def _ruff_toml() -> str:
@@ -243,7 +243,7 @@ def _write_generated(
     # Write ruff config
     (tmp_path / "ruff.toml").write_text(_ruff_toml())
 
-    files = GeneratorRegistry.default().run(cfg)
+    files = generate(cfg)
     for f in files:
         dest = out / f.path
         dest.parent.mkdir(parents=True, exist_ok=True)

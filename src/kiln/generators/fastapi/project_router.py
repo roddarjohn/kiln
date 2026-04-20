@@ -1,4 +1,4 @@
-"""Generator that produces the root router for project-level configs."""
+"""Root router that mounts all app routers in a multi-app project."""
 
 from __future__ import annotations
 
@@ -11,59 +11,37 @@ if TYPE_CHECKING:
     from kiln.config.schema import KilnConfig
 
 
-class ProjectRouterGenerator:
-    """Produces a root ``routes/__init__.py`` that mounts every app router.
+def generate_project_router(
+    config: KilnConfig,
+) -> list[GeneratedFile]:
+    """Generate ``routes/__init__.py`` mounting every app.
 
-    Only runs when the config has an ``apps`` list (project mode).
-    The result can be included directly in a FastAPI application::
+    Args:
+        config: The validated kiln configuration (must have
+            ``apps``).
 
-        from .routes import router
-        app.include_router(router)
+    Returns:
+        A single :class:`GeneratedFile`.
+
     """
-
-    @property
-    def name(self) -> str:
-        """Unique generator identifier."""
-        return "project_router"
-
-    def can_generate(self, config: KilnConfig) -> bool:
-        """Return True when there are apps to mount.
-
-        Args:
-            config: The validated kiln configuration.
-
-        """
-        return bool(config.apps)
-
-    def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Generate the root router file.
-
-        Args:
-            config: The validated project-level kiln configuration.
-
-        Returns:
-            A single :class:`~kiln.generators.base.GeneratedFile`
-            at ``routes/__init__.py``.
-
-        """
-        tmpl = env.get_template("fastapi/project_router.py.j2")
-        pkg = config.package_prefix
-        has_auth = config.auth is not None
-        auth_module = f"{pkg}.auth" if pkg else "auth"
-        content = tmpl.render(
-            has_auth=has_auth,
-            auth_module=auth_module,
-            apps=[
-                {
-                    "module": (
-                        f"{pkg}.{app_ref.config.module}"
-                        if pkg
-                        else app_ref.config.module
-                    ),
-                    "alias": app_ref.config.module,
-                    "prefix": app_ref.prefix,
-                }
-                for app_ref in config.apps
-            ],
-        )
-        return [GeneratedFile(path="routes/__init__.py", content=content)]
+    tmpl = env.get_template("fastapi/project_router.py.j2")
+    pkg = config.package_prefix
+    has_auth = config.auth is not None
+    auth_module = f"{pkg}.auth" if pkg else "auth"
+    content = tmpl.render(
+        has_auth=has_auth,
+        auth_module=auth_module,
+        apps=[
+            {
+                "module": (
+                    f"{pkg}.{app_ref.config.module}"
+                    if pkg
+                    else app_ref.config.module
+                ),
+                "alias": app_ref.config.module,
+                "prefix": app_ref.prefix,
+            }
+            for app_ref in config.apps
+        ],
+    )
+    return [GeneratedFile(path="routes/__init__.py", content=content)]

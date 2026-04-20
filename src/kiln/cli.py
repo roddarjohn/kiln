@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
 from kiln.config.loader import load
-from kiln.generators.registry import GeneratorRegistry
+from kiln.generators.generate import generate
 from kiln_core.output import write_files
-
-if TYPE_CHECKING:
-    from kiln.config.schema import KilnConfig
 
 app = typer.Typer(help="CLI for autogenerating FastAPI + pgcraft files.")
 
@@ -22,8 +19,8 @@ def main() -> None:
     """CLI for autogenerating files from templates."""
 
 
-@app.command()
-def generate(
+@app.command("generate")
+def generate_cmd(
     config: Annotated[
         Path,
         typer.Option(
@@ -38,9 +35,10 @@ def generate(
             "--out",
             "-o",
             help=(
-                "Output root directory.  Defaults to the config's "
-                "``package_prefix`` value (e.g. ``_generated``) or "
-                "the current directory when prefix is empty."
+                "Output root directory.  Defaults to the "
+                "config's ``package_prefix`` value (e.g. "
+                "``_generated``) or the current directory "
+                "when prefix is empty."
             ),
         ),
     ] = None,
@@ -48,28 +46,17 @@ def generate(
         bool,
         typer.Option(
             "--clean",
-            help="Delete all contents of --out before generating.",
-        ),
-    ] = False,
-    no_validate: Annotated[  # noqa: ARG001,FBT002
-        bool,
-        typer.Option(
-            "--no-validate",
-            help=(
-                "Deprecated — validation is no longer performed. "
-                "Accepted for backwards compatibility but has no effect."
-            ),
+            help=("Delete all contents of --out before generating."),
         ),
     ] = False,
 ) -> None:
     """Generate all project files from a config.
 
-    Handles both app-level configs (models + routes) and project-level
-    configs (multi-app, with auth and database scaffolding).  Re-running
-    is always safe — all files are overwritten.
+    Re-running is always safe -- all files are overwritten.
 
-    Use ``--clean`` to delete the output directory first, which removes any
-    files that no longer correspond to the current config.
+    Use ``--clean`` to delete the output directory first,
+    which removes files that no longer correspond to the
+    current config.
 
     Example::
 
@@ -77,7 +64,7 @@ def generate(
         kiln generate --config blog.jsonnet --out src/ --clean
     """
     try:
-        cfg: KilnConfig = load(config)
+        cfg = load(config)
     except Exception as exc:
         typer.echo(f"Error loading config: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -87,8 +74,7 @@ def generate(
     )
 
     try:
-        registry = GeneratorRegistry.default()
-        files = registry.run(cfg)
+        files = generate(cfg)
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc

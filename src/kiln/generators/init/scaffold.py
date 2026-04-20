@@ -1,10 +1,4 @@
-"""Scaffold generator for infrastructure files.
-
-Produces ``db/`` and ``auth/`` boilerplate driven entirely by the
-project config.  All files are overwritten on every run so that
-changes to auth strategy or database pool settings are always
-reflected without manual editing.
-"""
+"""Infrastructure scaffold: db sessions and auth dependencies."""
 
 from __future__ import annotations
 
@@ -17,55 +11,54 @@ if TYPE_CHECKING:
     from kiln.config.schema import AuthConfig, KilnConfig
 
 
-class ScaffoldGenerator:
-    """Generates infrastructure scaffold files from a kiln config.
+def generate_scaffold(
+    config: KilnConfig,
+) -> list[GeneratedFile]:
+    """Generate ``db/`` and ``auth/`` infrastructure files.
 
-    Call :meth:`generate` to produce ``db/`` and ``auth/`` files.
+    Produces per-database session files when
+    ``config.databases`` is non-empty, or a single
+    ``db/session.py`` otherwise.  Emits
+    ``auth/dependencies.py`` only when ``config.auth`` is set.
+
+    Args:
+        config: The validated kiln config.
+
+    Returns:
+        List of :class:`GeneratedFile` objects.
+
     """
-
-    def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-        """Return all scaffold files for *config*.
-
-        Generates per-database session files when ``config.databases``
-        is non-empty, or a single ``db/session.py`` otherwise.  Emits
-        ``auth/dependencies.py`` only when ``config.auth`` is set.
-
-        Args:
-            config: The validated project or app-level kiln config.
-
-        Returns:
-            List of :class:`~kiln.generators.base.GeneratedFile`
-            objects.
-
-        """
-        files: list[GeneratedFile] = [
-            GeneratedFile("db/__init__.py", ""),
+    files: list[GeneratedFile] = [
+        GeneratedFile("db/__init__.py", ""),
+    ]
+    files.extend(_render_sessions(config))
+    if config.auth is not None:
+        files += [
+            GeneratedFile("auth/__init__.py", ""),
+            GeneratedFile(
+                "auth/dependencies.py",
+                _render_auth_deps(config.auth),
+            ),
         ]
-        files.extend(_render_sessions(config))
-        if config.auth is not None:
-            files += [
-                GeneratedFile("auth/__init__.py", ""),
+        if config.auth.get_current_user_fn is None:
+            files.append(
                 GeneratedFile(
-                    "auth/dependencies.py", _render_auth_deps(config.auth)
-                ),
-            ]
-            if config.auth.get_current_user_fn is None:
-                files.append(
-                    GeneratedFile(
-                        "auth/router.py",
-                        _render_auth_router(config.auth),
-                    )
+                    "auth/router.py",
+                    _render_auth_router(config.auth),
                 )
-        return files
+            )
+    return files
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------
 
 
-def _render_sessions(config: KilnConfig) -> list[GeneratedFile]:
-    """Return one session file per database, or the legacy single file."""
+def _render_sessions(
+    config: KilnConfig,
+) -> list[GeneratedFile]:
+    """Return one session file per database, or the legacy single."""
     session_tmpl = env.get_template("init/db_session.py.j2")
     if config.databases:
         return [
@@ -104,7 +97,7 @@ def _render_sessions(config: KilnConfig) -> list[GeneratedFile]:
 
 
 def _render_auth_deps(auth: AuthConfig) -> str:
-    """Render ``auth/dependencies.py`` from *auth* config."""
+    """Render ``auth/dependencies.py``."""
     gcu_module: str | None = None
     gcu_name: str | None = None
     if auth.get_current_user_fn:
@@ -119,9 +112,9 @@ def _render_auth_deps(auth: AuthConfig) -> str:
 
 
 def _render_auth_router(auth: AuthConfig) -> str:
-    """Render ``auth/router.py`` from *auth* config."""
+    """Render ``auth/router.py``."""
     vcf = auth.verify_credentials_fn
-    if vcf is None:  # pragma: no cover - guarded by validator
+    if vcf is None:  # pragma: no cover
         msg = "verify_credentials_fn is required"
         raise ValueError(msg)
     vcf_module, vcf_name = vcf.rsplit(".", 1)

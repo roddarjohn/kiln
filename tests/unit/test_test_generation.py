@@ -8,7 +8,7 @@ from kiln.config.schema import (
     OperationConfig,
     ResourceConfig,
 )
-from kiln.generators.fastapi.resource import ResourceGenerator
+from kiln.generators.fastapi.pipeline import generate_resource
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -97,7 +97,9 @@ def no_test_config(no_test_resource) -> KilnConfig:
 
 def _get_test_file(config: KilnConfig) -> str | None:
     """Generate and return the test file content, or None."""
-    files = ResourceGenerator().generate(config)
+    files = []
+    for r in config.resources:
+        files.extend(generate_resource(r, config))
     for f in files:
         if "tests/test_" in f.path:
             return f.content
@@ -106,7 +108,9 @@ def _get_test_file(config: KilnConfig) -> str | None:
 
 def _get_test_path(config: KilnConfig) -> str | None:
     """Generate and return the test file path, or None."""
-    files = ResourceGenerator().generate(config)
+    files = []
+    for r in config.resources:
+        files.extend(generate_resource(r, config))
     for f in files:
         if "tests/test_" in f.path:
             return f.path
