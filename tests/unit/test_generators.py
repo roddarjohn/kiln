@@ -556,12 +556,12 @@ def test_registry_custom_generator(full_config):
 
 
 def test_registry_write_files(full_config, tmp_path: Path):
-    from kiln.cli import _write_files
+    from kiln_core import write_files
 
     files = GeneratorRegistry.default().run(full_config)
-    written = _write_files(files, tmp_path)
+    written = write_files(files, tmp_path)
     assert written > 0
-    written2 = _write_files(files, tmp_path)
+    written2 = write_files(files, tmp_path)
     assert written2 == written
 
 
@@ -952,6 +952,7 @@ def test_filespec_module_without_prefix():
 
 
 def test_filespec_render_produces_generated_file():
+    from kiln.generators._env import env
     from kiln.generators._helpers import ImportCollector
     from kiln.generators.base import FileSpec
 
@@ -964,13 +965,14 @@ def test_filespec_render_produces_generated_file():
     )
     spec.imports.add_from("__future__", "annotations")
     spec.imports.add_from("pydantic", "BaseModel")
-    result = spec.render()
+    result = spec.render(env)
     assert result.path == "myapp/schemas/user.py"
     assert "from __future__ import annotations" in result.content
     assert "from pydantic import BaseModel" in result.content
 
 
 def test_filespec_render_empty_imports():
+    from kiln.generators._env import env
     from kiln.generators._helpers import ImportCollector
     from kiln.generators.base import FileSpec
 
@@ -981,7 +983,7 @@ def test_filespec_render_empty_imports():
         package_prefix="",
         context={"model_name": "User", "schema_classes": []},
     )
-    result = spec.render()
+    result = spec.render(env)
     assert isinstance(result, GeneratedFile)
 
 

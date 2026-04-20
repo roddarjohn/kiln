@@ -126,7 +126,7 @@ ignore = [
 allowed-unresolved-imports = ["_jsonnet"]
 
 [tool.coverage.run]
-source = ["kiln"]
+source = ["kiln", "kiln_core"]
 branch = true
 
 [tool.coverage.report]

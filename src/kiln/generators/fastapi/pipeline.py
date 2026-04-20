@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kiln.config.schema import OperationConfig
+from kiln.generators._env import env
 from kiln.generators.fastapi.operations import (
     Operation,
     OperationRegistry,
@@ -96,7 +97,7 @@ class ResourcePipeline:
         _wire_imports(specs)
 
         # Render all specs in insertion order
-        return [spec.render() for spec in specs.values()]
+        return [spec.render(env) for spec in specs.values()]
 
 
 def _resolve_op_configs(

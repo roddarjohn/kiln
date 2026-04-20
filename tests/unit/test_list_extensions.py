@@ -3,6 +3,7 @@ import ast
 import pytest
 
 from kiln.config.schema import FieldSpec, OperationConfig, ResourceConfig
+from kiln.generators._env import env
 from kiln.generators._helpers import ImportCollector, Name
 from kiln.generators.base import FileSpec
 from kiln.generators.fastapi.list_extensions import (
@@ -582,7 +583,7 @@ class TestListOperationWithExtensions:
         route_spec = specs["route"]
         route_spec.imports.add_from("sqlalchemy", "select")
         route_spec.imports.add_from("myapp.models", "User")
-        generated = route_spec.render()
+        generated = route_spec.render(env)
         ast.parse(generated.content)
 
     def test_combined_schema_valid_python(self, specs, resource, shared_ctx):
@@ -603,7 +604,7 @@ class TestListOperationWithExtensions:
         schema_spec = specs["schema"]
         schema_spec.imports.add_from("__future__", "annotations")
         schema_spec.imports.add_from("pydantic", "BaseModel")
-        generated = schema_spec.render()
+        generated = schema_spec.render(env)
         ast.parse(generated.content)
 
     def test_search_request_includes_sort_and_pagination(
@@ -714,5 +715,5 @@ class TestBackwardCompat:
         route_spec = specs["route"]
         route_spec.imports.add_from("sqlalchemy", "select")
         route_spec.imports.add_from("myapp.models", "User")
-        generated = route_spec.render()
+        generated = route_spec.render(env)
         ast.parse(generated.content)
