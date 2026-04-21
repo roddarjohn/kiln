@@ -24,14 +24,14 @@ repos:
       - id: taplo-format
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.8
+    rev: v0.15.11
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
 
   - repo: https://github.com/google/go-jsonnet
-    rev: v0.20.0
+    rev: v0.22.0
     hooks:
       - id: jsonnet-format
         args: [--indent, "2", --string-style, "d", --in-place]
