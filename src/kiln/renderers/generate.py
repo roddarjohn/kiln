@@ -46,6 +46,11 @@ def generate(config: BaseModel) -> list[GeneratedFile]:
     """
     operations = _discover_operations()
     registry = create_registry()
+    registry.active_tags["framework"] = getattr(
+        config,
+        "framework",
+        "fastapi",
+    )
     pkg = getattr(config, "package_prefix", "")
 
     # Project-scoped operations run on the root config.

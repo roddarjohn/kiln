@@ -1,0 +1,7 @@
+def {{ function_name }}(obj: {{ model_name }}) -> {{ schema_name }}:
+    """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""
+    return {{ schema_name }}(
+{% for f in fields %}
+        {{ f.name }}=obj.{{ f.name }},
+{% endfor %}
+    )

@@ -12,10 +12,14 @@ from _generated.auth.dependencies import get_current_user
 from _generated.db.primary_session import get_primary_db
 from _generated.myapp.schemas.post import (
     PostCreateRequest,
+    PostListItem,
     PostResource,
     PostUpdateRequest,
 )
-from _generated.myapp.serializers.post import to_post_resource
+from _generated.myapp.serializers.post import (
+    to_post_list_item,
+    to_post_resource,
+)
 from _generated.utils import assert_rowcount, get_object_from_query_or_404
 from fastapi import APIRouter, Depends
 from myapp.models import Post
@@ -46,15 +50,15 @@ async def get_post(
 
 
 
-@router.get("/", response_model=list[PostResource])
+@router.get("/", response_model=list[PostListItem])
 async def list_post(
     db: Annotated[AsyncSession, Depends(get_primary_db)],
     current_user: Annotated[dict, Depends(get_current_user)],
-) -> list[PostResource]:
+) -> list[PostListItem]:
     """List Post records."""
     stmt = select(Post)
     result = await db.execute(stmt)
-    return [to_post_resource(obj) for obj in result.scalars()]
+    return [to_post_list_item(obj) for obj in result.scalars()]
 
 
 

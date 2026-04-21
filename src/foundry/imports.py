@@ -63,6 +63,23 @@ class ImportCollector:
         for name in names:
             self._from[module][name] = None
 
+    def update(self, other: ImportCollector) -> None:
+        """Merge imports from *other* into this collector.
+
+        Bare imports and from-imports are both unioned; duplicates
+        are deduplicated.  Used when multiple fragments targeting
+        the same output file need their import sets combined.
+
+        Args:
+            other: Another :class:`ImportCollector` to merge in.
+
+        """
+        for mod in other._bare:
+            self._bare[mod] = None
+        for mod, names in other._from.items():
+            for name in names:
+                self._from[mod][name] = None
+
     def block(self) -> str:
         """Return all imports as a single string block.
 

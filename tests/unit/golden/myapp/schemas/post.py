@@ -19,6 +19,13 @@ class PostResource(BaseModel):
     views: int
 
 
+class PostListItem(BaseModel):
+    """ListItem schema for Post."""
+
+    title: str
+    views: int
+
+
 class PostCreateRequest(BaseModel):
     """Request body for creating a Post."""
 

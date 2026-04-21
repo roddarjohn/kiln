@@ -399,14 +399,34 @@ class _FieldsOpts(BaseModel):
     fields: list[FieldSpec] | None = None
 
 
+# -------------------------------------------------------------------
+# Get
+# -------------------------------------------------------------------
+
+
 class TestGet:
     """Tests for Get operation."""
 
-    def test_get_with_fields(self):
+    def test_get_without_fields(self):
+        """No fields config → no schema, untyped handler."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        opts = _FieldsOpts(fields=_FIELDS)
-        result = Get().build(ctx, opts)
+        result = Get().build(ctx, _FieldsOpts())
+
+        assert not any(isinstance(r, SchemaClass) for r in result)
+        assert not any(isinstance(r, SerializerFn) for r in result)
+
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        assert len(handlers) == 1
+        assert handlers[0].response_model is None
+        assert handlers[0].return_type == "object"
+        assert handlers[0].serializer_fn is None
+
+    def test_get_with_fields(self):
+        """Get emits its own ``{Model}Resource`` schema + serializer."""
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _resource_ctx(resource)
+        result = Get().build(ctx, _FieldsOpts(fields=_FIELDS))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
@@ -415,23 +435,12 @@ class TestGet:
         sers = [r for r in result if isinstance(r, SerializerFn)]
         assert len(sers) == 1
         assert sers[0].function_name == "to_user_resource"
+        assert sers[0].schema_name == "UserResource"
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        assert handlers[0].method == "GET"
-        assert handlers[0].function_name == "get_user"
-        assert handlers[0].response_model == "UserResource"
-
-    def test_get_no_fields(self):
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
-        result = Get().build(ctx, _FieldsOpts())
-
-        schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 0
-
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert handlers[0].response_model is None
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.response_model == "UserResource"
+        assert handler.return_type == "UserResource"
+        assert handler.serializer_fn == "to_user_resource"
 
     def test_get_test_case(self):
         resource = ResourceConfig(model="app.models.User")
@@ -470,49 +479,40 @@ class TestGet:
 class TestList:
     """Tests for List operation."""
 
-    def test_list_basic(self):
+    def test_list_without_fields(self):
+        """No fields config → no schema, untyped list response."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
         result = List().build(ctx, _FieldsOpts())
 
+        assert not any(isinstance(r, SchemaClass) for r in result)
         handlers = [r for r in result if isinstance(r, RouteHandler)]
         assert len(handlers) == 1
         assert handlers[0].method == "GET"
         assert handlers[0].path == "/"
         assert handlers[0].function_name == "list_users"
+        assert handlers[0].response_model == "list"
+        assert handlers[0].serializer_fn is None
 
-    def test_list_with_fields(self):
+    def test_list_with_fields_distinct_from_get(self):
+        """List emits its own ``{Model}ListItem`` schema + serializer."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        opts = _FieldsOpts(fields=_FIELDS)
-        result = List().build(ctx, opts)
-
-        schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 1
-        assert schemas[0].name == "UserResource"
-
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert handlers[0].response_model == "list[UserResource]"
-
-    def test_list_reuses_get_schema(self):
-        """List skips schema when get already produced one."""
-        resource = ResourceConfig(model="app.models.User")
-        store = BuildStore()
-        store.add(
-            "resource",
-            "user",
-            "get",
-            SchemaClass(name="UserResource", fields=[]),
-        )
-        ctx = _resource_ctx(resource, store=store)
         result = List().build(ctx, _FieldsOpts(fields=_FIELDS))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 0
+        assert len(schemas) == 1
+        assert schemas[0].name == "UserListItem"
 
-        # Still uses the resource schema in response_model
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert handlers[0].response_model == "list[UserResource]"
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert len(sers) == 1
+        assert sers[0].function_name == "to_user_list_item"
+        assert sers[0].schema_name == "UserListItem"
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.response_model == "list[UserListItem]"
+        assert handler.return_type == "list[UserListItem]"
+        assert handler.serializer_fn == "to_user_list_item"
 
     def test_list_test_case(self):
         resource = ResourceConfig(model="app.models.User")

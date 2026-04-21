@@ -101,6 +101,7 @@ class RouteHandler:
     body_param: str | None = None
     request_schema: str | None = None
     response_model: str | None = None
+    serializer_fn: str | None = None
     status_code: int | None = None
     return_type: str | None = None
     body_lines: list[str] = field(default_factory=list)

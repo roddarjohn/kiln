@@ -168,6 +168,10 @@ class KilnConfig(BaseModel):
 
     version: str = "1"
     module: str = "app"
+    framework: str = "fastapi"
+    """Target framework profile.  Selects which renderer set runs;
+    each renderer is tagged with the framework it implements, and
+    only those matching this value are used."""
     package_prefix: str = "_generated"
     """Directory prefix prepended to all generated file paths and Python
     import paths.  Defaults to ``"_generated"`` so generated code lives

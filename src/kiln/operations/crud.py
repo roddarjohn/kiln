@@ -74,7 +74,7 @@ def _resolve_resource_info(
 
 
 # -------------------------------------------------------------------
-# Get
+# Read-op helpers
 # -------------------------------------------------------------------
 
 
@@ -82,6 +82,41 @@ class FieldsOptions(BaseModel):
     """Options for operations that accept a field list."""
 
     fields: list[FieldSpec] | None = None
+
+
+def _read_schema_outputs(
+    model: Name,
+    fields: list[FieldSpec],
+    suffix: str,
+    serializer_stem: str,
+) -> tuple[SchemaClass, SerializerFn]:
+    """Build the ``SchemaClass`` / ``SerializerFn`` pair for a read op.
+
+    ``suffix`` is appended to the model's pascal-cased name to form
+    the response schema class (e.g. ``Resource`` → ``UserResource``).
+    ``serializer_stem`` becomes the trailing segment of the
+    serializer function, e.g. ``resource`` → ``to_user_resource``.
+    """
+    out_fields = _field_dicts(fields)
+    schema_name = model.suffixed(suffix)
+    serializer_fn = f"to_{model.lower}_{serializer_stem}"
+    schema = SchemaClass(
+        name=schema_name,
+        fields=out_fields,
+        doc=f"{suffix} schema for {model.pascal}.",
+    )
+    serializer = SerializerFn(
+        function_name=serializer_fn,
+        model_name=model.pascal,
+        schema_name=schema_name,
+        fields=out_fields,
+    )
+    return schema, serializer
+
+
+# -------------------------------------------------------------------
+# Get
+# -------------------------------------------------------------------
 
 
 @operation("get", scope="resource")
@@ -99,41 +134,35 @@ class Get:
 
         Args:
             ctx: Build context with resource config.
-            options: Parsed FieldsOptions.
+            options: Parsed :class:`FieldsOptions`.
 
         Returns:
-            List of objects (schema, handler, test).
+            List of objects (handler, test, and -- when fields
+            are supplied -- the schema + serializer).
 
         """
         model, _, pk_name, pk_py_type, _ = _resolve_resource_info(ctx)
         fields = getattr(options, "fields", None)
         out: list[object] = []
 
+        schema_name: str | None = None
+        serializer_fn: str | None = None
         if fields:
-            out_fields = _field_dicts(fields)
-            out.append(
-                SchemaClass(
-                    name=model.suffixed("Resource"),
-                    fields=out_fields,
-                    doc=f"Resource schema for {model.pascal}.",
-                )
+            schema, serializer = _read_schema_outputs(
+                model, fields, "Resource", "resource"
             )
-            out.append(
-                SerializerFn(
-                    function_name=f"to_{model.lower}_resource",
-                    model_name=model.pascal,
-                    schema_name=model.suffixed("Resource"),
-                    fields=out_fields,
-                )
-            )
+            schema_name = schema.name
+            serializer_fn = serializer.function_name
+            out.extend([schema, serializer])
 
         handler = RouteHandler(
             method="GET",
             path=f"/{{{pk_name}}}",
             function_name=f"get_{model.lower}",
             op_name="get",
-            response_model=(model.suffixed("Resource") if fields else None),
-            return_type=(model.suffixed("Resource") if fields else "object"),
+            response_model=schema_name,
+            serializer_fn=serializer_fn,
+            return_type=schema_name or "object",
             doc=f"Get a {model.pascal} by {pk_name}.",
         )
         handler.params.append(RouteParam(name=pk_name, annotation=pk_py_type))
@@ -146,9 +175,7 @@ class Get:
                 path=f"/{{{pk_name}}}",
                 status_success=200,
                 status_not_found=404,
-                response_schema=(
-                    model.suffixed("Resource") if fields else None
-                ),
+                response_schema=schema_name,
             )
         )
 
@@ -181,62 +208,36 @@ class List:
 
         Args:
             ctx: Build context with resource config.
-            options: Parsed List.Options.
+            options: Parsed ``Options``.
 
         Returns:
-            List of objects.
+            List of objects (handler, test, and -- when fields
+            are supplied -- a distinct ``{Model}ListItem`` schema
+            + serializer).
 
         """
         model, _, _, _, _ = _resolve_resource_info(ctx)
         fields = getattr(options, "fields", None)
         out: list[object] = []
 
-        has_resource_schema = bool(fields)
-        # Check store for earlier schema from get
-        earlier = ctx.store.get("resource", ctx.instance_id, "get")
-        for obj in earlier:
-            if isinstance(obj, SchemaClass):
-                has_resource_schema = True
-
-        has_earlier_serializer = any(
-            isinstance(o, SerializerFn) for o in earlier
-        )
-        if fields and not any(isinstance(o, SchemaClass) for o in earlier):
-            out_fields = _field_dicts(fields)
-            out.append(
-                SchemaClass(
-                    name=model.suffixed("Resource"),
-                    fields=out_fields,
-                    doc=(f"Resource schema for {model.pascal}."),
-                )
+        schema_name: str | None = None
+        serializer_fn: str | None = None
+        if fields:
+            schema, serializer = _read_schema_outputs(
+                model, fields, "ListItem", "list_item"
             )
-            if not has_earlier_serializer:
-                out.append(
-                    SerializerFn(
-                        function_name=(f"to_{model.lower}_resource"),
-                        model_name=model.pascal,
-                        schema_name=model.suffixed("Resource"),
-                        fields=out_fields,
-                    )
-                )
-
-        response_model = (
-            f"list[{model.suffixed('Resource')}]"
-            if has_resource_schema
-            else "list"
-        )
+            schema_name = schema.name
+            serializer_fn = serializer.function_name
+            out.extend([schema, serializer])
 
         handler = RouteHandler(
             method="GET",
             path="/",
             function_name=f"list_{model.lower}s",
             op_name="list",
-            response_model=response_model,
-            return_type=(
-                f"list[{model.suffixed('Resource')}]"
-                if has_resource_schema
-                else "object"
-            ),
+            response_model=f"list[{schema_name}]" if schema_name else "list",
+            serializer_fn=serializer_fn,
+            return_type=(f"list[{schema_name}]" if schema_name else "object"),
             doc=f"List all {model.pascal} records.",
         )
         out.append(handler)

@@ -20,6 +20,10 @@ from kiln.renderers.fastapi import (
     _render_handler_string,
     _status_suffix,
     create_registry,
+    render_enum_class,
+    render_router_mount,
+    render_schema_class,
+    render_serializer,
 )
 
 # -------------------------------------------------------------------
@@ -58,7 +62,7 @@ def test_status_suffix_unknown():
 
 
 # -------------------------------------------------------------------
-# RouteHandler rendering
+# RouteHandler string rendering
 # -------------------------------------------------------------------
 
 
@@ -148,20 +152,11 @@ def test_render_handler_default_param():
 
 
 # -------------------------------------------------------------------
-# Registry renders
+# Content helpers (standalone, no Fragment wrapper)
 # -------------------------------------------------------------------
 
 
-def test_registry_has_all_types(registry):
-    assert registry.has_renderer(SchemaClass)
-    assert registry.has_renderer(EnumClass)
-    assert registry.has_renderer(RouteHandler)
-    assert registry.has_renderer(RouterMount)
-    assert registry.has_renderer(StaticFile)
-    assert registry.has_renderer(TestCase)
-
-
-def test_render_schema_class(registry, ctx):
+def test_render_schema_class_string():
     schema = SchemaClass(
         name="UserResource",
         fields=[
@@ -169,70 +164,84 @@ def test_render_schema_class(registry, ctx):
             Field(name="name", py_type="str"),
         ],
     )
-    result = registry.render(schema, ctx)
+    result = render_schema_class(schema)
     assert "class UserResource(BaseModel):" in result
     assert "id: int" in result
     assert "name: str" in result
 
 
-def test_render_enum_class(registry, ctx):
+def test_render_enum_class_string():
     enum = EnumClass(
         name="SortField",
         members=[("NAME", "name"), ("AGE", "age")],
     )
-    result = registry.render(enum, ctx)
+    result = render_enum_class(enum)
     assert "class SortField(str, Enum):" in result
     assert "NAME = 'name'" in result
     assert "AGE = 'age'" in result
 
 
-def test_render_route_handler(registry, ctx):
-    handler = RouteHandler(
-        method="GET",
-        path="/",
-        function_name="root",
-        body_lines=["return {}"],
-    )
-    result = registry.render(handler, ctx)
-    assert "async def root(" in result
-
-
-def test_render_router_mount(registry, ctx):
+def test_render_router_mount_with_prefix():
     mount = RouterMount(
         module="myapp.routes.user",
         alias="user_router",
         prefix="/users",
     )
-    result = registry.render(mount, ctx)
+    result = render_router_mount(mount)
     assert "from myapp.routes.user import router" in result
     assert 'prefix="/users"' in result
 
 
-def test_render_router_mount_no_prefix(registry, ctx):
+def test_render_router_mount_no_prefix():
     mount = RouterMount(
         module="myapp.routes.user",
         alias="user_router",
     )
-    result = registry.render(mount, ctx)
+    result = render_router_mount(mount)
     assert "prefix=" not in result
 
 
-def test_render_static_file(registry):
-    tmpl = MagicMock()
-    tmpl.render.return_value = "# generated"
-    env = MagicMock()
-    env.get_template.return_value = tmpl
-    ctx = RenderCtx(env=env, config={})
+# -------------------------------------------------------------------
+# Registry registrations (only assert shape; Fragment content is
+# exercised via the assembler tests and golden output).
+# -------------------------------------------------------------------
 
+
+def test_registry_has_all_types(registry):
+    assert registry.has_renderer(SchemaClass)
+    assert registry.has_renderer(EnumClass)
+    assert registry.has_renderer(RouteHandler)
+    assert registry.has_renderer(StaticFile)
+    assert registry.has_renderer(TestCase)
+
+
+def test_registry_static_file_fragment(registry):
+    env = MagicMock()
+    rctx = RenderCtx(env=env, config={})
     sf = StaticFile(
         path="utils.py",
         template="utils.j2",
         context={"key": "value"},
     )
-    result = registry.render(sf, ctx)
-    env.get_template.assert_called_once_with("utils.j2")
-    tmpl.render.assert_called_once_with(key="value")
-    assert result == "# generated"
+    fragments = registry.render(sf, rctx)
+    assert len(fragments) == 1
+    frag = fragments[0]
+    assert frag.path == "utils.py"
+    assert frag.shell_template == "utils.j2"
+    assert frag.shell_context == {"key": "value"}
+
+
+def test_render_serializer_string():
+    from foundry.outputs import SerializerFn
+
+    ser = SerializerFn(
+        function_name="to_user_resource",
+        model_name="User",
+        schema_name="UserResource",
+        fields=[Field(name="id", py_type="int")],
+    )
+    result = render_serializer(ser)
+    assert "to_user_resource" in result
 
 
 # -------------------------------------------------------------------
@@ -257,19 +266,38 @@ def test_assemble_static_files():
     tmpl.render.return_value = "# main\n"
     env = MagicMock()
     env.get_template.return_value = tmpl
-    ctx = RenderCtx(env=env, config={})
+    rctx = RenderCtx(env=env, config={})
 
     reg = create_registry()
-    files = assemble(store, reg, ctx)
+    files = assemble(store, reg, rctx)
     assert len(files) == 1
     assert files[0].path == "main.py"
+    # Assembler rstrips and appends a single newline.
     assert files[0].content == "# main\n"
 
 
 def test_assemble_empty_store():
     store = BuildStore()
     env = MagicMock()
-    ctx = RenderCtx(env=env, config={})
+    rctx = RenderCtx(env=env, config={})
     reg = create_registry()
-    files = assemble(store, reg, ctx)
+    files = assemble(store, reg, rctx)
     assert files == []
+
+
+def test_assemble_empty_template_static_file():
+    """Static files with empty templates produce empty content."""
+    store = BuildStore()
+    store.add(
+        "project",
+        "project",
+        "scaffold",
+        StaticFile(path="pkg/__init__.py", template="", context={}),
+    )
+    env = MagicMock()
+    rctx = RenderCtx(env=env, config={})
+    reg = create_registry()
+    files = assemble(store, reg, rctx)
+    assert len(files) == 1
+    assert files[0].path == "pkg/__init__.py"
+    assert files[0].content == ""
