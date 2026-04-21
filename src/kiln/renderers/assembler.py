@@ -87,14 +87,10 @@ def _find_resource(
 ) -> BaseModel | None:
     """Locate the :class:`ResourceConfig` matching *instance_id*.
 
-    The engine derives ``instance_id`` from the resource's
-    dotted ``model`` path (``class_name.lower()``); we invert that
-    lookup here so renderers can fetch the resource without the
-    engine having to thread it through.
-
-    Searches the top-level ``resources`` list first, then every
-    app's nested ``config.resources`` — a multi-app project has
-    no top-level resources, so the nested walk is required.
+    Resource instance IDs are compounded with the enclosing
+    app's ID (e.g. ``"blog/article"``); we match against the
+    trailing segment, which the engine derives from the
+    resource's dotted ``model`` path (``class_name.lower()``).
 
     Args:
         config: The top-level config passed to the assembler.
@@ -104,12 +100,13 @@ def _find_resource(
         Matching resource config, or ``None`` when not found.
 
     """
+    base_id = instance_id.rsplit("/", 1)[-1]
     for resource in _iter_all_resources(config):
         model = getattr(resource, "model", "")
         if "." not in model:
             continue
         _, name = Name.from_dotted(model)
-        if name.lower == instance_id:
+        if name.lower == base_id:
             return resource
     return None
 
@@ -117,17 +114,19 @@ def _find_resource(
 def _iter_all_resources(config: BaseModel) -> list[BaseModel]:
     """Yield every :class:`ResourceConfig` in a project config.
 
-    Resources can live at the root (single-app) or inside each
-    ``AppRef.config`` (multi-app); both are yielded here.
+    After :func:`kiln.config.schema.normalize_config`, resources
+    always live under ``config.apps[*].config.resources`` — bare
+    top-level resources are wrapped in an implicit single app
+    during :func:`kiln.renderers.generate.generate`.
 
     Args:
-        config: Top-level project config.
+        config: Top-level project config (post-normalization).
 
     Returns:
         Flat list of resource configs across all apps.
 
     """
-    resources: list[BaseModel] = list(getattr(config, "resources", []))
+    resources: list[BaseModel] = []
     for app_ref in getattr(config, "apps", []):
         app_cfg = getattr(app_ref, "config", None)
         if app_cfg is None:

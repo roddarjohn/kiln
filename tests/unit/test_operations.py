@@ -236,7 +236,7 @@ class TestRouter:
 
     @staticmethod
     def _res(name: str) -> ResourceConfig:
-        """A ResourceConfig whose iid will be *name* lowercase."""
+        """A ResourceConfig whose instance_id will be *name* lowercase."""
         return ResourceConfig(model=f"pkg.models.{name.capitalize()}")
 
     @staticmethod
@@ -245,62 +245,48 @@ class TestRouter:
         resources: list[ResourceConfig],
         store: BuildStore,
     ) -> BuildContext:
-        config = KilnConfig(module=module, resources=resources)
-        return BuildContext(
-            config=config,
-            scope=PROJECT,
-            instance=config,
-            instance_id="project",
-            store=store,
-        )
+        """Context for Router running at the app scope.
 
-    @staticmethod
-    def _multi_app_ctx(
-        apps: list[tuple[str, list[ResourceConfig]]],
-        store: BuildStore,
-    ) -> BuildContext:
-        """Context for a multi-app config.
-
-        Args:
-            apps: ``(module, resources)`` per app.
-            store: Build store to attach.
+        The Router now runs once per :class:`AppRef`, so the
+        scope instance is an AppRef wrapping an inner KilnConfig
+        carrying the module and resources for this app.
         """
-        config = KilnConfig(
-            module="project",
-            apps=[
-                AppRef(
-                    config=KilnConfig(module=module, resources=resources),
-                    prefix=f"/{module}",
-                )
-                for module, resources in apps
-            ],
+        app_ref = AppRef(
+            config=KilnConfig(module=module, resources=resources),
+            prefix="",
         )
+        project = KilnConfig(module="project", apps=[app_ref])
         return BuildContext(
-            config=config,
-            scope=PROJECT,
-            instance=config,
-            instance_id="project",
+            config=project,
+            scope=APP_SCOPE,
+            instance=app_ref,
+            instance_id=module,
             store=store,
         )
 
     @staticmethod
-    def _add_handler(store: BuildStore, iid: str) -> None:
+    def _add_handler(
+        store: BuildStore,
+        app: str,
+        base_instance_id: str,
+    ) -> None:
+        """Store a RouteHandler under the app-compounded resource id."""
         store.add(
             "resource",
-            iid,
+            f"{app}/{base_instance_id}",
             "get",
             RouteHandler(
                 method="GET",
                 path="/{id}",
-                function_name=f"get_{iid}",
+                function_name=f"get_{base_instance_id}",
             ),
         )
 
     def test_mounts_resources_from_store(self):
         """One RouterMount per resource with a RouteHandler in the store."""
         store = BuildStore()
-        self._add_handler(store, "post")
-        self._add_handler(store, "comment")
+        self._add_handler(store, "blog", "post")
+        self._add_handler(store, "blog", "comment")
         resources = [self._res("Post"), self._res("Comment")]
         ctx = self._ctx("blog", resources, store)
 
@@ -319,7 +305,7 @@ class TestRouter:
     def test_router_static_context(self):
         """Static file context has correct route entries."""
         store = BuildStore()
-        self._add_handler(store, "user")
+        self._add_handler(store, "api", "user")
         ctx = self._ctx("api", [self._res("User")], store)
 
         result = list(Router().build(ctx, _Empty()))
@@ -334,13 +320,13 @@ class TestRouter:
         store = BuildStore()
         store.add(
             "resource",
-            "user",
+            "api/user",
             "get",
             RouteHandler(method="GET", path="/{id}", function_name="get_user"),
         )
         store.add(
             "resource",
-            "user",
+            "api/user",
             "list",
             RouteHandler(method="GET", path="/", function_name="list_user"),
         )
@@ -356,11 +342,11 @@ class TestRouter:
         store = BuildStore()
         store.add(
             "resource",
-            "silent",
+            "api/silent",
             "some_op",
             StaticFile(path="silent.py", template="x.j2"),
         )
-        self._add_handler(store, "loud")
+        self._add_handler(store, "api", "loud")
         ctx = self._ctx("api", [self._res("Silent"), self._res("Loud")], store)
 
         result = list(Router().build(ctx, _Empty()))
@@ -388,23 +374,28 @@ class TestRouter:
         result = list(Router().build(ctx, _Empty()))
         assert result == []
 
-    def test_multi_app_emits_per_app_routers(self):
-        """Multi-app config produces one routes/__init__.py per app."""
+    def test_per_app_invocation_emits_its_own_router(self):
+        """Each app-scope invocation emits only its own app's router."""
         store = BuildStore()
-        self._add_handler(store, "post")
-        self._add_handler(store, "product")
-        ctx = self._multi_app_ctx(
-            [
-                ("blog", [self._res("Post")]),
-                ("shop", [self._res("Product")]),
-            ],
-            store,
-        )
+        self._add_handler(store, "blog", "post")
+        self._add_handler(store, "shop", "product")
 
-        result = list(Router().build(ctx, _Empty()))
-        statics = [r for r in result if isinstance(r, StaticFile)]
-        paths = {s.path for s in statics}
-        assert paths == {"blog/routes/__init__.py", "shop/routes/__init__.py"}
+        blog_ctx = self._ctx("blog", [self._res("Post")], store)
+        shop_ctx = self._ctx("shop", [self._res("Product")], store)
+
+        blog_statics = [
+            r
+            for r in Router().build(blog_ctx, _Empty())
+            if isinstance(r, StaticFile)
+        ]
+        shop_statics = [
+            r
+            for r in Router().build(shop_ctx, _Empty())
+            if isinstance(r, StaticFile)
+        ]
+
+        assert [s.path for s in blog_statics] == ["blog/routes/__init__.py"]
+        assert [s.path for s in shop_statics] == ["shop/routes/__init__.py"]
 
 
 # -------------------------------------------------------------------

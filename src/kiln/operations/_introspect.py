@@ -82,11 +82,14 @@ def introspect_action_fn(
 
     for param_name in sig.parameters:
         hint = hints.get(param_name)
+
         if hint is None or _is_async_session(hint):
             continue
+
         if hint is model_cls:
             is_object_action = True
             model_param_name = param_name
+
         elif _is_pydantic_model(hint):
             if request_class is not None:
                 msg = (
@@ -95,6 +98,7 @@ def introspect_action_fn(
                     f"request body is allowed."
                 )
                 raise ValueError(msg)
+
             request_class = hint.__name__
             request_module = hint.__module__
 

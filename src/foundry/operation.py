@@ -9,6 +9,7 @@ to the class so the engine can discover and wire it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from pydantic import BaseModel
@@ -165,8 +166,10 @@ def topological_sort(
 ) -> list[type]:
     """Sort operations by dependency order.
 
-    Uses Kahn's algorithm.  Raises :class:`ValueError` on
-    cycles or missing dependencies.
+    Delegates to :class:`graphlib.TopologicalSorter` and breaks
+    ties alphabetically so output is deterministic regardless of
+    input ordering.  Raises :class:`ValueError` on cycles or
+    missing dependencies.
 
     Args:
         operations: Operation classes with attached metadata.
@@ -186,11 +189,9 @@ def topological_sort(
         meta_map[meta.name] = meta
         cls_map[meta.name] = cls
 
-    # Build adjacency: edges[a] = {b} means a must run before b
-    in_degree: dict[str, int] = dict.fromkeys(meta_map, 0)
-    dependents: dict[str, list[str]] = {n: [] for n in meta_map}
-
+    sorter: TopologicalSorter[str] = TopologicalSorter()
     for name, meta in meta_map.items():
+        sorter.add(name)
         for req in meta.requires:
             if req not in meta_map:
                 msg = (
@@ -198,23 +199,19 @@ def topological_sort(
                     f"which is not registered"
                 )
                 raise ValueError(msg)
-            dependents[req].append(name)
-            in_degree[name] += 1
+            sorter.add(name, req)
 
-    # Kahn's algorithm
-    queue = sorted(n for n, d in in_degree.items() if d == 0)
-    result: list[str] = []
-
-    while queue:
-        current = queue.pop(0)
-        result.append(current)
-        for dep in sorted(dependents[current]):
-            in_degree[dep] -= 1
-            if in_degree[dep] == 0:
-                queue.append(dep)
-
-    if len(result) != len(meta_map):
+    try:
+        sorter.prepare()
+    except CycleError as exc:
         msg = "Cycle detected in operation dependencies"
-        raise ValueError(msg)
+        raise ValueError(msg) from exc
+
+    result: list[str] = []
+    while sorter.is_active():
+        ready = sorted(sorter.get_ready())
+        result.extend(ready)
+        for name in ready:
+            sorter.done(name)
 
     return [cls_map[n] for n in result]

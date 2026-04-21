@@ -1,4 +1,4 @@
-"""Router operations: resource-level and project-level routers."""
+"""Router operations: per-app router and project router."""
 
 from __future__ import annotations
 
@@ -14,64 +14,73 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import BuildStore
-    from kiln.config.schema import KilnConfig, ResourceConfig
+    from kiln.config.schema import AppRef, KilnConfig, ResourceConfig
 
 
-@operation("router", scope="project", after_children=True)
+@operation("router", scope="app", after_children=True)
 class Router:
-    """Generate each app's ``{module}/routes/__init__.py``.
+    """Generate one app's ``{module}/routes/__init__.py``.
 
-    Runs in the post-children phase of the project scope so the
-    build store is fully populated with resource-scope output.
-    For every app (or for a single-app config, the project
-    itself), emits one router module that mounts every resource
-    that produced at least one :class:`RouteHandler`.
+    Runs in the post-children phase of the app scope so the build
+    store is fully populated with resource-scope output beneath
+    this app.  Emits one :class:`RouterMount` per resource that
+    produced at least one :class:`RouteHandler` plus a single
+    :class:`StaticFile` that aggregates them into the app's
+    router module.
     """
 
     def build(
         self,
-        ctx: BuildContext[KilnConfig],
+        ctx: BuildContext[AppRef],
         _options: BaseModel,
     ) -> Iterable[RouterMount | StaticFile]:
-        """Produce per-app router mounts and aggregation files.
+        """Produce this app's router mount and aggregation file.
 
         Args:
-            ctx: Build context; ``store`` is fully populated
-                with resource-scope output.
+            ctx: Build context for one :class:`AppRef`; ``store``
+                is fully populated with resource-scope output
+                because ``after_children=True``.
             _options: Unused.
 
         Yields:
-            One :class:`RouterMount` plus a :class:`StaticFile`
-            per app with at least one resource that produced
-            routes.
+            One :class:`RouterMount` per mounted resource plus a
+            single :class:`StaticFile` for the app's routes
+            package.  Nothing is yielded when no resource in the
+            app produced a :class:`RouteHandler`.
 
         """
-        config = ctx.instance
-        for module, resources in _apps_to_render(config):
-            iids = _resource_iids_with_handlers(ctx.store, resources)
-            if not iids:
-                continue
+        app_ref = ctx.instance
+        app_config = app_ref.config
+        module = app_config.module
 
-            for iid in iids:
-                yield RouterMount(
-                    module=f"{module}.routes.{iid}",
-                    alias=f"{iid}_router",
-                )
+        resource_ids = _resource_instance_ids_with_handlers(
+            ctx.store,
+            app_config.resources,
+            ctx.instance_id,
+        )
+        if not resource_ids:
+            return
 
-            yield StaticFile(
-                path=f"{module}/routes/__init__.py",
-                template="fastapi/router.py.j2",
-                context={
-                    "module": module,
-                    "routes": [
-                        {
-                            "module_name": iid,
-                            "alias": f"{iid}_router",
-                        }
-                        for iid in iids
-                    ],
-                },
+        for resource_id in resource_ids:
+            yield RouterMount(
+                module=f"{module}.routes.{resource_id}",
+                alias=f"{resource_id}_router",
             )
+
+        yield StaticFile(
+            path=f"{module}/routes/__init__.py",
+            template="fastapi/router.py.j2",
+            context={
+                "module": module,
+                "routes": [
+                    {
+                        "module_name": resource_id,
+                        "alias": f"{resource_id}_router",
+                    }
+                    for resource_id in resource_ids
+                ],
+            },
+        )
 
 
 @operation("project_router", scope="project")
@@ -85,8 +94,12 @@ class ProjectRouter:
     ) -> Iterable[StaticFile]:
         """Produce the project-level router file.
 
-        Only produces output for multi-app configs (those
-        with an ``apps`` list).
+        Only produces output for configs that have an ``apps``
+        list.  After :func:`kiln.config.schema.normalize_config`,
+        every project config routed through :func:`generate` has
+        at least one app (bare top-level resources are wrapped in
+        an implicit single app with ``prefix=""``), so this op
+        runs unconditionally in the normal pipeline.
 
         Args:
             ctx: Build context; instance is the project config.
@@ -94,7 +107,7 @@ class ProjectRouter:
 
         Yields:
             Single :class:`StaticFile` for the project router,
-            or nothing for single-level configs.
+            or nothing for configs that have no apps at all.
 
         """
         config = ctx.instance
@@ -127,61 +140,44 @@ class ProjectRouter:
         )
 
 
-def _apps_to_render(
-    config: KilnConfig,
-) -> list[tuple[str, list[ResourceConfig]]]:
-    """Return ``(module, resources)`` for each app in *config*.
-
-    Multi-app configs expose one entry per :class:`AppRef`; a
-    single-app config (resources directly at the root) produces
-    one entry with the project's own module and resources.
-
-    Args:
-        config: The top-level project config.
-
-    Returns:
-        One ``(module, resources)`` tuple per app to render.
-
-    """
-    if config.apps:
-        return [
-            (app_ref.config.module, app_ref.config.resources)
-            for app_ref in config.apps
-        ]
-    if config.resources:
-        return [(config.module, config.resources)]
-    return []
-
-
-def _resource_iids_with_handlers(
+def _resource_instance_ids_with_handlers(
     store: BuildStore,
     resources: list[ResourceConfig],
+    app_instance_id: str,
 ) -> list[str]:
-    """Return the instance IDs of resources that produced routes.
+    """Return the base instance ids of resources that produced routes.
 
-    The ID convention mirrors :func:`foundry.engine._instance_id`:
-    for a :class:`ResourceConfig`, the class name extracted from
-    its dotted ``model`` path, lowercased.
+    Store keys are compounded with the enclosing app's instance
+    id (see :meth:`foundry.engine.Engine._visit`), so this
+    function looks up
+    ``("resource", f"{app_instance_id}/{base}")`` per resource
+    but returns the bare base id for output (module paths and
+    router aliases are per-app and don't need the prefix).
 
     Args:
         store: The populated build store.
-        resources: Configs for one app's resources.
+        resources: Configs for this app's resources.
+        app_instance_id: The enclosing app's instance id, used
+            as the store-key prefix.
 
     Returns:
-        Instance IDs, in config order, whose resource scope
+        Base instance IDs, in config order, whose resource scope
         emitted at least one :class:`RouteHandler`.
 
     """
-    iids: list[str] = []
+    instance_ids: list[str] = []
     for res in resources:
-        iid = _resource_iid(res)
-        items = store.get_by_scope("resource", iid)
+        base_id = _resource_instance_id(res)
+        items = store.get_by_scope(
+            "resource",
+            f"{app_instance_id}/{base_id}",
+        )
         if any(isinstance(obj, RouteHandler) for obj in items):
-            iids.append(iid)
-    return iids
+            instance_ids.append(base_id)
+    return instance_ids
 
 
-def _resource_iid(res: ResourceConfig) -> str:
+def _resource_instance_id(res: ResourceConfig) -> str:
     """Compute the engine-generated instance ID for *res*.
 
     Matches :func:`foundry.engine._instance_id` for a

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from foundry.engine import Engine
 from foundry.render import RenderCtx
+from kiln.config.schema import KilnConfig, normalize_config
 from kiln.generators._env import env
 from kiln.renderers import registry
 from kiln.renderers.assembler import assemble
@@ -38,6 +39,8 @@ def generate(config: BaseModel) -> list[GeneratedFile]:
         Flat list of all generated files.
 
     """
+    if isinstance(config, KilnConfig):
+        config = normalize_config(config)
     operations = _discover_operations()
     pkg = getattr(config, "package_prefix", "")
 

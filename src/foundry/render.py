@@ -225,8 +225,8 @@ class BuildStore:
 
         """
         result: list[object] = []
-        for (s, iid, _), items in self._items.items():
-            if s == scope and iid == instance_id:
+        for (s, stored_id, _), items in self._items.items():
+            if s == scope and stored_id == instance_id:
                 result.extend(items)
         return result
 
@@ -260,5 +260,5 @@ class BuildStore:
         Used by the assembler to walk the store and dispatch
         each item to the correct renderer with scope-aware context.
         """
-        for (scope, iid, op_name), items in self._items.items():
-            yield scope, iid, op_name, items
+        for (scope, instance_id, op_name), items in self._items.items():
+            yield scope, instance_id, op_name, items

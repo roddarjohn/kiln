@@ -193,8 +193,60 @@ class AppRef(BaseModel):
     config: KilnConfig
     prefix: str
 
+    @property
+    def module(self) -> str:
+        """Expose the app's module name to the engine.
+
+        :func:`foundry.engine._instance_id` derives a scope
+        instance's ID from its ``module`` attribute before falling
+        back to a positional name.  Surfacing the nested module
+        here keeps app-scope store keys stable across reorderings.
+        """
+        return self.config.module
+
 
 # KilnConfig.apps references AppRef, which is defined after KilnConfig.
 # Pydantic cannot resolve that forward reference during class creation,
 # so we force a rebuild once AppRef is available.
 KilnConfig.model_rebuild()
+
+
+def normalize_config(config: KilnConfig) -> KilnConfig:
+    """Wrap bare top-level resources in an implicit single app.
+
+    Ensures the scope tree is always ``project → app → resource``
+    by converting a config like::
+
+        KilnConfig(module="blog", resources=[...])
+
+    into::
+
+        KilnConfig(module="blog", apps=[AppRef(
+            config=KilnConfig(module="blog", resources=[...]),
+            prefix="",
+        )])
+
+    Configs that already have ``apps`` (or have no resources at
+    all) are returned unchanged.
+
+    Args:
+        config: Project config, possibly with top-level resources.
+
+    Returns:
+        A config whose resources all live under ``apps``.
+
+    """
+    if config.apps or not config.resources:
+        return config
+
+    inner = KilnConfig(
+        module=config.module,
+        resources=config.resources,
+        operations=config.operations,
+    )
+    return config.model_copy(
+        update={
+            "resources": [],
+            "apps": [AppRef(config=inner, prefix="")],
+        },
+    )

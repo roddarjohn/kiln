@@ -120,8 +120,8 @@ def test_store_entries_iter():
     store.add("resource", "user", "get", "h1", "h2")
     store.add("project", "project", "scaffold", "sf")
     tuples = [
-        (scope, iid, op_name, items)
-        for scope, iid, op_name, items in store.entries()
+        (scope, instance_id, op_name, items)
+        for scope, instance_id, op_name, items in store.entries()
     ]
     assert ("resource", "user", "get", ["h1", "h2"]) in tuples
     assert ("project", "project", "scaffold", ["sf"]) in tuples

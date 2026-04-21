@@ -121,8 +121,17 @@ class Engine:
         scope: Scope,
         parent_instance: object,
         state: _WalkState,
+        parent_iid: str = "",
     ) -> None:
         """Recursively walk *scope* and its descendants.
+
+        Instance IDs are compounded with ``/`` across non-root
+        ancestors so sibling scope trees can't collide on a bare
+        base ID.  For example, an ``article`` resource nested
+        under the ``blog`` app lands in the store under
+        ``("resource", "blog/article")``.  The project scope is
+        excluded from the prefix — its ID ``"project"`` would add
+        noise to every descendant without disambiguating anything.
 
         Args:
             scope: The scope currently being walked.
@@ -131,20 +140,25 @@ class Engine:
                 project config itself).
             state: Shared walk state — config, store, op groups,
                 and the child-scope index.
+            parent_iid: The compounded instance ID of the
+                enclosing scope, or ``""`` when the parent is the
+                project root (no prefixing).
 
         """
-        for inst_id, inst_obj in _resolve_instances(scope, parent_instance):
+        for own_iid, inst_obj in _resolve_instances(scope, parent_instance):
+            full_iid = f"{parent_iid}/{own_iid}" if parent_iid else own_iid
             ctx = BuildContext(
                 config=state.config,
                 scope=scope,
                 instance=inst_obj,
-                instance_id=inst_id,
+                instance_id=full_iid,
                 store=state.store,
                 package_prefix=state.package_prefix,
             )
             _run_ops(state.pre_ops.get(scope.name, []), ctx)
+            next_parent = "" if scope is PROJECT else full_iid
             for child in state.children_of.get(scope.name, []):
-                self._visit(child, inst_obj, state)
+                self._visit(child, inst_obj, state, parent_iid=next_parent)
             _run_ops(state.post_ops.get(scope.name, []), ctx)
 
 

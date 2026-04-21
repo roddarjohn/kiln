@@ -56,6 +56,7 @@ class Action:
 
         if info.is_object_action:
             path = f"/{{{ctx.instance.pk}}}/{action_name.slug}"
+
         else:
             path = f"/{action_name.slug}"
 
