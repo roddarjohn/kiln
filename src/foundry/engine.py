@@ -280,8 +280,8 @@ def _run_ops(
 
 def _resolve_instances(
     scope: Scope,
-    parent_instance: Any,
-) -> list[tuple[str, Any]]:
+    parent_instance: object,
+) -> list[tuple[str, object]]:
     """Yield ``(instance_id, instance_object)`` pairs for *scope*.
 
     The root (project) scope always returns a single entry with
@@ -305,14 +305,14 @@ def _resolve_instances(
     items = _walk_path(parent_instance, path)
     if not isinstance(items, list):
         return []
-    result: list[tuple[str, Any]] = []
+    result: list[tuple[str, object]] = []
     for i, item in enumerate(items):
         inst_id = _instance_id(item, scope.name, i)
         result.append((inst_id, item))
     return result
 
 
-def _walk_path(obj: Any, path: tuple[str, ...]) -> Any:
+def _walk_path(obj: object, path: tuple[str, ...]) -> object:
     """Follow dotted attribute *path* from *obj*.
 
     Args:
@@ -336,7 +336,7 @@ def _walk_path(obj: Any, path: tuple[str, ...]) -> Any:
 def _scope_instances(
     config: BaseModel,
     scope: Scope,
-) -> list[tuple[str, Any]]:
+) -> list[tuple[str, object]]:
     """Resolve scope instances from the top-level config.
 
     Only valid for direct children of the project scope (or the

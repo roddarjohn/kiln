@@ -301,7 +301,8 @@ class TestRouter:
         store = BuildStore()
         self._add_handler(store, "post")
         self._add_handler(store, "comment")
-        ctx = self._ctx("blog", [self._res("Post"), self._res("Comment")], store)
+        resources = [self._res("Post"), self._res("Comment")]
+        ctx = self._ctx("blog", resources, store)
 
         result = list(Router().build(ctx, _Empty()))
         mounts = [r for r in result if isinstance(r, RouterMount)]
