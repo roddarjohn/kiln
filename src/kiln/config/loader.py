@@ -13,37 +13,52 @@ from pathlib import Path
 from typing import Any
 
 import _jsonnet
+from pydantic import ValidationError
 
-from kiln.config.schema import KilnConfig
+from kiln.config.schema import ProjectConfig
+from kiln.errors import ConfigError
 
 _STDLIB_DIR = Path(__file__).parent.parent / "stdlib"
 
 
-def load(config_path: Path) -> KilnConfig:
+def load(config_path: Path) -> ProjectConfig:
     """Load and validate a kiln config file.
 
     Args:
         config_path: Path to a ``.json`` or ``.jsonnet`` file.
 
     Returns:
-        Validated :class:`~kiln.config.schema.KilnConfig`.
+        Validated :class:`~kiln.config.schema.ProjectConfig`.
 
     Raises:
-        ValueError: If the file extension is not supported.
-        pydantic.ValidationError: If the config fails validation.
+        ConfigError: If the file is missing, has an unsupported
+            extension, fails to parse, or fails schema validation.
 
     """
     suffix = config_path.suffix.lower()
     if suffix == ".jsonnet":
         raw = _evaluate_jsonnet(config_path)
     elif suffix == ".json":
-        raw = config_path.read_text()
+        try:
+            raw = config_path.read_text()
+        except OSError as exc:
+            msg = f"Could not read {config_path}: {exc}"
+            raise ConfigError(msg) from exc
     else:
         msg = f"Unsupported config format: {suffix!r} (use .json or .jsonnet)"
-        raise ValueError(msg)
+        raise ConfigError(msg)
 
-    data: dict[str, Any] = json.loads(raw)
-    return KilnConfig.model_validate(data)
+    try:
+        data: dict[str, Any] = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"Invalid JSON in {config_path}: {exc}"
+        raise ConfigError(msg) from exc
+
+    try:
+        return ProjectConfig.model_validate(data)
+    except ValidationError as exc:
+        msg = f"Invalid config in {config_path}: {exc}"
+        raise ConfigError(msg) from exc
 
 
 def _import_callback(importing_dir: str, import_path: str) -> tuple[str, bytes]:
@@ -76,8 +91,19 @@ def _evaluate_jsonnet(path: Path) -> str:
     Returns:
         JSON string produced by the Jsonnet evaluator.
 
+    Raises:
+        ConfigError: If the file is missing or Jsonnet evaluation
+            fails.
+
     """
-    return _jsonnet.evaluate_file(
-        str(path),
-        import_callback=_import_callback,
-    )
+    try:
+        return _jsonnet.evaluate_file(
+            str(path),
+            import_callback=_import_callback,
+        )
+    except RuntimeError as exc:
+        msg = f"Jsonnet evaluation failed for {path}: {exc}"
+        raise ConfigError(msg) from exc
+    except OSError as exc:
+        msg = f"Could not read {path}: {exc}"
+        raise ConfigError(msg) from exc

@@ -96,7 +96,7 @@ Add your operation to your package's ``pyproject.toml``:
 
 .. code-block:: toml
 
-   [project.entry-points."kiln.operations"]
+   [project.entry-points."foundry.operations"]
    bulk_create = "my_pkg.ops:BulkCreate"
 
 ``kiln generate`` discovers all installed operations at startup, so
@@ -384,7 +384,7 @@ Run your operations through the engine directly -- no CLI needed:
 
 .. code-block:: python
 
-   from kiln.config.schema import KilnConfig, ResourceConfig
+   from kiln.config.schema import ProjectConfig
    from foundry.engine import Engine
    from foundry.outputs import RouteHandler
 
@@ -392,14 +392,11 @@ Run your operations through the engine directly -- no CLI needed:
 
 
    def test_bulk_create_produces_handler():
-       cfg = KilnConfig(
-           resources=[
-               ResourceConfig(
-                   model="myapp.Article",
-                   operations=["bulk_create"],
-               ),
+       cfg = ProjectConfig.model_validate({
+           "resources": [
+               {"model": "myapp.Article", "operations": ["bulk_create"]},
            ],
-       )
+       })
        engine = Engine(operations=[BulkCreate])
        store = engine.build(cfg)
 

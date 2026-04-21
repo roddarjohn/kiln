@@ -114,21 +114,21 @@ def _find_resource(
 def _iter_all_resources(config: BaseModel) -> list[BaseModel]:
     """Yield every :class:`ResourceConfig` in a project config.
 
-    After :func:`kiln.config.schema.normalize_config`, resources
-    always live under ``config.apps[*].config.resources`` — bare
-    top-level resources are wrapped in an implicit single app
-    during :func:`kiln.renderers.generate.generate`.
+    Resources always live under ``config.apps[*].config.resources``:
+    :class:`~kiln.config.schema.ProjectConfig` wraps a single-app
+    shorthand into an implicit :class:`~kiln.config.schema.App`
+    during validation.
 
     Args:
-        config: Top-level project config (post-normalization).
+        config: Top-level project config.
 
     Returns:
         Flat list of resource configs across all apps.
 
     """
     resources: list[BaseModel] = []
-    for app_ref in getattr(config, "apps", []):
-        app_cfg = getattr(app_ref, "config", None)
+    for app in getattr(config, "apps", []):
+        app_cfg = getattr(app, "config", None)
         if app_cfg is None:
             continue
         resources.extend(getattr(app_cfg, "resources", []))

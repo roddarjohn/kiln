@@ -185,8 +185,8 @@ Output lands in ``_generated/``:
        └── serializers/
            └── article.py
 
-``--out`` overrides the output root; ``--clean`` deletes the output
-directory first.
+``--out`` overrides the output root; ``--clean`` runs ``kiln clean``
+first to remove any stale files.
 
 Step 4 -- Mount the router
 --------------------------

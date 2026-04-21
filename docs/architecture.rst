@@ -34,7 +34,7 @@ Every ``kiln generate`` invocation flows through the same four steps:
 
 .. code-block:: text
 
-   config.jsonnet ──► load ──► KilnConfig
+   config.jsonnet ──► load ──► ProjectConfig
                                   │
                                   ▼
                            ┌──────────────┐
@@ -59,7 +59,7 @@ Every ``kiln generate`` invocation flows through the same four steps:
                              write_files
 
 1. **Load** the config file.  ``kiln.config.loader.load`` parses JSON
-   or Jsonnet and validates it against :class:`~kiln.config.schema.KilnConfig`.
+   or Jsonnet and validates it against :class:`~kiln.config.schema.ProjectConfig`.
 
 2. **Build** runs every registered operation.
    :class:`~foundry.engine.Engine` walks the config tree scope by
@@ -86,7 +86,7 @@ A *scope* is a level in the config tree at which an operation runs.
 The engine discovers scopes by inspecting the config model's fields:
 any field whose annotation is ``list[SomeBaseModel]`` becomes a scope.
 
-For the current :class:`~kiln.config.schema.KilnConfig`:
+For the current :class:`~kiln.config.schema.ProjectConfig`:
 
 .. list-table::
    :header-rows: 1
@@ -101,12 +101,13 @@ For the current :class:`~kiln.config.schema.KilnConfig`:
    * - ``database``
      - ``databases: list[DatabaseConfig]``
      - One instance per database entry.
-   * - ``resource``
-     - ``resources: list[ResourceConfig]``
-     - One instance per resource entry.
    * - ``app``
-     - ``apps: list[AppRef]``
-     - One instance per app entry (multi-app projects only).
+     - ``apps: list[App]``
+     - One instance per app entry.  Single-app shorthand is
+       wrapped into one implicit app during validation.
+   * - ``resource``
+     - ``resources: list[ResourceConfig]`` (nested under each app)
+     - One instance per resource entry.
 
 An operation declares its scope at decoration time::
 
@@ -255,12 +256,15 @@ different target would ship its own assembler.
 Discovery via entry points
 --------------------------
 
-Operations are loaded from the ``kiln.operations`` entry-point group.
-The built-ins are registered in kiln's own ``pyproject.toml``:
+Operations are loaded from the ``foundry.operations`` entry-point
+group by :func:`foundry.operation.discover_operations`.  From foundry's
+perspective, kiln is just one of potentially many packages that
+register operations; kiln's built-ins live in kiln's own
+``pyproject.toml``:
 
 .. code-block:: toml
 
-   [project.entry-points."kiln.operations"]
+   [project.entry-points."foundry.operations"]
    scaffold       = "kiln.operations.scaffold:Scaffold"
    get            = "kiln.operations.get:Get"
    list           = "kiln.operations.list:List"

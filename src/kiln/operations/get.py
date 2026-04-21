@@ -58,8 +58,10 @@ class Get:
         """
         _, model = Name.from_dotted(ctx.instance.model)
 
-        schema = _construct_response_schema(model, options.fields, "Resource")
-        serializer = _construct_serializer(model, schema, "resource")
+        schema = _construct_response_schema(
+            model, options.fields, suffix="Resource"
+        )
+        serializer = _construct_serializer(model, schema, stem="resource")
 
         yield schema
         yield serializer

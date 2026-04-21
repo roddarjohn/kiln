@@ -34,13 +34,25 @@ The CLI
     ``package_prefix: ""`` in the config to write directly into the
     current directory.
 ``--clean``
-    Delete ``--out`` before generating.  Useful when you remove a
+    Run ``kiln clean`` before generating.  Useful when you remove a
     resource from the config -- without ``--clean`` the previously
     generated files for that resource stay on disk.
 
 Re-running ``kiln generate`` is always safe: every generated file is
 overwritten.  Never edit files under the output directory -- the next
 run will discard your changes.
+
+``kiln clean``
+^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   kiln clean --config PATH [--out DIR]
+
+Deletes the output directory.  Resolves ``--out`` the same way
+``kiln generate`` does, so pointing the two commands at the same
+config produces matching paths.  The current working directory is
+never deleted.
 
 Config format
 -------------

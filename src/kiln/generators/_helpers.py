@@ -36,7 +36,7 @@ def resolve_db_session(
     Args:
         db_key: The ``db_key`` value from a resource config.
         databases: The project-level database list from
-            ``KilnConfig``.
+            ``ProjectConfig``.
 
     Returns:
         A ``(session_module, get_db_fn)`` tuple suitable for

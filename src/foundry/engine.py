@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from foundry.operation import (
     EmptyOptions,
+    discover_operations,
     get_operation_meta,
     topological_sort,
 )
@@ -69,7 +70,11 @@ class Engine:
 
     Attributes:
         operations: Operation classes decorated with
-            ``@operation``.
+            ``@operation``.  Defaults to every class registered
+            under the ``foundry.operations`` entry-point group
+            (see :func:`~foundry.operation.discover_operations`),
+            so production callers just write ``Engine()``.  Tests
+            override this to run a curated subset.
         scopes: Discovered scopes (auto-populated from
             config if not provided).
         package_prefix: Dotted prefix for generated imports,
@@ -77,7 +82,7 @@ class Engine:
 
     """
 
-    operations: list[type] = field(default_factory=list)
+    operations: list[type] = field(default_factory=discover_operations)
     scopes: list[Scope] = field(default_factory=list)
     package_prefix: str = ""
 

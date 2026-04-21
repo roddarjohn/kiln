@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import AuthConfig, KilnConfig
+    from kiln.config.schema import AuthConfig, ProjectConfig
 
 
 @operation("scaffold", scope="project")
@@ -30,7 +30,7 @@ class Scaffold:
 
     def build(
         self,
-        ctx: BuildContext[KilnConfig],
+        ctx: BuildContext[ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce static files for db sessions.
@@ -94,7 +94,7 @@ class Scaffold:
 class AuthScaffold:
     """Generate ``auth/`` infrastructure files."""
 
-    def when(self, ctx: BuildContext[KilnConfig]) -> bool:
+    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
         """Apply only when the project config has ``auth`` set.
 
         Args:
@@ -108,7 +108,7 @@ class AuthScaffold:
 
     def build(
         self,
-        ctx: BuildContext[KilnConfig],
+        ctx: BuildContext[ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce static files for auth dependencies and router.

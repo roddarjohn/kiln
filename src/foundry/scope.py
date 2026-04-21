@@ -9,7 +9,7 @@ Scopes form a tree rooted at :data:`PROJECT`.  A child scope's
 instances are resolved from its parent scope instance by walking
 :attr:`Scope.resolve_path` — a tuple of attribute names.  For a
 direct list-of-models field this is just ``(field_name,)``; for
-nested structures like ``AppRef.config.resources`` the path is
+nested structures like ``App.config.resources`` the path is
 ``("config", "resources")``.
 """
 
@@ -57,14 +57,13 @@ def discover_scopes(
     current level; the item type is then itself descended into
     to discover grandchild scopes.
 
-    Non-list ``BaseModel`` fields (e.g. ``AppRef.config``) are
+    Non-list ``BaseModel`` fields (e.g. ``App.config``) are
     traversed transparently: their nested ``list[BaseModel]``
     fields become scopes rooted at the enclosing level, with
     ``resolve_path`` reflecting the full attribute walk.
 
-    Cycles (e.g. ``KilnConfig → AppRef → KilnConfig``) are
-    detected via a visited-classes set so discovery always
-    terminates.
+    Cycles are detected via a visited-classes set so discovery
+    always terminates.
 
     Args:
         config_cls: The Pydantic model class to inspect.
@@ -102,7 +101,7 @@ def _discover(
 
     Cycle detection tracks only classes reached via ``list``
     descent, because those are what can nest unboundedly.
-    Non-list ``BaseModel`` fields (e.g. ``AppRef.config``) are
+    Non-list ``BaseModel`` fields (e.g. ``App.config``) are
     traversed transparently so nested list fields surface as
     scopes with a compound ``resolve_path``.
 

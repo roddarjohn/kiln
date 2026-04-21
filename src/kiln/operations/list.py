@@ -65,8 +65,10 @@ class List:
 
         """
         _, model = Name.from_dotted(ctx.instance.model)
-        schema = _construct_response_schema(model, options.fields, "ListItem")
-        serializer = _construct_serializer(model, schema, "list_item")
+        schema = _construct_response_schema(
+            model, options.fields, suffix="ListItem"
+        )
+        serializer = _construct_serializer(model, schema, stem="list_item")
         yield schema
         yield serializer
 

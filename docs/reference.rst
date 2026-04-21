@@ -8,11 +8,19 @@ Reference
 Config schema
 -------------
 
-All config files parse into a :class:`~kiln.config.schema.KilnConfig`
+All config files parse into a :class:`~kiln.config.schema.ProjectConfig`
 instance.  The classes below correspond directly to the fields you
 write in ``.jsonnet`` / ``.json``.
 
-.. autoclass:: kiln.config.schema.KilnConfig
+.. autoclass:: kiln.config.schema.ProjectConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.AppConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.App
    :members:
    :undoc-members:
 
@@ -33,10 +41,6 @@ write in ``.jsonnet`` / ``.json``.
    :undoc-members:
 
 .. autoclass:: kiln.config.schema.DatabaseConfig
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.AppRef
    :members:
    :undoc-members:
 
@@ -93,7 +97,7 @@ The ``type`` field on :class:`~kiln.config.schema.FieldSpec` accepts:
 Built-in operations
 -------------------
 
-Every built-in operation is registered under the ``kiln.operations``
+Every built-in operation is registered under the ``foundry.operations``
 entry-point group in kiln's own ``pyproject.toml``.  See :doc:`usage`
 for what each one generates and :doc:`extending` for the operation
 protocol.

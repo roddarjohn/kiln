@@ -16,7 +16,7 @@ from foundry.outputs import (
     TestCase,
 )
 from foundry.render import BuildStore, RenderCtx
-from kiln.config.schema import AuthConfig, KilnConfig, ResourceConfig
+from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
 from kiln.generators._env import env as jinja_env
 from kiln.renderers import registry as shared_registry
 from kiln.renderers.assembler import assemble
@@ -332,10 +332,12 @@ def _rctx(
     *,
     auth: AuthConfig | None = None,
 ) -> RenderCtx:
-    config = KilnConfig(
-        module="myapp",
-        auth=auth,
-        resources=[resource],
+    config = ProjectConfig.model_validate(
+        {
+            "module": "myapp",
+            "resources": [resource.model_dump()],
+            **({"auth": auth.model_dump()} if auth is not None else {}),
+        }
     )
     return RenderCtx(
         env=jinja_env,
@@ -555,14 +557,15 @@ def test_action_route_dispatches_via_registry(registry):
     supply; that is a pre-existing template/handler mismatch.  This
     test stays focused on renderer dispatch + Fragment shape.
     """
-    from kiln.config.schema import KilnConfig
     from kiln.operations.action import ActionRoute
 
     tmpl = MagicMock()
     tmpl.render.return_value = "def publish_action(): ..."
     env = MagicMock()
     env.get_template.return_value = tmpl
-    config = KilnConfig(module="myapp", resources=[_resource()])
+    config = ProjectConfig.model_validate(
+        {"module": "myapp", "resources": [_resource().model_dump()]}
+    )
     rctx = RenderCtx(
         env=env,
         config=config,

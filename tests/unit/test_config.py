@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from kiln.config.schema import (
+    AppConfig,
     AuthConfig,
     FieldSpec,
-    KilnConfig,
     OperationConfig,
+    ProjectConfig,
     ResourceConfig,
 )
 
@@ -18,13 +19,47 @@ from kiln.config.schema import (
 # ---------------------------------------------------------------------------
 
 
-def test_kiln_config_defaults():
-    cfg = KilnConfig()
+def test_project_config_defaults():
+    cfg = ProjectConfig()
     assert cfg.version == "1"
-    assert cfg.module == "app"
     assert cfg.auth is None
+    assert cfg.apps == []
+
+
+def test_app_config_defaults():
+    cfg = AppConfig()
+    assert cfg.module == "app"
     assert cfg.resources == []
     assert cfg.operations is None
+
+
+def test_project_config_shorthand_wraps_single_app():
+    cfg = ProjectConfig.model_validate(
+        {
+            "module": "myapp",
+            "resources": [{"model": "myapp.models.Post"}],
+            "operations": ["get", "list"],
+        }
+    )
+    assert len(cfg.apps) == 1
+    app = cfg.apps[0]
+    assert app.prefix == ""
+    assert app.config.module == "myapp"
+    assert app.config.resources[0].model == "myapp.models.Post"
+    assert app.config.operations == ["get", "list"]
+
+
+def test_project_config_apps_mode_untouched():
+    cfg = ProjectConfig.model_validate(
+        {
+            "apps": [
+                {"config": {"module": "blog"}, "prefix": "/blog"},
+            ],
+        }
+    )
+    assert len(cfg.apps) == 1
+    assert cfg.apps[0].prefix == "/blog"
+    assert cfg.apps[0].config.module == "blog"
 
 
 def test_auth_config_defaults():
@@ -148,8 +183,8 @@ def test_operation_config_options_excludes_known_fields():
     assert "fields" in oc.options
 
 
-def test_kiln_config_with_operations():
-    cfg = KilnConfig(
+def test_app_config_with_operations():
+    cfg = AppConfig(
         operations=["get", "list", "create"],
     )
     assert len(cfg.operations) == 3
@@ -182,17 +217,19 @@ def test_load_json(tmp_path: Path):
     from kiln.config.loader import load
 
     cfg = load(cfg_file)
-    assert cfg.module == "myapp"
-    assert len(cfg.resources) == 1
-    assert cfg.resources[0].model == "myapp.models.Widget"
+    app = cfg.apps[0]
+    assert app.config.module == "myapp"
+    assert len(app.config.resources) == 1
+    assert app.config.resources[0].model == "myapp.models.Widget"
 
 
 def test_load_unsupported_extension(tmp_path: Path):
     from kiln.config.loader import load
+    from kiln.errors import ConfigError
 
     bad = tmp_path / "kiln.yaml"
     bad.write_text("version: '1'")
-    with pytest.raises(ValueError, match="Unsupported"):
+    with pytest.raises(ConfigError, match="Unsupported"):
         load(bad)
 
 
@@ -203,7 +240,7 @@ def test_load_jsonnet(tmp_path: Path):
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
     cfg = load(cfg_file)
-    assert cfg.module == "jsonnet_app"
+    assert cfg.apps[0].config.module == "jsonnet_app"
 
 
 def test_load_jsonnet_relative_import(tmp_path: Path):
@@ -215,19 +252,19 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
     cfg = load(cfg_file)
-    assert cfg.module == "helper_app"
+    assert cfg.apps[0].config.module == "helper_app"
 
 
 def test_load_validation_error(tmp_path: Path):
     from kiln.config.loader import load
+    from kiln.errors import ConfigError
 
     # model is required in ResourceConfig
     data = {"resources": [{"operations": ["get"]}]}
     cfg_file = tmp_path / "bad.json"
     cfg_file.write_text(json.dumps(data))
-    from pydantic import ValidationError
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ConfigError):
         load(cfg_file)
 
 
@@ -254,10 +291,11 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(src)
     cfg = load(cfg_file)
-    assert cfg.module == "blog"
-    assert len(cfg.resources) == 1
-    assert cfg.resources[0].model == "blog.models.Article"
-    operations = cfg.resources[0].operations
+    app = cfg.apps[0]
+    assert app.config.module == "blog"
+    assert len(app.config.resources) == 1
+    assert app.config.resources[0].model == "blog.models.Article"
+    operations = app.config.resources[0].operations
     assert operations is not None
     assert len(operations) == 1
     op = operations[0]

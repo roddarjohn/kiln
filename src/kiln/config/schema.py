@@ -131,7 +131,7 @@ class ResourceConfig(BaseModel):
     Each entry is either a string (built-in operation name resolved
     via entry points) or an :class:`OperationConfig` object.  When
     ``None``, operations are inherited from the parent
-    :class:`KilnConfig`.
+    :class:`AppConfig`.
 
     ``require_auth`` sets the default authentication requirement for
     all operations.  Individual operations can override this via
@@ -157,41 +157,32 @@ class ResourceConfig(BaseModel):
     ``require_auth`` field."""
     operations: list[str | OperationConfig] | None = None
     """Ordered list of operations to run.  ``None`` inherits from
-    the parent :class:`KilnConfig`."""
+    the parent :class:`AppConfig`."""
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
 
 
-class KilnConfig(BaseModel):
-    """Top-level kiln configuration."""
+class AppConfig(BaseModel):
+    """One app within a project: a module of related resources.
 
-    version: str = "1"
-    module: str = "app"
-    framework: str = "fastapi"
-    """Target framework profile.  Selects which renderer set runs;
-    each renderer is tagged with the framework it implements, and
-    only those matching this value are used."""
-    package_prefix: str = "_generated"
-    """Directory prefix prepended to all generated file paths and Python
-    import paths.  Defaults to ``"_generated"`` so generated code lives
-    at ``_generated/{module}/`` and is imported as
-    ``_generated.{module}.routes.article``.  Set to ``""`` to disable.
+    An app owns its own Python package (``module``) and a list of
+    resources.  ``operations`` is the default operation set inherited
+    by resources that don't declare their own.
     """
-    auth: AuthConfig | None = None
-    databases: list[DatabaseConfig] = []
+
+    module: str = "app"
     operations: list[str | OperationConfig] | None = None
-    """Default operations for all resources in this config.  Resources
+    """Default operations for all resources in this app.  Resources
     can override with their own ``operations`` list."""
     resources: list[ResourceConfig] = []
-    apps: list[AppRef] = []
 
 
-class AppRef(BaseModel):
-    """An app config entry inside a project-level config."""
+class App(BaseModel):
+    """An app mounted at a URL prefix in the project router."""
 
-    config: KilnConfig
-    prefix: str
+    config: AppConfig
+    prefix: str = ""
 
     @property
     def module(self) -> str:
@@ -205,48 +196,50 @@ class AppRef(BaseModel):
         return self.config.module
 
 
-# KilnConfig.apps references AppRef, which is defined after KilnConfig.
-# Pydantic cannot resolve that forward reference during class creation,
-# so we force a rebuild once AppRef is available.
-KilnConfig.model_rebuild()
+class ProjectConfig(BaseModel):
+    """Top-level kiln configuration.
 
-
-def normalize_config(config: KilnConfig) -> KilnConfig:
-    """Wrap bare top-level resources in an implicit single app.
-
-    Ensures the scope tree is always ``project → app → resource``
-    by converting a config like::
-
-        KilnConfig(module="blog", resources=[...])
-
-    into::
-
-        KilnConfig(module="blog", apps=[AppRef(
-            config=KilnConfig(module="blog", resources=[...]),
-            prefix="",
-        )])
-
-    Configs that already have ``apps`` (or have no resources at
-    all) are returned unchanged.
-
-    Args:
-        config: Project config, possibly with top-level resources.
-
-    Returns:
-        A config whose resources all live under ``apps``.
-
+    A project is a collection of apps plus shared infrastructure
+    (auth, databases, framework target).  Resources always live
+    under ``apps[*].config.resources``; a shorthand config with
+    top-level ``module`` / ``resources`` / ``operations`` fields is
+    wrapped into a single implicit app with ``prefix=""`` by
+    :meth:`_wrap_shorthand`, so the scope tree
+    (``project → app → resource``) is uniform across configs.
     """
-    if config.apps or not config.resources:
-        return config
 
-    inner = KilnConfig(
-        module=config.module,
-        resources=config.resources,
-        operations=config.operations,
-    )
-    return config.model_copy(
-        update={
-            "resources": [],
-            "apps": [AppRef(config=inner, prefix="")],
-        },
-    )
+    version: str = "1"
+    framework: str = "fastapi"
+    """Target framework profile.  Selects which renderer set runs;
+    each renderer is tagged with the framework it implements, and
+    only those matching this value are used."""
+    package_prefix: str = "_generated"
+    """Directory prefix prepended to all generated file paths and Python
+    import paths.  Defaults to ``"_generated"`` so generated code lives
+    at ``_generated/{module}/`` and is imported as
+    ``_generated.{module}.routes.article``.  Set to ``""`` to disable.
+    """
+    auth: AuthConfig | None = None
+    databases: list[DatabaseConfig] = []
+    apps: list[App] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _wrap_shorthand(cls, data: Any) -> Any:  # type: ignore[operator]  # noqa: ANN401
+        """Wrap single-app shorthand into an implicit ``apps`` entry.
+
+        A config like ``{"module": "blog", "resources": [...]}`` is
+        rewritten to
+        ``{"apps": [{"config": {"module": "blog", "resources": [...]},
+        "prefix": ""}]}`` so the scope tree always runs
+        ``project → app → resource``.  Configs that already set
+        ``apps`` are returned unchanged.
+        """
+        if not isinstance(data, dict) or "apps" in data:
+            return data
+        app_keys = ("module", "resources", "operations")
+        if not any(k in data for k in app_keys):
+            return data
+        app_data = {k: data.pop(k) for k in list(data.keys()) if k in app_keys}
+        data["apps"] = [{"config": app_data, "prefix": ""}]
+        return data

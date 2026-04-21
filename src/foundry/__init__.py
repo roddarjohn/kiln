@@ -25,6 +25,7 @@ from foundry.naming import Name, prefix_import, split_dotted_class
 from foundry.operation import (
     EmptyOptions,
     OperationMeta,
+    discover_operations,
     get_operation_meta,
     operation,
     topological_sort,
@@ -69,6 +70,7 @@ __all__ = [
     "StaticFile",
     "TestCase",
     "create_jinja_env",
+    "discover_operations",
     "discover_scopes",
     "get_operation_meta",
     "operation",
