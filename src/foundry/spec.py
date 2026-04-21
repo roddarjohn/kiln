@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import jinja2
 
-    from kiln_core.imports import ImportCollector
+    from foundry.imports import ImportCollector
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class FileSpec:
             ``"myapp/schemas/user.py"``.
         template: Jinja2 template name, e.g.
             ``"fastapi/schema.py.j2"``.
-        imports: :class:`~kiln_core.imports.ImportCollector`
+        imports: :class:`~foundry.imports.ImportCollector`
             accumulating all ``import`` statements for this file.
         exports: Names this file makes available (class names,
             function names) for other files to import.

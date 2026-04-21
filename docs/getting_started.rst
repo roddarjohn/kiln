@@ -3,14 +3,37 @@ Getting started
 
 This guide walks through setting up a new project with kiln from scratch.
 By the end you will have a working FastAPI application with generated
-models, routes, and auth wired together.
+routes, schemas, and (optionally) auth wired to SQLAlchemy models you
+define yourself.
+
+What kiln generates -- and doesn't
+----------------------------------
+
+kiln generates FastAPI code from a config file.  Specifically, it
+produces:
+
+* **Routes** -- one FastAPI router per resource, with handlers for the
+  CRUD operations (and custom actions) you enable.
+* **Pydantic schemas** -- request and response models for every route.
+* **Serializers** -- model-to-schema helpers used by the generated
+  handlers.
+* **An app router** -- aggregates all resource routers into one
+  ``APIRouter`` your FastAPI app can mount.
+* **A project router** *(multi-app projects only)* -- mounts every
+  app router under its configured prefix.
+* **Scaffolding** -- database session factories (one per configured
+  database) and, when auth is enabled, a ``get_current_user``
+  dependency and optional login router.
+
+kiln does **not** generate your SQLAlchemy models.  You write those
+yourself and point the config at them by dotted import path.
 
 Prerequisites
 -------------
 
 * Python 3.12+
-* A PostgreSQL database
 * `uv <https://docs.astral.sh/uv/>`_ (recommended) or pip
+* A PostgreSQL database, if you want to run the generated code
 
 Install
 -------
@@ -29,263 +52,249 @@ Verify the CLI is available::
 Project layout
 --------------
 
-Kiln generates code into an output directory of your choice.  A typical
-single-app project looks like this after generation:
+By default kiln writes all generated code into ``_generated/``
+(controlled by the ``package_prefix`` config field).  A typical
+single-app project looks like:
 
 .. code-block:: text
 
    myproject/
-   ├── app.jsonnet          # kiln config
-   ├── src/
-   │   ├── main.py          # your FastAPI entry point
-   │   ├── auth/            # generated — JWT dependency
-   │   ├── db/              # generated — base + session
-   │   └── myapp/
-   │       ├── models/      # generated — pgcraft model classes
-   │       ├── routes/      # generated — FastAPI routers
-   │       └── schemas/     # generated — Pydantic request/response models
+   ├── app.jsonnet            # kiln config
+   ├── myapp/
+   │   └── models.py          # your hand-written SQLAlchemy models
+   ├── main.py                # your FastAPI entry point
+   └── _generated/            # written by kiln (never edit)
+       ├── auth/              # get_current_user dependency
+       ├── db/                # async session factories
+       └── myapp/
+           ├── routes/        # FastAPI routers
+           ├── schemas/       # Pydantic request/response models
+           └── serializers/   # model-to-schema helpers
 
-Everything under ``src/auth/``, ``src/db/``, and ``src/myapp/`` is
-written by kiln and overwritten on every ``kiln generate`` run.  Do not
-edit those files by hand.
+Everything under ``_generated/`` is overwritten on every ``kiln
+generate`` run.  Source-control the config file and your models, not
+the generated output.
 
-Step 1 — Write a config
------------------------
+Step 1 -- Define your SQLAlchemy models
+---------------------------------------
 
-Create ``app.jsonnet`` in your project root.  Jsonnet is recommended
-over plain JSON because it supports imports, variables, and comments.
+kiln generates routes and schemas *around* SQLAlchemy models you
+define.  A minimal ``myapp/models.py``:
+
+.. code-block:: python
+
+   import uuid
+   from datetime import datetime
+
+   from sqlalchemy import DateTime, String, func
+   from sqlalchemy.dialects.postgresql import UUID
+   from sqlalchemy.orm import (
+       DeclarativeBase, Mapped, mapped_column,
+   )
+
+
+   class Base(DeclarativeBase):
+       pass
+
+
+   class Article(Base):
+       __tablename__ = "articles"
+
+       id: Mapped[uuid.UUID] = mapped_column(
+           UUID(as_uuid=True),
+           primary_key=True,
+           default=uuid.uuid4,
+       )
+       title: Mapped[str] = mapped_column(String)
+       body: Mapped[str] = mapped_column(String)
+       created_at: Mapped[datetime] = mapped_column(
+           DateTime(timezone=True),
+           server_default=func.now(),
+       )
+
+Step 2 -- Write a config
+------------------------
+
+Create ``app.jsonnet`` at your project root:
 
 .. code-block:: jsonnet
-
-   local auth  = import 'kiln/auth/jwt.libsonnet';
-   local db    = import 'kiln/db/databases.libsonnet';
-   local field = import 'kiln/models/fields.libsonnet';
-   local crud  = import 'kiln/crud/presets.libsonnet';
 
    {
      version: "1",
      module: "myapp",
-
-     auth: auth.jwt({ secret_env: "JWT_SECRET" }),
+     package_prefix: "_generated",
 
      databases: [
-       db.postgres("primary", { default: true }),
+       { key: "primary", url_env: "DATABASE_URL", default: true },
      ],
 
-     models: [
-       {
-         name: "Post",
-         table: "posts",
-         schema: "public",
-         pgcraft_type: "simple",
-         fields: [
-           field.uuid("id", primary_key=true),
-           field.str("title"),
-           field.str("body"),
-           field.bool("published"),
-           field.datetime("created_at", auto_now_add=true),
-           field.datetime("updated_at", auto_now=true),
-         ],
-         crud: crud.full({ require_auth: ["create", "update", "delete"] }),
-       },
-     ],
+     resources: [{
+       model: "myapp.models.Article",
+       pk: "id",
+       pk_type: "uuid",
+       route_prefix: "/articles",
+       require_auth: false,
+       operations: [
+         "get", "list", "create", "update", "delete",
+         {
+           name: "create",
+           fields: [
+             { name: "title", type: "str" },
+             { name: "body",  type: "str" },
+           ],
+         },
+       ],
+     }],
    }
 
-The stdlib imports (``kiln/auth/…``, ``kiln/models/…``, etc.) are
-bundled with kiln and are always available without any extra setup.
+Key points:
 
-Step 2 — Generate
------------------
+* ``model`` is the dotted import path to your SQLAlchemy class.  kiln
+  does not require a specific base class -- any SQLAlchemy
+  ``DeclarativeBase`` subclass works.
+* ``operations`` lists the operations to run for this resource.  A
+  string is shorthand for the operation with default options.  An
+  object with ``name`` carries per-operation options (here, specifying
+  exactly which fields the ``CreateRequest`` schema should expose).
+* ``databases`` produces one async session factory per entry.  Set
+  ``default: true`` on exactly one; resources omitting ``db_key`` use
+  the default.
 
-Run kiln against the config, writing output into ``src/``::
+Step 3 -- Generate
+------------------
 
-   kiln generate --config app.jsonnet --out src/
+Run kiln::
 
-Kiln creates:
+   kiln generate --config app.jsonnet
 
-* ``src/auth/dependencies.py`` — ``get_current_user`` FastAPI dependency
-* ``src/db/base.py`` — ``PGCraftBase`` subclass shared by all models
-* ``src/db/primary_session.py`` — async SQLAlchemy session factory
-* ``src/myapp/models/post.py`` — pgcraft declarative model class
-* ``src/myapp/schemas/post.py`` — Pydantic ``PostCreate``, ``PostUpdate``, ``PostResponse``
-* ``src/myapp/routes/post.py`` — FastAPI CRUD router
-* ``src/myapp/routes/__init__.py`` — aggregated router
+Output lands in ``_generated/``:
 
-Re-running ``kiln generate`` is always safe — all files are overwritten.
+.. code-block:: text
 
-Step 3 — Mount the router
--------------------------
+   _generated/
+   ├── db/
+   │   ├── __init__.py
+   │   └── primary_session.py
+   └── myapp/
+       ├── __init__.py
+       ├── routes/
+       │   ├── __init__.py          # app router
+       │   └── article.py
+       ├── schemas/
+       │   └── article.py
+       └── serializers/
+           └── article.py
 
-Create ``src/main.py`` (or add to your existing entry point):
+``--out`` overrides the output root; ``--clean`` deletes the output
+directory first.
+
+Step 4 -- Mount the router
+--------------------------
+
+Wire the generated router into your FastAPI app:
 
 .. code-block:: python
 
-   import sys
-   from pathlib import Path
-
-   # Put src/ on the path so generated packages are importable.
-   sys.path.insert(0, str(Path(__file__).parent))
-
    from fastapi import FastAPI
-   from myapp.routes import router
+
+   from _generated.myapp.routes import router
 
    app = FastAPI()
    app.include_router(router, prefix="/v1")
 
-Step 4 — Set environment variables
------------------------------------
-
-Kiln-generated auth and session code reads from environment variables::
-
-   export DATABASE_URL="postgresql+asyncpg://user:password@localhost/mydb"
-   export JWT_SECRET="your-secret-key"
-
-The variable names come from the config (``url_env`` and ``secret_env``).
-Defaults are ``DATABASE_URL`` and ``JWT_SECRET``.
-
-Step 5 — Run migrations and serve
+Step 5 -- Environment and database
 ----------------------------------
 
-Kiln generates the SQLAlchemy model classes; `pgcraft
-<https://github.com/roddarjohn/pgcraft>`_ then drives Alembic to create
-the actual database tables.  Follow the pgcraft docs to run migrations,
-then start the server::
+The generated session factory reads the URL from an environment
+variable (``url_env`` on the database config -- default
+``DATABASE_URL``)::
 
-   uvicorn main:app --reload --app-dir src/
+   export DATABASE_URL="postgresql+asyncpg://user:pw@localhost/mydb"
 
-Interactive API docs will be available at ``http://localhost:8000/docs``.
+Create the database tables with whatever migration tool you use
+(Alembic is a common choice).  kiln does not manage schema migrations.
+
+Step 6 -- Run the server
+------------------------
+
+::
+
+   uvicorn main:app --reload
+
+Interactive API docs land at ``http://localhost:8000/docs``.
+
+Adding authentication
+---------------------
+
+Add an ``auth`` block to the config to turn on JWT authentication:
+
+.. code-block:: jsonnet
+
+   {
+     ...,
+     auth: {
+       type: "jwt",
+       secret_env: "JWT_SECRET",
+       algorithm: "HS256",
+       verify_credentials_fn: "myapp.auth.verify_credentials",
+     },
+     resources: [{
+       model: "myapp.models.Article",
+       require_auth: true,  // applies to all handlers on this resource
+       ...
+     }],
+   }
+
+You provide ``verify_credentials`` -- kiln generates the rest
+(``auth/dependencies.py`` with ``get_current_user``, and
+``auth/router.py`` with a ``/auth/token`` login endpoint).
+
+Auth is implemented as a cross-cutting ``@operation`` with a
+``when`` hook -- it runs whenever both ``config.auth`` is set and
+``resource.require_auth`` is true.  No extra wiring is required on
+your end.
 
 Multi-app projects
 ------------------
 
-For projects with multiple apps (e.g. a blog and an inventory service),
-use a **project-level config** that imports each app config and assigns
-a URL prefix.
-
-Create one config file per app (``blog.jsonnet``, ``inventory.jsonnet``),
-then a top-level ``project.jsonnet``:
+For projects that bundle multiple apps (a blog API and an inventory
+API, say), wrap each app's config in an ``apps`` list:
 
 .. code-block:: jsonnet
 
-   local auth = import 'kiln/auth/jwt.libsonnet';
-   local db   = import 'kiln/db/databases.libsonnet';
-
+   // project.jsonnet
    {
-     auth: auth.jwt({ secret_env: "JWT_SECRET" }),
-
-     databases: [
-       db.postgres("primary", { default: true }),
-     ],
+     version: "1",
+     package_prefix: "_generated",
+     auth: { type: "jwt", secret_env: "JWT_SECRET", ... },
+     databases: [{ key: "primary", default: true }],
 
      apps: [
-       { config: import "blog.jsonnet",      prefix: "/blog"      },
+       { config: import "blog.jsonnet",      prefix: "/blog" },
        { config: import "inventory.jsonnet", prefix: "/inventory" },
      ],
    }
 
-Run once::
-
-   kiln generate --config project.jsonnet --out src/
-
-Kiln generates all app code plus a root ``src/routes/__init__.py`` that
-mounts each app router at its prefix.  Mount it in your FastAPI app:
+``kiln generate --config project.jsonnet`` produces the per-app code
+plus a top-level ``_generated/routes/__init__.py`` that mounts each
+app at its prefix.  Mount that in FastAPI:
 
 .. code-block:: python
 
-   from routes import router
+   from _generated.routes import router
 
    app = FastAPI()
    app.include_router(router, prefix="/v1")
 
-See the :doc:`playground` for a working multi-app example with auth,
-multiple databases, views, and a hand-written query function.
+See the :doc:`playground` for a runnable multi-app example with auth,
+multiple databases, and custom actions.
 
-Config reference
-----------------
+Where to next
+-------------
 
-Fields
-^^^^^^
-
-Defined with ``field.<type>(name, **opts)`` from
-``kiln/models/fields.libsonnet``:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 55 30
-
-   * - Helper
-     - Description
-     - Key options
-   * - ``field.uuid``
-     - UUID column
-     - ``primary_key``, ``foreign_key``, ``nullable``
-   * - ``field.str``
-     - VARCHAR / TEXT column
-     - ``unique``, ``nullable``, ``index``
-   * - ``field.email``
-     - Email string (validated in schema)
-     - ``unique``, ``nullable``
-   * - ``field.int``
-     - Integer column
-     - ``primary_key``, ``foreign_key``, ``nullable``
-   * - ``field.float``
-     - Float column
-     - ``nullable``
-   * - ``field.bool``
-     - Boolean column
-     - ``nullable``
-   * - ``field.datetime``
-     - Timestamp with timezone
-     - ``auto_now_add``, ``auto_now``, ``nullable``
-   * - ``field.date``
-     - Date column
-     - ``nullable``
-   * - ``field.json``
-     - JSONB column
-     - ``nullable``
-
-CRUD presets
-^^^^^^^^^^^^
-
-Defined with ``crud.<preset>(opts)`` from ``kiln/crud/presets.libsonnet``:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 75
-
-   * - Preset
-     - Operations enabled
-   * - ``crud.full``
-     - create, read, update, delete, list
-   * - ``crud.read_only``
-     - read, list
-   * - ``crud.no_list``
-     - create, read, update, delete
-   * - ``crud.write_only``
-     - create, update, delete
-
-Pass ``require_auth: ["create", "update", "delete"]`` in ``opts`` to
-require a valid JWT for specific operations.
-
-pgcraft model types
-^^^^^^^^^^^^^^^^^^^
-
-Set via ``pgcraft_type`` on a model:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 75
-
-   * - Type
-     - Description
-   * - ``simple``
-     - Standard dimension table (default)
-   * - ``append_only``
-     - Immutable ledger — no update or delete at the DB level
-   * - ``ledger``
-     - Double-entry ledger with balance tracking
-   * - ``eav``
-     - Entity–attribute–value table
-
-See the `pgcraft docs <https://github.com/roddarjohn/pgcraft>`_ for
-details on what each type generates in PostgreSQL.
+* :doc:`usage` -- day-to-day usage patterns and the full config shape.
+* :doc:`extending` -- add your own operations, renderers, or
+  generators.
+* :doc:`architecture` -- how the engine, scopes, operations, and
+  renderers fit together.
+* :doc:`reference` -- the exhaustive config reference.

@@ -2,9 +2,9 @@
 async def get_{{ model_lower }}(
     {{ pk_name }}: {{ pk_py_type }},
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% if has_auth and requires_auth %}
-    current_user: Annotated[dict, Depends(get_current_user)],
-{% endif %}
+{% for dep in extra_deps|default([]) %}
+    {{ dep }}
+{% endfor %}
 ) -> {% if has_resource_schema %}{{ model_name }}Resource{% else %}object{% endif %}:
     """Get a {{ model_name }} by {{ pk_name }}."""
     obj = await get_object_from_query_or_404(

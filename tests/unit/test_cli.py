@@ -5,8 +5,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from foundry import GeneratedFile, write_files
 from kiln.cli import app
-from kiln_core import GeneratedFile, write_files
 
 runner = CliRunner()
 

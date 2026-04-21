@@ -1,9 +1,9 @@
 @router.{{ http_method }}("{{ route_path }}", response_model={{ response_model }})
 async def list_{{ model_lower }}(
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% if has_auth and requires_auth %}
-    current_user: Annotated[dict, Depends(get_current_user)],
-{% endif %}
+{% for dep in extra_deps|default([]) %}
+    {{ dep }}
+{% endfor %}
 {% for param in extra_params %}
     {{ param }}
 {% endfor %}

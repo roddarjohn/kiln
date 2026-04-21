@@ -7,9 +7,9 @@ from typing import Annotated
 
 import typer
 
+from foundry.output import write_files
 from kiln.config.loader import load
-from kiln.generators.generate import generate
-from kiln_core.output import write_files
+from kiln.renderers.generate import generate
 
 app = typer.Typer(help="CLI for autogenerating FastAPI + pgcraft files.")
 

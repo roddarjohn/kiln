@@ -1,183 +1,269 @@
 Usage
 =====
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+This page covers day-to-day usage of the ``kiln`` CLI.  For a
+walkthrough of a brand-new project, see :doc:`getting_started`.  For
+the complete config schema, see :doc:`reference`.
+
 Install
 -------
 
 .. code-block:: bash
 
-   pip install kiln            # or: uv add kiln
+   pip install kiln-generator  # or: uv add kiln-generator
 
-Kiln generates FastAPI routes and `pgcraft <https://github.com/roddarjohn/pgcraft>`_
-model definitions from a declarative config file.  pgcraft then drives
-Alembic migrations and PostgreSQL DDL (tables, views, triggers, functions).
+The CLI
+-------
 
-Quick start
------------
+``kiln generate``
+^^^^^^^^^^^^^^^^^
 
-1. **Scaffold** the one-time boilerplate into your app directory::
+.. code-block:: text
 
-      kiln init --out ./src/app
+   kiln generate --config PATH [--out DIR] [--clean]
 
-   This creates:
+``--config / -c`` *(required)*
+    Path to the ``.json`` or ``.jsonnet`` config file.
+``--out / -o`` *(optional)*
+    Output root directory.  Defaults to the config's
+    ``package_prefix`` value (e.g. ``_generated``).  Set
+    ``package_prefix: ""`` in the config to write directly into the
+    current directory.
+``--clean``
+    Delete ``--out`` before generating.  Useful when you remove a
+    resource from the config -- without ``--clean`` the previously
+    generated files for that resource stay on disk.
 
-   * ``auth/dependencies.py`` — JWT ``get_current_user`` FastAPI dependency
-   * ``db/base.py`` — ``PGCraftBase`` subclass shared by all models
-   * ``db/session.py`` — async SQLAlchemy session factory
-
-2. **Write a config file** (``myapp.jsonnet`` or ``myapp.json``):
-
-   .. code-block:: jsonnet
-
-      local auth  = import 'kiln/auth/jwt.libsonnet';
-      local field = import 'kiln/models/fields.libsonnet';
-      local crud  = import 'kiln/crud/presets.libsonnet';
-
-      {
-        version: "1",
-        module: "app",
-        auth: auth.jwt({ secret_env: "JWT_SECRET" }),
-
-        models: [{
-          name: "Post",
-          table: "posts",
-          schema: "public",
-          pgcraft_type: "simple",
-          fields: [
-            field.uuid("id", primary_key=true),
-            field.str("title"),
-            field.uuid("author_id", foreign_key="users.id"),
-          ],
-          crud: crud.full({ require_auth: ["create", "update", "delete"] }),
-        }],
-      }
-
-3. **Generate** the model and route files::
-
-      kiln generate --config myapp.jsonnet --out ./src/app
-
-   This creates or updates:
-
-   * ``db/models/post.py`` — pgcraft declarative model
-   * ``api/routes/post.py`` — FastAPI CRUD router with Pydantic schemas
-   * ``api/__init__.py`` — aggregating router (``from app.api import router``)
-
-4. **Mount** the generated router in your FastAPI app:
-
-   .. code-block:: python
-
-      from fastapi import FastAPI
-      from app.api import router
-
-      app = FastAPI()
-      app.include_router(router)
-
-Re-running ``kiln generate`` is safe: model and route files are always
-refreshed; pgcraft stub files (``db/views/``) are never overwritten so
-hand-written SQL is preserved.
+Re-running ``kiln generate`` is always safe: every generated file is
+overwritten.  Never edit files under the output directory -- the next
+run will discard your changes.
 
 Config format
 -------------
 
-Kiln supports ``.json`` and ``.jsonnet`` config files.  Jsonnet is
-recommended because it allows imports, variables, and composition.
+kiln accepts ``.json`` and ``.jsonnet`` files.  Jsonnet is
+recommended: imports, variables, and array concatenation make it much
+more ergonomic for sharing common patterns across resources.
 
-The bundled stdlib (importable as ``kiln/...``) provides helpers:
-
-* ``kiln/auth/jwt.libsonnet`` — JWT auth preset
-* ``kiln/models/fields.libsonnet`` — field constructors (``uuid``, ``str``, ``email``, …)
-* ``kiln/crud/presets.libsonnet`` — CRUD presets (``full``, ``read_only``, …)
-
-The full config schema is documented in
-:mod:`kiln.config.schema`.
-
-Views and database functions
-----------------------------
-
-Kiln can also generate FastAPI routes that query **views** or
-**set-returning functions** managed by pgcraft.
-
-Add a ``views`` entry to the config:
+Minimal single-resource config
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: jsonnet
 
-   views: [
-     // Non-parameterised view  →  PGCraftViewMixin stub + SELECT route
-     {
-       name: "active_users",
-       model: "User",
-       schema: "public",
-       returns: [
-         { name: "id",    type: "uuid" },
-         { name: "email", type: "str"  },
-       ],
+   {
+     version: "1",
+     module: "myapp",
+     resources: [{
+       model: "myapp.models.Article",
+       operations: ["get", "list", "create", "update", "delete"],
+     }],
+   }
+
+Full config with auth and multiple databases
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: jsonnet
+
+   {
+     version: "1",
+     module: "blog",
+     package_prefix: "_generated",
+
+     auth: {
+       type: "jwt",
+       secret_env: "JWT_SECRET",
+       verify_credentials_fn: "blog.auth.verify_credentials",
      },
 
-     // Parameterised function  →  PGCraftFunctionMixin stub + func route
+     databases: [
+       { key: "primary",   url_env: "DATABASE_URL",  default: true },
+       { key: "analytics", url_env: "ANALYTICS_URL", echo: true },
+     ],
+
+     operations: ["get", "list", "create", "update", "delete"],
+
+     resources: [
+       {
+         model: "blog.models.Article",
+         require_auth: true,
+         generate_tests: true,
+       },
+       {
+         model: "blog.models.ReadStat",
+         db_key: "analytics",
+         operations: ["get", "list"],
+       },
+     ],
+   }
+
+Notes on inheritance:
+
+* ``operations`` at the root is the default applied to every resource
+  that does not set its own ``operations`` list.
+* ``databases`` is configured once at the root; resources choose one
+  via ``db_key`` (or fall back to the database with ``default: true``).
+* ``auth`` is configured once at the root; each resource opts in via
+  ``require_auth`` (defaults to ``True``).
+
+Operations
+----------
+
+Each entry in a resource's ``operations`` list is either:
+
+* **A string**, the operation name -- invokes the operation with
+  default options.
+
+  .. code-block:: jsonnet
+
+     operations: ["get", "list", "create", "update", "delete"]
+
+* **An object**, carrying per-operation options:
+
+  .. code-block:: jsonnet
+
      {
-       name: "summarize_posts_by_user",
-       model: "Post",
-       description: "Count posts per user in a date range.",
-       schema: "public",
-       http_method: "GET",
-       require_auth: true,
-       parameters: [
-         { name: "start_date", type: "date" },
-         { name: "end_date",   type: "date" },
+       name: "create",
+       fields: [
+         { name: "title", type: "str" },
+         { name: "body",  type: "str" },
        ],
-       returns: [
-         { name: "user_id",    type: "uuid" },
-         { name: "post_count", type: "int"  },
-       ],
-     },
-   ],
+     }
 
-Kiln generates:
+  Extra keys (``fields``, ``max_items``, …) are parsed by the
+  operation's ``Options`` Pydantic model, so validation errors surface
+  during config load rather than at generation time.
 
-* ``db/views/<name>.py`` (``overwrite=False``) — fill in the pgcraft
-  ``__query__`` or ``register_function`` definition, then run pgcraft
-  migrations.
-* ``api/views/<name>.py`` — FastAPI route that queries the named database
-  object.  No SQL appears in the route file:
+* **An action**, invoking a custom Python function as a POST
+  endpoint:
 
-  * Views: ``select(view_table)``
-  * Functions: ``func.<schema>.<name>(params).table_valued(cols)``
+  .. code-block:: jsonnet
 
-Extending kiln
+     {
+       name: "publish",
+       fn: "blog.actions.publish",
+       params: [{ name: "at", type: "datetime" }],
+     }
+
+  kiln generates a ``POST /{id}/publish`` handler that calls
+  ``blog.actions.publish``.
+
+Built-in operations
+-------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 60
+
+   * - Name
+     - Scope
+     - Output
+   * - ``scaffold``
+     - project
+     - ``db/*_session.py``, ``auth/dependencies.py``, ``auth/router.py``
+   * - ``utils``
+     - app
+     - ``utils.py`` helpers used by generated routes
+   * - ``get``
+     - resource
+     - GET /{pk} route handler + response schema
+   * - ``list``
+     - resource
+     - GET / route handler + list/filter/sort/paginate schemas
+   * - ``create``
+     - resource
+     - POST / route handler + request schema
+   * - ``update``
+     - resource
+     - PATCH /{pk} route handler + request schema
+   * - ``delete``
+     - resource
+     - DELETE /{pk} route handler
+   * - ``action``
+     - resource
+     - POST /{pk}/{slug} or POST /{slug} handler for a custom action
+   * - ``auth``
+     - resource
+     - Augments handlers with ``current_user`` dependency (runs only
+       when ``config.auth`` is set and resource opts in)
+   * - ``router``
+     - app
+     - App-level ``routes/__init__.py`` that includes every resource
+       router
+   * - ``project_router``
+     - project
+     - Project-level ``routes/__init__.py`` that mounts every app
+       router (multi-app projects only)
+
+Multi-app projects
+------------------
+
+Wrap each app's config in an ``apps`` entry:
+
+.. code-block:: jsonnet
+
+   // project.jsonnet
+   {
+     version: "1",
+     auth: { ... },
+     databases: [ ... ],
+     apps: [
+       { config: import "blog.jsonnet",      prefix: "/blog" },
+       { config: import "inventory.jsonnet", prefix: "/inventory" },
+     ],
+   }
+
+Top-level ``auth``, ``databases``, and ``operations`` are merged into
+each app config during generation.  Individual apps can still override
+these by defining their own blocks.
+
+Jsonnet stdlib
 --------------
 
-Custom generators can be installed as Python packages and registered
-via the ``kiln.generators`` entry-point group:
+kiln bundles a small Jsonnet stdlib that is importable from any config
+file without a path prefix (the ``kiln`` prefix resolves to the stdlib
+directory shipped inside the package).
 
-.. code-block:: toml
+See :doc:`reference` for the full stdlib list.  The most common:
 
-   [project.entry-points."kiln.generators"]
-   typescript = "my_package.generators:TypeScriptClientGenerator"
+* ``kiln/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
+* ``kiln/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
 
-The class must implement the
-:class:`~kiln.generators.base.Generator` protocol and accept no
-constructor arguments.  It is instantiated automatically by
-:meth:`~kiln.generators.registry.GeneratorRegistry.discover_entry_points`
-and included in every ``kiln generate`` run.
+Testing the generated code
+--------------------------
 
-See :mod:`kiln.generators.base` for the full protocol definition.
+Setting ``generate_tests: true`` on a resource emits a pytest file
+under ``_generated/.../tests/test_{name}.py``.  The file contains one
+test per generated operation; run them with pytest as usual::
+
+   uv run pytest _generated/
 
 API versioning
 --------------
 
-Kiln has no built-in ``--version`` flag.  To maintain multiple API
-versions, run ``kiln generate`` into separate output directories and
-mount each router at a different prefix:
+kiln has no built-in ``--version`` flag.  To maintain multiple API
+versions, run ``kiln generate`` against separate configs into separate
+output trees and mount each at a different prefix:
 
 .. code-block:: bash
 
-   kiln generate --config v1.jsonnet --out ./src/app_v1
-   kiln generate --config v2.jsonnet --out ./src/app_v2
+   kiln generate --config v1.jsonnet --out _generated_v1/
+   kiln generate --config v2.jsonnet --out _generated_v2/
 
 .. code-block:: python
 
-   from app_v1.api import router as v1_router
-   from app_v2.api import router as v2_router
+   from _generated_v1.myapp.routes import router as v1_router
+   from _generated_v2.myapp.routes import router as v2_router
 
    app.include_router(v1_router, prefix="/v1")
    app.include_router(v2_router, prefix="/v2")
+
+Extending kiln
+--------------
+
+To add your own operations, swap renderers, or build an entirely new
+target, see :doc:`extending`.  For the underlying architecture, see
+:doc:`architecture`.

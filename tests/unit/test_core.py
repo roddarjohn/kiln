@@ -1,8 +1,8 @@
-"""Tests for kiln_core primitives."""
+"""Tests for foundry primitives."""
 
 import pytest
 
-from kiln_core import (
+from foundry import (
     FileSpec,
     GeneratedFile,
     ImportCollector,

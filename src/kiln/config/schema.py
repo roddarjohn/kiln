@@ -84,15 +84,13 @@ class FieldSpec(BaseModel):
 
 
 class OperationConfig(BaseModel):
-    """Configuration for a single pipeline operation.
+    """Configuration for a single operation.
 
     Known fields (``name``, ``require_auth``) are parsed normally.
     All other keys are collected into :attr:`options` via Pydantic's
     ``extra="allow"`` setting and passed to the operation's
-    :meth:`~kiln.generators.fastapi.operations.Operation.validate`
-    and
-    :meth:`~kiln.generators.fastapi.operations.Operation.contribute`
-    methods.
+    ``Options`` model (see
+    :func:`foundry.operation.operation`).
 
     Examples::
 

@@ -2,7 +2,7 @@
 
 Creates a module-level :data:`env` using kiln's bundled template
 directory and provides a convenience :func:`render_snippet` that
-delegates to :func:`kiln_core.env.render_snippet` with the
+delegates to :func:`foundry.env.render_snippet` with the
 pre-configured environment.
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kiln_core.env import create_jinja_env
-from kiln_core.env import render_snippet as _core_render_snippet
+from foundry.env import create_jinja_env
+from foundry.env import render_snippet as _core_render_snippet
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 

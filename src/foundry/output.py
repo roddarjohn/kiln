@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from kiln_core.spec import GeneratedFile
+    from foundry.spec import GeneratedFile
 
 
 def write_files(
