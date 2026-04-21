@@ -9,11 +9,8 @@ from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
 from kiln.generators._helpers import PYTHON_TYPES
-from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
-    build_handler_fragment,
-)
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment, utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -25,8 +22,6 @@ if TYPE_CHECKING:
 @dataclass
 class DeleteRoute(RouteHandler):
     """Route handler emitted by the :class:`Delete` operation."""
-
-    op_name: str = "delete"
 
 
 @operation("delete", scope="resource", requires=["update"])
@@ -48,37 +43,37 @@ class Delete:
             The route handler and a test case.
 
         """
-        resource = ctx.instance
-        _, model = Name.from_dotted(resource.model)
-        pk_name = resource.pk
-        pk_py_type = PYTHON_TYPES[resource.pk_type]
+        _, model = Name.from_dotted(ctx.instance.model)
 
-        handler = DeleteRoute(
+        yield DeleteRoute(
             method="DELETE",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             function_name=f"delete_{model.lower}",
+            params=[
+                RouteParam(
+                    name=ctx.instance.pk,
+                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                )
+            ],
             status_code=204,
-            doc=f"Delete a {model.pascal} by {pk_name}.",
+            doc=f"Delete a {model.pascal} by {ctx.instance.pk}.",
         )
-        handler.params.append(RouteParam(name=pk_name, annotation=pk_py_type))
-        yield handler
 
         yield TestCase(
             op_name="delete",
             method="delete",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             status_success=204,
             status_not_found=404,
         )
 
 
-@FASTAPI_REGISTRY.renders(DeleteRoute, tags=FASTAPI_TAGS)
-def _render(h: DeleteRoute, ctx: RenderCtx) -> Fragment:
+@registry.renders(DeleteRoute)
+def _render(handler: DeleteRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/delete.py.j2",
         body_extra={},
-        sql_verb="delete",
-        needs_utils=True,
+        extra_imports=[("sqlalchemy", "delete"), *utils_imports(ctx)],
     )

@@ -96,7 +96,6 @@ class RouteHandler:
     method: str
     path: str
     function_name: str
-    op_name: str = ""
     params: list[RouteParam] = field(default_factory=list)
     body_param: str | None = None
     request_schema: str | None = None

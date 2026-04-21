@@ -16,11 +16,8 @@ from foundry.outputs import (
 )
 from kiln.generators._helpers import PYTHON_TYPES
 from kiln.operations._shared import FieldsOptions, _field_dicts
-from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
-    build_handler_fragment,
-)
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment, utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -32,8 +29,6 @@ if TYPE_CHECKING:
 @dataclass
 class UpdateRoute(RouteHandler):
     """Route handler emitted by the :class:`Update` operation."""
-
-    op_name: str = "update"
 
 
 @operation("update", scope="resource", requires=["create"])
@@ -58,10 +53,7 @@ class Update:
             optional), the route handler, and a test case.
 
         """
-        resource = ctx.instance
-        _, model = Name.from_dotted(resource.model)
-        pk_name = resource.pk
-        pk_py_type = PYTHON_TYPES[resource.pk_type]
+        _, model = Name.from_dotted(ctx.instance.model)
         request_schema = model.suffixed("UpdateRequest")
 
         yield SchemaClass(
@@ -73,20 +65,24 @@ class Update:
             doc=f"Request body for updating a {model.pascal}.",
         )
 
-        handler = UpdateRoute(
+        yield UpdateRoute(
             method="PATCH",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             function_name=f"update_{model.lower}",
-            doc=f"Update a {model.pascal} by {pk_name}.",
+            params=[
+                RouteParam(
+                    name=ctx.instance.pk,
+                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                )
+            ],
+            doc=f"Update a {model.pascal} by {ctx.instance.pk}.",
             request_schema=request_schema,
         )
-        handler.params.append(RouteParam(name=pk_name, annotation=pk_py_type))
-        yield handler
 
         yield TestCase(
             op_name="update",
             method="patch",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             status_success=200,
             status_not_found=404,
             status_invalid=422,
@@ -95,13 +91,12 @@ class Update:
         )
 
 
-@FASTAPI_REGISTRY.renders(UpdateRoute, tags=FASTAPI_TAGS)
+@registry.renders(UpdateRoute)
 def _render(h: UpdateRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
         h,
         ctx,
         body_template="fastapi/ops/update.py.j2",
         body_extra={},
-        sql_verb="update",
-        needs_utils=True,
+        extra_imports=[("sqlalchemy", "update"), *utils_imports(ctx)],
     )

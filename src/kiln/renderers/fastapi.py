@@ -33,24 +33,15 @@ from foundry.outputs import (
     StaticFile,
     TestCase,
 )
-from foundry.render import Fragment, RenderRegistry
+from foundry.render import Fragment
 from kiln.generators._env import render_snippet
 from kiln.generators._helpers import PYTHON_TYPES, resolve_db_session
+from kiln.renderers import registry
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from foundry.render import RenderCtx
-
-FASTAPI_TAGS = {"framework": "fastapi"}
-
-# Module-level singleton registry.  Importing this module registers
-# every built-in renderer below; importing an op module from
-# :mod:`kiln.operations` registers that op's handler renderer.  This
-# mirrors alembic's ``@Operations.register_operation`` pattern: a
-# plugin self-registers on import, with no explicit ``register_*``
-# call required.
-FASTAPI_REGISTRY = RenderRegistry(active_tags=dict(FASTAPI_TAGS))
 
 
 # -------------------------------------------------------------------
@@ -117,14 +108,14 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
 # -------------------------------------------------------------------
 # Built-in renderers -- register at module import time against the
-# shared :data:`FASTAPI_REGISTRY`.  Op-specific RouteHandler
+# shared :data:`~kiln.renderers.registry`.  Op-specific RouteHandler
 # subclasses decorate their own module's renderer against the same
 # registry; those registrations fire when the op module is imported
 # (e.g. via entry points in the generate pipeline).
 # -------------------------------------------------------------------
 
 
-@FASTAPI_REGISTRY.renders(SchemaClass, tags=FASTAPI_TAGS)
+@registry.renders(SchemaClass)
 def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Fragment:
     info = _resource_info(ctx)
     rendered = render_schema_class(schema)
@@ -143,7 +134,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Fragment:
     )
 
 
-@FASTAPI_REGISTRY.renders(EnumClass, tags=FASTAPI_TAGS)
+@registry.renders(EnumClass)
 def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Fragment:
     info = _resource_info(ctx)
     rendered = render_enum_class(enum)
@@ -162,8 +153,10 @@ def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Fragment:
     )
 
 
-@FASTAPI_REGISTRY.renders(RouteHandler, tags=FASTAPI_TAGS)
-def _generic_handler_fragment(h: RouteHandler, ctx: RenderCtx) -> Fragment:
+@registry.renders(RouteHandler)
+def _generic_handler_fragment(
+    handler: RouteHandler, ctx: RenderCtx
+) -> Fragment:
     """Fallback renderer for plain RouteHandler instances.
 
     Op-specific subclasses (:class:`GetRoute`, :class:`ListRoute`,
@@ -171,10 +164,10 @@ def _generic_handler_fragment(h: RouteHandler, ctx: RenderCtx) -> Fragment:
     op template.  Handlers that reach this function have
     ``body_lines`` already populated and are rendered as-is.
     """
-    return build_handler_fragment(h, ctx)
+    return build_handler_fragment(handler, ctx)
 
 
-@FASTAPI_REGISTRY.renders(SerializerFn, tags=FASTAPI_TAGS)
+@registry.renders(SerializerFn)
 def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
     info = _resource_info(ctx)
     rendered = render_serializer(ser)
@@ -207,7 +200,7 @@ def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
     return [serializer_fragment, test_aux]
 
 
-@FASTAPI_REGISTRY.renders(TestCase, tags=FASTAPI_TAGS)
+@registry.renders(TestCase)
 def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> list[Fragment]:
     info = _resource_info(ctx)
     if not info.generate_tests:
@@ -225,7 +218,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> list[Fragment]:
     ]
 
 
-@FASTAPI_REGISTRY.renders(StaticFile, tags=FASTAPI_TAGS)
+@registry.renders(StaticFile)
 def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Fragment:
     return Fragment(
         path=sf.path,
@@ -239,30 +232,44 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Fragment:
 # -------------------------------------------------------------------
 
 
-def build_handler_fragment(  # noqa: PLR0913
-    h: RouteHandler,
+def utils_imports(ctx: RenderCtx) -> list[tuple[str, str]]:
+    """Return import pairs for the generated ``utils`` module.
+
+    The three CRUD ops that load-or-404 a row (get, update,
+    delete) all need ``get_object_from_query_or_404`` and
+    ``assert_rowcount``; this centralizes the pair.
+    """
+    utils_mod = prefix_import(ctx.package_prefix, "utils")
+    return [
+        (utils_mod, "get_object_from_query_or_404"),
+        (utils_mod, "assert_rowcount"),
+    ]
+
+
+def build_handler_fragment(
+    handler: RouteHandler,
     ctx: RenderCtx,
     *,
     body_template: str | None = None,
     body_extra: dict[str, object] | None = None,
-    sql_verb: str | None = None,
-    needs_utils: bool = False,
+    extra_imports: Iterable[tuple[str, str]] = (),
 ) -> Fragment:
     """Build a :class:`Fragment` for one route handler.
 
+    Op-specific imports (sqlalchemy verbs, generated utils, ...)
+    are the renderer's concern, not the shared builder's.  Each
+    op renderer passes them via ``extra_imports``.
+
     Args:
-        h: The handler to render.
+        handler: The handler to render.
         ctx: Current render context.
         body_template: Path to the op-specific body template.
             ``None`` falls back to :func:`_render_handler_string`,
             which emits the handler's own ``body_lines`` verbatim.
         body_extra: Extra template variables merged on top of
             the shared handler context.
-        sql_verb: SQLAlchemy verb (``"select"``, ``"insert"``,
-            ``"update"``, ``"delete"``) the body needs, or
-            ``None`` to skip the sqlalchemy import.
-        needs_utils: Whether the body uses helpers from the
-            generated ``utils`` module.
+        extra_imports: ``(module, name)`` pairs the op renderer
+            needs on top of the handler-derived imports.
 
     Returns:
         A fragment targeting ``<app>/routes/<model>.py`` with
@@ -271,7 +278,8 @@ def build_handler_fragment(  # noqa: PLR0913
     """
     info = _resource_info(ctx)
     if body_template is None:
-        rendered = _render_handler_string(h)
+        rendered = _render_handler_string(handler)
+
     else:
         common: dict[str, object] = {
             "model_name": info.model.pascal,
@@ -280,14 +288,17 @@ def build_handler_fragment(  # noqa: PLR0913
             "pk_py_type": info.pk_py_type,
             "get_db_fn": info.get_db_fn,
             "route_prefix": info.route_prefix,
-            "extra_deps": h.extra_deps,
+            "extra_deps": handler.extra_deps,
         }
+
         rendered = ctx.env.get_template(body_template).render(
             **common, **(body_extra or {})
         )
-    imports = _handler_imports(
-        h, info, sql_verb=sql_verb, needs_utils=needs_utils
-    )
+
+    imports = _handler_imports(handler, info)
+    for module, name in extra_imports:
+        imports.add_from(module, name)
+
     return Fragment(
         path=f"{info.app}/routes/{info.model.lower}.py",
         shell_template="fastapi/route.py.j2",
@@ -431,14 +442,14 @@ def _status_suffix(code: int | None) -> str | None:
     return mapping.get(code)
 
 
-def _response_schema_name(h: RouteHandler) -> str | None:
+def _response_schema_name(handler: RouteHandler) -> str | None:
     """Return the schema class referenced by the handler's response_model.
 
     Unwraps a single ``list[...]`` envelope so callers get the
     inner class name regardless of whether the handler returns
     one object or a list of objects.
     """
-    rm = h.response_model
+    rm = handler.response_model
     if not rm:
         return None
     if rm.startswith("list[") and rm.endswith("]"):
@@ -453,21 +464,19 @@ def _response_schema_name(h: RouteHandler) -> str | None:
 
 
 def _handler_imports(
-    h: RouteHandler,
+    handler: RouteHandler,
     info: _ResourceInfo,
-    *,
-    sql_verb: str | None = None,
-    needs_utils: bool = False,
 ) -> ImportCollector:
     """Compute the imports contributed by a single route handler.
 
-    Base imports (APIRouter, Annotated, session, model) are
-    always added; per-handler imports are derived from the
-    handler's fields (status code, response_model).  The caller
-    supplies the sqlalchemy verb and whether the body uses the
-    generated utils module -- both are op-specific and owned by
-    each op's renderer.  Auth imports come from the auth op via
-    ``extra_imports``.
+    Covers only what is derivable from the handler and its
+    resource: the always-present fastapi/sqlalchemy scaffolding,
+    the model and pk-type imports, and anything the handler
+    carries directly (status code, request/response schema,
+    serializer, ``extra_imports``).  Op-specific imports
+    (sqlalchemy verbs, generated utils) are owned by the op
+    renderer and added via :func:`build_handler_fragment`'s
+    ``extra_imports`` argument.
     """
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
@@ -480,37 +489,28 @@ def _handler_imports(
     session_mod = prefix_import(info.pkg, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
 
-    if h.status_code in (201, 204):
+    if handler.status_code in (201, 204):
         imports.add_from("starlette", "status")
 
-    if sql_verb:
-        imports.add_from("sqlalchemy", sql_verb)
-    if needs_utils:
-        imports.add_from(
-            prefix_import(info.pkg, "utils"),
-            "get_object_from_query_or_404",
-            "assert_rowcount",
-        )
-
-    if h.request_schema:
+    if handler.request_schema:
         schema_mod = prefix_import(
             info.pkg, info.app, "schemas", info.model.lower
         )
-        imports.add_from(schema_mod, h.request_schema)
+        imports.add_from(schema_mod, handler.request_schema)
 
-    response_schema = _response_schema_name(h)
+    response_schema = _response_schema_name(handler)
     if response_schema:
         schema_mod = prefix_import(
             info.pkg, info.app, "schemas", info.model.lower
         )
         imports.add_from(schema_mod, response_schema)
-    if h.serializer_fn:
+    if handler.serializer_fn:
         serializer_mod = prefix_import(
             info.pkg, info.app, "serializers", info.model.lower
         )
-        imports.add_from(serializer_mod, h.serializer_fn)
+        imports.add_from(serializer_mod, handler.serializer_fn)
 
-    for module, name in h.extra_imports:
+    for module, name in handler.extra_imports:
         imports.add_from(module, name)
 
     return imports

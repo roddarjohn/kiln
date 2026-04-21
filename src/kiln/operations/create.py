@@ -9,11 +9,8 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, SchemaClass, TestCase
 from kiln.operations._shared import FieldsOptions, _field_dicts
-from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
-    build_handler_fragment,
-)
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -25,8 +22,6 @@ if TYPE_CHECKING:
 @dataclass
 class CreateRoute(RouteHandler):
     """Route handler emitted by the :class:`Create` operation."""
-
-    op_name: str = "create"
 
 
 @operation("create", scope="resource", requires=["list"])
@@ -80,13 +75,12 @@ class Create:
         )
 
 
-@FASTAPI_REGISTRY.renders(CreateRoute, tags=FASTAPI_TAGS)
-def _render(h: CreateRoute, ctx: RenderCtx) -> Fragment:
+@registry.renders(CreateRoute)
+def _render(handler: CreateRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/create.py.j2",
         body_extra={},
-        sql_verb="insert",
-        needs_utils=False,
+        extra_imports=[("sqlalchemy", "insert")],
     )

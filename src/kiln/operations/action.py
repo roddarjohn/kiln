@@ -11,11 +11,8 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
 from kiln.operations._introspect import introspect_action_fn
-from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
-    build_handler_fragment,
-)
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -27,8 +24,6 @@ if TYPE_CHECKING:
 @dataclass
 class ActionRoute(RouteHandler):
     """Route handler emitted by the :class:`Action` operation."""
-
-    op_name: str = "action"
 
 
 @operation("action", scope="resource")
@@ -55,13 +50,11 @@ class Action:
             The route handler and a test case.
 
         """
-        resource = ctx.instance
         action_name = Name(ctx.instance_id)
-        info = introspect_action_fn(options.fn, resource.model)
+        info = introspect_action_fn(options.fn, ctx.instance.model)
 
-        pk_name = resource.pk
         if info.is_object_action:
-            path = f"/{{{pk_name}}}/{action_name.slug}"
+            path = f"/{{{ctx.instance.pk}}}/{action_name.slug}"
         else:
             path = f"/{action_name.slug}"
 
@@ -87,19 +80,17 @@ class Action:
         )
 
 
-@FASTAPI_REGISTRY.renders(ActionRoute, tags=FASTAPI_TAGS)
-def _render(h: ActionRoute, ctx: RenderCtx) -> Fragment:
+@registry.renders(ActionRoute)
+def _render(handler: ActionRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/action.py.j2",
         body_extra={
-            "function_name": h.function_name,
-            "method": h.method.lower(),
-            "path": h.path,
-            "response_class": h.response_model,
-            "request_class": h.request_schema,
+            "function_name": handler.function_name,
+            "method": handler.method.lower(),
+            "path": handler.path,
+            "response_class": handler.response_model,
+            "request_class": handler.request_schema,
         },
-        sql_verb=None,
-        needs_utils=False,
     )

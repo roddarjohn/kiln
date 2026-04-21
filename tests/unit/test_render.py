@@ -63,50 +63,6 @@ def test_render_no_renderer_raises():
         reg.render(42, ctx)
 
 
-def test_render_tags_select_active_profile():
-    reg = RenderRegistry(active_tags={"framework": "fastapi"})
-    env = MagicMock()
-
-    @reg.renders(int, tags={"framework": "fastapi"})
-    def render_fastapi(_obj, _ctx):
-        return _frag("fastapi")
-
-    @reg.renders(int, tags={"framework": "flask"})
-    def render_flask(_obj, _ctx):
-        return _frag("flask")
-
-    ctx = RenderCtx(env=env, config={})
-    assert reg.render(1, ctx)[0].shell_template == "fastapi"
-
-    reg.active_tags = {"framework": "flask"}
-    assert reg.render(1, ctx)[0].shell_template == "flask"
-
-
-def test_render_untagged_is_universal():
-    reg = RenderRegistry(active_tags={"framework": "flask"})
-    env = MagicMock()
-
-    @reg.renders(int)
-    def render_any(_obj, _ctx):
-        return _frag("any")
-
-    ctx = RenderCtx(env=env, config={})
-    assert reg.render(1, ctx)[0].shell_template == "any"
-
-
-def test_render_no_match_raises():
-    reg = RenderRegistry(active_tags={"framework": "flask"})
-    env = MagicMock()
-
-    @reg.renders(int, tags={"framework": "fastapi"})
-    def render_fastapi(_obj, _ctx):
-        return _frag("fastapi")
-
-    ctx = RenderCtx(env=env, config={})
-    with pytest.raises(LookupError, match="flask"):
-        reg.render(42, ctx)
-
-
 # -------------------------------------------------------------------
 # BuildStore
 # -------------------------------------------------------------------

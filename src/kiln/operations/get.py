@@ -9,12 +9,16 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
 from kiln.generators._helpers import PYTHON_TYPES
-from kiln.operations._shared import FieldsOptions, _read_schema_outputs
+from kiln.operations._shared import (
+    FieldsOptions,
+    _construct_response_schema,
+    _construct_serializer,
+)
+from kiln.renderers import registry
 from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
     _response_schema_name,
     build_handler_fragment,
+    utils_imports,
 )
 
 if TYPE_CHECKING:
@@ -27,8 +31,6 @@ if TYPE_CHECKING:
 @dataclass
 class GetRoute(RouteHandler):
     """Route handler emitted by the :class:`Get` operation."""
-
-    op_name: str = "get"
 
 
 @operation("get", scope="resource")
@@ -53,50 +55,49 @@ class Get:
             route handler, and a test case.
 
         """
-        resource = ctx.instance
-        _, model = Name.from_dotted(resource.model)
-        pk_name = resource.pk
-        pk_py_type = PYTHON_TYPES[resource.pk_type]
+        _, model = Name.from_dotted(ctx.instance.model)
 
-        schema, serializer = _read_schema_outputs(
-            model, options.fields, "Resource", "resource"
-        )
+        schema = _construct_response_schema(model, options.fields, "Resource")
+        serializer = _construct_serializer(model, schema, "resource")
 
         yield schema
         yield serializer
 
-        handler = GetRoute(
+        yield GetRoute(
             method="GET",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             function_name=f"get_{model.lower}",
+            params=[
+                RouteParam(
+                    name=ctx.instance.pk,
+                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                )
+            ],
             response_model=schema.name,
             serializer_fn=serializer.function_name,
             return_type=schema.name,
-            doc=f"Get a {model.pascal} by {pk_name}.",
+            doc=f"Get a {model.pascal} by {ctx.instance.pk}.",
         )
-        handler.params.append(RouteParam(name=pk_name, annotation=pk_py_type))
-        yield handler
 
         yield TestCase(
             op_name="get",
             method="get",
-            path=f"/{{{pk_name}}}",
+            path=f"/{{{ctx.instance.pk}}}",
             status_success=200,
             status_not_found=404,
             response_schema=schema.name,
         )
 
 
-@FASTAPI_REGISTRY.renders(GetRoute, tags=FASTAPI_TAGS)
-def _render(h: GetRoute, ctx: RenderCtx) -> Fragment:
+@registry.renders(GetRoute)
+def _render(handler: GetRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/get.py.j2",
         body_extra={
-            "response_schema": _response_schema_name(h),
-            "serializer_fn": h.serializer_fn,
+            "response_schema": _response_schema_name(handler),
+            "serializer_fn": handler.serializer_fn,
         },
-        sql_verb="select",
-        needs_utils=True,
+        extra_imports=[("sqlalchemy", "select"), *utils_imports(ctx)],
     )

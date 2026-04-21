@@ -35,31 +35,36 @@ def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
     ]
 
 
-def _read_schema_outputs(
+def _construct_response_schema(
     model: Name,
     fields: list[FieldSpec],
     suffix: str,
-    serializer_stem: str,
-) -> tuple[SchemaClass, SerializerFn]:
-    """Build the ``SchemaClass`` / ``SerializerFn`` pair for a read op.
+) -> SchemaClass:
+    """Build the response ``SchemaClass`` for a read op.
 
     ``suffix`` is appended to the model's pascal-cased name to form
-    the response schema class (e.g. ``Resource`` -> ``UserResource``).
-    ``serializer_stem`` becomes the trailing segment of the
-    serializer function, e.g. ``resource`` -> ``to_user_resource``.
+    the schema class (e.g. ``Resource`` -> ``UserResource``).
     """
-    out_fields = _field_dicts(fields)
-    schema_name = model.suffixed(suffix)
-    serializer_fn = f"to_{model.lower}_{serializer_stem}"
-    schema = SchemaClass(
-        name=schema_name,
-        fields=out_fields,
+    return SchemaClass(
+        name=model.suffixed(suffix),
+        fields=_field_dicts(fields),
         doc=f"{suffix} schema for {model.pascal}.",
     )
-    serializer = SerializerFn(
-        function_name=serializer_fn,
+
+
+def _construct_serializer(
+    model: Name,
+    schema: SchemaClass,
+    stem: str,
+) -> SerializerFn:
+    """Build the ``SerializerFn`` that maps a model row to ``schema``.
+
+    ``stem`` becomes the trailing segment of the serializer
+    function, e.g. ``resource`` -> ``to_user_resource``.
+    """
+    return SerializerFn(
+        function_name=f"to_{model.lower}_{stem}",
         model_name=model.pascal,
-        schema_name=schema_name,
-        fields=out_fields,
+        schema_name=schema.name,
+        fields=schema.fields,
     )
-    return schema, serializer

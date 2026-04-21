@@ -18,9 +18,9 @@ from foundry.outputs import (
 from foundry.render import BuildStore, RenderCtx
 from kiln.config.schema import AuthConfig, KilnConfig, ResourceConfig
 from kiln.generators._env import env as jinja_env
+from kiln.renderers import registry as shared_registry
 from kiln.renderers.assembler import assemble
 from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
     _render_handler_string,
     _response_schema_name,
     _status_suffix,
@@ -37,7 +37,7 @@ from kiln.renderers.fastapi import (
 
 @pytest.fixture
 def registry():
-    return FASTAPI_REGISTRY
+    return shared_registry
 
 
 @pytest.fixture
@@ -272,7 +272,7 @@ def test_assemble_static_files():
     env.get_template.return_value = tmpl
     rctx = RenderCtx(env=env, config={})
 
-    reg = FASTAPI_REGISTRY
+    reg = shared_registry
     files = assemble(store, reg, rctx)
     assert len(files) == 1
     assert files[0].path == "main.py"
@@ -284,7 +284,7 @@ def test_assemble_empty_store():
     store = BuildStore()
     env = MagicMock()
     rctx = RenderCtx(env=env, config={})
-    reg = FASTAPI_REGISTRY
+    reg = shared_registry
     files = assemble(store, reg, rctx)
     assert files == []
 
@@ -300,7 +300,7 @@ def test_assemble_empty_template_static_file():
     )
     env = MagicMock()
     rctx = RenderCtx(env=env, config={})
-    reg = FASTAPI_REGISTRY
+    reg = shared_registry
     files = assemble(store, reg, rctx)
     assert len(files) == 1
     assert files[0].path == "pkg/__init__.py"
@@ -478,7 +478,6 @@ def test_handler_fragment_datetime_pk(registry):
         method="GET",
         path="/{id}",
         function_name="get_post",
-        op_name="get",
         response_model="PostResource",
         serializer_fn="to_post_resource",
         return_type="PostResource",
@@ -496,7 +495,6 @@ def test_handler_fragment_date_pk(registry):
         method="GET",
         path="/{id}",
         function_name="get_post",
-        op_name="list",
     )
     fragments = registry.render(h, _rctx(_resource(pk_type="date")))
     block = fragments[0].imports.block()
@@ -509,7 +507,6 @@ def test_handler_fragment_unknown_op_no_db_verb(registry):
         method="POST",
         path="/publish",
         function_name="publish_post",
-        op_name="custom",
         body_lines=["return None"],
         extra_imports=[("myapp.actions", "publish")],
     )
@@ -525,7 +522,6 @@ def test_handler_fragment_custom_route_prefix(registry):
         method="GET",
         path="/",
         function_name="list_posts",
-        op_name="list",
     )
     fragments = registry.render(
         h,
@@ -622,12 +618,11 @@ def test_render_handler_string_numeric_status_code():
 
 
 def test_render_handler_body_unknown_op_falls_through(registry):
-    """Unknown op_name falls back to _render_handler_string."""
+    """Plain RouteHandler falls back to _render_handler_string."""
     h = RouteHandler(
         method="GET",
         path="/",
         function_name="custom",
-        op_name="not_a_crud_op",
         body_lines=["return None"],
     )
     fragments = registry.render(h, _rctx(_resource()))

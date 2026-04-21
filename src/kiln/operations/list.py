@@ -16,12 +16,12 @@ from kiln.operations._list_config import (  # noqa: TC001
     OrderConfig,
     PaginateConfig,
 )
-from kiln.operations._shared import _read_schema_outputs
-from kiln.renderers.fastapi import (
-    FASTAPI_REGISTRY,
-    FASTAPI_TAGS,
-    build_handler_fragment,
+from kiln.operations._shared import (
+    _construct_response_schema,
+    _construct_serializer,
 )
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -33,8 +33,6 @@ if TYPE_CHECKING:
 @dataclass
 class ListRoute(RouteHandler):
     """Route handler emitted by the :class:`List` operation."""
-
-    op_name: str = "list"
 
 
 @operation("list", scope="resource", requires=["get"])
@@ -66,9 +64,8 @@ class List:
 
         """
         _, model = Name.from_dotted(ctx.instance.model)
-        schema, serializer = _read_schema_outputs(
-            model, options.fields, "ListItem", "list_item"
-        )
+        schema = _construct_response_schema(model, options.fields, "ListItem")
+        serializer = _construct_serializer(model, schema, "list_item")
         yield schema
         yield serializer
 
@@ -91,22 +88,21 @@ class List:
         )
 
 
-@FASTAPI_REGISTRY.renders(ListRoute, tags=FASTAPI_TAGS)
-def _render(h: ListRoute, ctx: RenderCtx) -> Fragment:
+@registry.renders(ListRoute)
+def _render(handler: ListRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/list.py.j2",
         body_extra={
             "http_method": "get",
             "route_path": "/",
-            "response_model": h.response_model,
-            "return_type": h.return_type,
-            "serializer_fn": h.serializer_fn,
+            "response_model": handler.response_model,
+            "return_type": handler.return_type,
+            "serializer_fn": handler.serializer_fn,
             "extra_params": [],
             "query_modifiers": [],
             "result_expression": None,
         },
-        sql_verb="select",
-        needs_utils=False,
+        extra_imports=[("sqlalchemy", "select")],
     )
