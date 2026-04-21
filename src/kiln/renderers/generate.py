@@ -42,15 +42,15 @@ def generate(config: BaseModel) -> list[GeneratedFile]:
     if isinstance(config, KilnConfig):
         config = normalize_config(config)
     operations = _discover_operations()
-    pkg = getattr(config, "package_prefix", "")
+    package_prefix = getattr(config, "package_prefix", "")
 
-    engine = Engine(operations=operations, package_prefix=pkg)
+    engine = Engine(operations=operations, package_prefix=package_prefix)
     store = engine.build(config)
 
     ctx = RenderCtx(
         env=env,
         config=config,
-        package_prefix=pkg,
+        package_prefix=package_prefix,
     )
     return list(assemble(store, registry, ctx))
 

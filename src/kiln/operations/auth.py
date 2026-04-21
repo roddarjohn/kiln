@@ -84,10 +84,10 @@ class Auth:
         import_pair = (auth_mod, "get_current_user")
 
         items = ctx.store.get_by_scope(ctx.scope.name, ctx.instance_id)
-        for obj in items:
-            if isinstance(obj, RouteHandler):
-                obj.extra_deps.append(dep_line)
-                obj.extra_imports.append(import_pair)
-            elif isinstance(obj, TestCase):
-                obj.requires_auth = True
+        for item in items:
+            if isinstance(item, RouteHandler):
+                item.extra_deps.append(dep_line)
+                item.extra_imports.append(import_pair)
+            elif isinstance(item, TestCase):
+                item.requires_auth = True
         return ()

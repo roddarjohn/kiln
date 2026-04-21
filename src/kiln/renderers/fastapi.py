@@ -57,7 +57,7 @@ class _ResourceInfo:
     model: Name
     model_module: str
     app: str
-    pkg: str
+    package_prefix: str
     route_prefix: str
     pk_name: str
     pk_py_type: str
@@ -77,7 +77,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     """
     resource = ctx.extras["resource"]
     config = ctx.config
-    pkg = ctx.package_prefix
+    package_prefix = ctx.package_prefix
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
@@ -95,7 +95,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         model=model,
         model_module=model_module,
         app=app,
-        pkg=pkg,
+        package_prefix=package_prefix,
         route_prefix=route_prefix,
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[getattr(resource, "pk_type", "uuid")],
@@ -174,7 +174,9 @@ def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from(info.model_module, info.model.pascal)
-    schema_mod = prefix_import(info.pkg, info.app, "schemas", info.model.lower)
+    schema_mod = prefix_import(
+        info.package_prefix, info.app, "schemas", info.model.lower
+    )
     imports.add_from(schema_mod, ser.schema_name)
     serializer_fragment = Fragment(
         path=f"{info.app}/serializers/{info.model.lower}.py",
@@ -484,7 +486,7 @@ def _handler_imports(
     imports.add_from(info.model_module, info.model.pascal)
     _add_pk_type_imports(imports, info.pk_py_type)
 
-    session_mod = prefix_import(info.pkg, info.session_module)
+    session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
 
     if handler.status_code in (201, 204):
@@ -492,19 +494,19 @@ def _handler_imports(
 
     if handler.request_schema:
         schema_mod = prefix_import(
-            info.pkg, info.app, "schemas", info.model.lower
+            info.package_prefix, info.app, "schemas", info.model.lower
         )
         imports.add_from(schema_mod, handler.request_schema)
 
     response_schema = _response_schema_name(handler)
     if response_schema:
         schema_mod = prefix_import(
-            info.pkg, info.app, "schemas", info.model.lower
+            info.package_prefix, info.app, "schemas", info.model.lower
         )
         imports.add_from(schema_mod, response_schema)
     if handler.serializer_fn:
         serializer_mod = prefix_import(
-            info.pkg, info.app, "serializers", info.model.lower
+            info.package_prefix, info.app, "serializers", info.model.lower
         )
         imports.add_from(serializer_mod, handler.serializer_fn)
 
@@ -559,12 +561,14 @@ def _test_file_imports(info: _ResourceInfo) -> ImportCollector:
     imports.add_from("unittest.mock", "AsyncMock", "MagicMock")
     imports.add_from("httpx", "ASGITransport", "AsyncClient")
     imports.add_from("fastapi", "FastAPI")
-    route_module = prefix_import(info.pkg, info.app, "routes", info.model.lower)
+    route_module = prefix_import(
+        info.package_prefix, info.app, "routes", info.model.lower
+    )
     imports.add_from(route_module, "router")
-    session_mod = prefix_import(info.pkg, info.session_module)
+    session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        auth_module = prefix_import(info.pkg, "auth", "dependencies")
+        auth_module = prefix_import(info.package_prefix, "auth", "dependencies")
         imports.add_from(auth_module, "get_current_user")
     return imports
 
@@ -576,7 +580,9 @@ def _test_file_base_context(info: _ResourceInfo) -> dict[str, object]:
     by the :class:`SerializerFn` fragment so they are absent
     here.  The template treats both as optional/falsy by default.
     """
-    route_module = prefix_import(info.pkg, info.app, "routes", info.model.lower)
+    route_module = prefix_import(
+        info.package_prefix, info.app, "routes", info.model.lower
+    )
     get_current_user_fn = "get_current_user" if info.has_auth else None
     return {
         "model_name": info.model.pascal,

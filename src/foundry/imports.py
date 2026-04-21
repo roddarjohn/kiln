@@ -74,11 +74,11 @@ class ImportCollector:
             other: Another :class:`ImportCollector` to merge in.
 
         """
-        for mod in other._bare:
-            self._bare[mod] = None
-        for mod, names in other._from.items():
+        for module_name in other._bare:
+            self._bare[module_name] = None
+        for module_name, names in other._from.items():
             for name in names:
-                self._from[mod][name] = None
+                self._from[module_name][name] = None
 
     def block(self) -> str:
         """Return all imports as a single string block.
@@ -126,24 +126,26 @@ class ImportCollector:
             )
 
         # --- bare imports ---
-        for mod in sorted(self._bare):
-            bucket = stdlib if mod.split(".")[0] in _STDLIB else third
-            bucket.append(f"import {mod}")
+        for module_name in sorted(self._bare):
+            top_level = module_name.split(".")[0]
+            bucket = stdlib if top_level in _STDLIB else third
+            bucket.append(f"import {module_name}")
 
         # --- from imports ---
-        for mod in sorted(self._from):
-            if mod == "__future__":
+        for module_name in sorted(self._from):
+            if module_name == "__future__":
                 continue
-            names = sorted(self._from[mod])
-            line = _format_from_import(mod, names)
-            bucket = stdlib if mod.split(".")[0] in _STDLIB else third
+            names = sorted(self._from[module_name])
+            line = _format_from_import(module_name, names)
+            top_level = module_name.split(".")[0]
+            bucket = stdlib if top_level in _STDLIB else third
             bucket.append(line)
 
         # Assemble groups with blank-line separators.
-        groups = [g for g in (future, stdlib, third) if g]
+        groups = [grp for grp in (future, stdlib, third) if grp]
         result: list[str] = []
-        for i, group in enumerate(groups):
-            if i > 0:
+        for index, group in enumerate(groups):
+            if index > 0:
                 result.append("")
             result.extend(group)
         return result

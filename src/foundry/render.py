@@ -225,8 +225,8 @@ class BuildStore:
 
         """
         result: list[object] = []
-        for (s, stored_id, _), items in self._items.items():
-            if s == scope and stored_id == instance_id:
+        for (stored_scope, stored_id, _), items in self._items.items():
+            if stored_scope == scope and stored_id == instance_id:
                 result.extend(items)
         return result
 
@@ -242,7 +242,9 @@ class BuildStore:
         """
         result: list[object] = []
         for items in self._items.values():
-            result.extend(obj for obj in items if isinstance(obj, output_type))
+            result.extend(
+                item for item in items if isinstance(item, output_type)
+            )
         return result
 
     def all_items(self) -> list[object]:

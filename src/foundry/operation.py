@@ -192,14 +192,14 @@ def topological_sort(
     sorter: TopologicalSorter[str] = TopologicalSorter()
     for name, meta in meta_map.items():
         sorter.add(name)
-        for req in meta.requires:
-            if req not in meta_map:
+        for dependency in meta.requires:
+            if dependency not in meta_map:
                 msg = (
-                    f"Operation '{name}' requires '{req}', "
+                    f"Operation '{name}' requires '{dependency}', "
                     f"which is not registered"
                 )
                 raise ValueError(msg)
-            sorter.add(name, req)
+            sorter.add(name, dependency)
 
     try:
         sorter.prepare()
@@ -214,4 +214,4 @@ def topological_sort(
         for name in ready:
             sorter.done(name)
 
-    return [cls_map[n] for n in result]
+    return [cls_map[name] for name in result]

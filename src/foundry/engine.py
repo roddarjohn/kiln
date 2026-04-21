@@ -273,22 +273,22 @@ def _run_ops(
         meta = get_operation_meta(op_cls)
         if meta is None:  # pragma: no cover
             continue
-        op = op_cls()
-        when_fn = getattr(op, "when", None)
-        has_when = callable(when_fn)
+        operation_instance = op_cls()
+        when_method = getattr(operation_instance, "when", None)
+        has_when = callable(when_method)
         # An instance's ``operations`` list gates user-facing ops.
         # Cross-cutting ops that define ``when`` opt-in at runtime
         # and bypass the explicit list.
         if not has_when and allowed is not None and meta.name not in allowed:
             continue
-        if has_when and when_fn is not None and not when_fn(ctx):
+        if has_when and when_method is not None and not when_method(ctx):
             continue
         options = _resolve_options(op_cls, ctx.instance)
         ctx.store.add(
             ctx.scope.name,
             ctx.instance_id,
             meta.name,
-            *op.build(ctx, options),
+            *operation_instance.build(ctx, options),
         )
 
 
@@ -320,9 +320,9 @@ def _resolve_instances(
     if not isinstance(items, list):
         return []
     result: list[tuple[str, object]] = []
-    for i, item in enumerate(items):
-        inst_id = _instance_id(item, scope.name, i)
-        result.append((inst_id, item))
+    for index, item in enumerate(items):
+        instance_id = _instance_id(item, scope.name, index)
+        result.append((instance_id, item))
     return result
 
 

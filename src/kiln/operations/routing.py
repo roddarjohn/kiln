@@ -114,9 +114,9 @@ class ProjectRouter:
         if not config.apps:
             return
 
-        pkg = config.package_prefix
+        package_prefix = config.package_prefix
         has_auth = config.auth is not None
-        auth_module = f"{pkg}.auth" if pkg else "auth"
+        auth_module = f"{package_prefix}.auth" if package_prefix else "auth"
 
         yield StaticFile(
             path="routes/__init__.py",
@@ -127,8 +127,8 @@ class ProjectRouter:
                 "apps": [
                     {
                         "module": (
-                            f"{pkg}.{app_ref.config.module}"
-                            if pkg
+                            f"{package_prefix}.{app_ref.config.module}"
+                            if package_prefix
                             else app_ref.config.module
                         ),
                         "alias": app_ref.config.module,
@@ -166,29 +166,29 @@ def _resource_instance_ids_with_handlers(
 
     """
     instance_ids: list[str] = []
-    for res in resources:
-        base_id = _resource_instance_id(res)
+    for resource in resources:
+        base_id = _resource_instance_id(resource)
         items = store.get_by_scope(
             "resource",
             f"{app_instance_id}/{base_id}",
         )
-        if any(isinstance(obj, RouteHandler) for obj in items):
+        if any(isinstance(item, RouteHandler) for item in items):
             instance_ids.append(base_id)
     return instance_ids
 
 
-def _resource_instance_id(res: ResourceConfig) -> str:
-    """Compute the engine-generated instance ID for *res*.
+def _resource_instance_id(resource: ResourceConfig) -> str:
+    """Compute the engine-generated instance ID for *resource*.
 
     Matches :func:`foundry.engine._instance_id` for a
     :class:`ResourceConfig`: class name from ``model``, lowercased.
 
     Args:
-        res: Resource config entry.
+        resource: Resource config entry.
 
     Returns:
         Instance ID string.
 
     """
-    _, _, class_name = res.model.rpartition(".")
+    _, _, class_name = resource.model.rpartition(".")
     return class_name.lower()
