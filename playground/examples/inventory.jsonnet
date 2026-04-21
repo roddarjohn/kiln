@@ -5,7 +5,8 @@
 // Demonstrates:
 //   - Full CRUD with specific fields and per-operation auth
 //   - Create-only (append-only pattern) with date field and action
-//   - write_only preset with route_prefix, db_key, and email/json/datetime fields
+//   - Write-only resource with route_prefix, db_key, and
+//     email/json/datetime fields
 //   - Actions with and without params, with and without auth
 
 local resource = import "kiln/resources/presets.libsonnet";
@@ -24,7 +25,18 @@ local resource = import "kiln/resources/presets.libsonnet";
       require_auth: false,
 
       operations: [
-        "get",
+        {
+          name: "get",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "sku", type: "str" },
+            { name: "name", type: "str" },
+            { name: "unit_price", type: "float" },
+            { name: "stock_count", type: "int" },
+            { name: "active", type: "bool" },
+            { name: "available_from", type: "date" },
+          ],
+        },
         {
           name: "list",
           fields: [
@@ -109,18 +121,18 @@ local resource = import "kiln/resources/presets.libsonnet";
       ],
     },
 
-    // EventLog: write_only (create/update/delete, no reads) backed by
-    // PGCraftAppendOnly — the analytics DB keeps the full attribute history.
-    // Demonstrates: write_only preset, route_prefix, db_key, email/json/datetime
-    //               fields, require_auth: true, and a no-param no-auth action.
-    resource.write_only(
-      "inventory.models.EventLog",
-      pk="id",
-      pk_type="uuid",
-      db_key="analytics",
-      require_auth=true,
-    ) + {
+    // EventLog: write-only (create/update/delete, no reads) backed by
+    // PGCraftAppendOnly — the analytics DB keeps the full attribute
+    // history.  Demonstrates: route_prefix, db_key, email/json/datetime
+    // fields, require_auth: true, and a no-param no-auth action.
+    {
+      model: "inventory.models.EventLog",
+      pk: "id",
+      pk_type: "uuid",
       route_prefix: "/event-logs",
+      db_key: "analytics",
+      require_auth: true,
+
       operations: [
         {
           name: "create",

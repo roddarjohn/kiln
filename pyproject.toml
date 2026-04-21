@@ -20,6 +20,8 @@ dependencies = [
   "pydantic>=2.0",
   "jsonnet>=0.21.0",
   "jinja2>=3.0",
+  "fastapi>=0.115",
+  "sqlalchemy[asyncio]>=2.0",
 ]
 
 [project.urls]
@@ -34,7 +36,7 @@ kiln = "kiln.cli:app"
 
 [project.entry-points."kiln.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
-utils = "kiln.operations.infra:Utils"
+auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
 get = "kiln.operations.get:Get"
 list = "kiln.operations.list:List"
 create = "kiln.operations.create:Create"
@@ -50,11 +52,17 @@ requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["kiln", "foundry"]
+module-name = ["kiln", "foundry", "ingot"]
 
 
 [dependency-groups]
-dev = ["pytest>=8", "coverage[toml]>=7.0", "tox>=4.49.1", "tox-uv>=1.33.2"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=1.3.0",
+  "coverage[toml]>=7.0",
+  "tox>=4.49.1",
+  "tox-uv>=1.33.2",
+]
 playground = [
   "fastapi>=0.115",
   "sqlalchemy[asyncio]>=2.0",
@@ -103,6 +111,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"src/ingot/**" = [
+  "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
+  "PLR0913", # pagination helpers genuinely take many parameters
+]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py
   "T201",    # print is fine in scripts
@@ -133,7 +145,7 @@ python_version = "3.12"
 files = ["src"]
 
 [tool.coverage.run]
-source = ["kiln", "foundry"]
+source = ["kiln", "foundry", "ingot"]
 branch = true
 
 [tool.coverage.report]
@@ -145,6 +157,7 @@ exclude_lines = [
 
 [tool.pytest.ini_options]
 addopts = ""
+asyncio_mode = "auto"
 
 [tool.tox]
 requires = ["tox-uv>=1"]

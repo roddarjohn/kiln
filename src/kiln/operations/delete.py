@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
+    from kiln.config.schema import ResourceConfig
 
 
 @dataclass
@@ -30,7 +31,7 @@ class Delete:
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         _options: EmptyOptions,
     ) -> Iterable[object]:
         """Produce output for DELETE /{pk}.
@@ -75,5 +76,5 @@ def _render(handler: DeleteRoute, ctx: RenderCtx) -> Fragment:
         ctx,
         body_template="fastapi/ops/delete.py.j2",
         body_extra={},
-        extra_imports=[("sqlalchemy", "delete"), *utils_imports(ctx)],
+        extra_imports=[("sqlalchemy", "delete"), *utils_imports()],
     )

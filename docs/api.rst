@@ -61,8 +61,8 @@ kiln.operations
 .. automodule:: kiln.operations.scaffold
    :members:
 
-.. automodule:: kiln.operations.infra
+.. automodule:: kiln.operations.routing
    :members:
 
-.. automodule:: kiln.operations.routing
+.. automodule:: ingot
    :members:

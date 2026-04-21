@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
+    from kiln.config.schema import ResourceConfig
 
 
 @operation(
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 class Auth:
     """Augment CRUD/action handlers and tests with auth."""
 
-    def when(self, ctx: BuildContext) -> bool:
+    def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
         """Apply only when auth is configured and the resource opts in.
 
         Args:
@@ -55,11 +56,12 @@ class Auth:
         """
         if getattr(ctx.config, "auth", None) is None:
             return False
-        return bool(getattr(ctx.instance, "require_auth", True))
+
+        return ctx.instance.require_auth
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
         """Mutate earlier handlers/tests to require auth.

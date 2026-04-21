@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
+    from kiln.config.schema import ResourceConfig
 
 
 @dataclass
@@ -49,7 +50,7 @@ class List:
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         options: Options,
     ) -> Iterable[object]:
         """Produce output for GET /.

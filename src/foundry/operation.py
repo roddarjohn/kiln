@@ -28,12 +28,19 @@ class OperationMeta:
             (e.g. ``"resource"``).
         requires: Names of operations that must run before
             this one within the same scope.
+        after_children: When ``True``, this project-scope
+            operation runs *after* all child scopes have
+            executed, so its ``build`` method can inspect
+            objects produced at the resource/app scopes
+            via the build store.  Ignored outside the
+            project scope (the engine raises if set).
 
     """
 
     name: str
     scope: str
     requires: tuple[str, ...] = ()
+    after_children: bool = False
 
 
 # -------------------------------------------------------------------
@@ -57,6 +64,7 @@ def operation(
     *,
     scope: str,
     requires: list[str] | None = None,
+    after_children: bool = False,
 ) -> Any:  # noqa: ANN401
     """Decorate a class as a kiln operation.
 
@@ -87,6 +95,11 @@ def operation(
         scope: Scope name (e.g. ``"resource"``, ``"app"``,
             ``"project"``).
         requires: Operation names that must run first.
+        after_children: When ``True`` (project scope only),
+            defer this operation until every child scope has
+            executed so ``build`` can walk child output in the
+            store.  The engine rejects this flag at any other
+            scope.
 
     Returns:
         Class decorator.
@@ -111,6 +124,12 @@ def operation(
                     h.extra_deps.append("...")
                 return []
 
+        @operation("router", scope="project", after_children=True)
+        class Router:
+            def build(self, ctx, options):
+                handlers = ctx.store.get_by_type(RouteHandler)
+                return [...]  # aggregate mounts from handlers
+
     """
     reqs = tuple(requires or [])
 
@@ -119,6 +138,7 @@ def operation(
             name=name,
             scope=scope,
             requires=reqs,
+            after_children=after_children,
         )
         setattr(cls, _OPERATION_META_ATTR, meta)
         if not hasattr(cls, "Options"):

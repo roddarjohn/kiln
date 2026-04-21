@@ -1,12 +1,16 @@
-"""Scaffold operation: db sessions and auth dependencies.
+"""Scaffold operations: db sessions and auth dependencies.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
-infrastructure files (database sessions, authentication).
+infrastructure files.  Split into two operations:
+
+* :class:`Scaffold` -- always runs; emits the ``db/`` tree.
+* :class:`AuthScaffold` -- runs only when the project config has
+  ``auth`` set, via :meth:`AuthScaffold.when`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -17,28 +21,32 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
+    from kiln.config.schema import AuthConfig, KilnConfig
 
 
 @operation("scaffold", scope="project")
 class Scaffold:
-    """Generate ``db/`` and ``auth/`` infrastructure files."""
+    """Generate ``db/`` infrastructure files."""
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[KilnConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
-        """Produce static files for db sessions and auth.
+        """Produce static files for db sessions.
 
         Args:
             ctx: Build context with project config.
             _options: Unused (no options).
 
         Yields:
-            :class:`StaticFile` objects for db and auth infrastructure.
+            :class:`StaticFile` objects for the ``db/`` package
+            and one session module per configured database (or a
+            single default ``db/session.py`` when none are
+            configured).
 
         """
-        config = ctx.config
+        config = ctx.instance
 
         yield StaticFile(
             path="db/__init__.py",
@@ -46,9 +54,8 @@ class Scaffold:
             context={},
         )
 
-        databases = getattr(config, "databases", [])
-        if databases:
-            for db in databases:
+        if config.databases:
+            for db in config.databases:
                 yield StaticFile(
                     path=f"db/{db.key}_session.py",
                     template="init/db_session.py.j2",
@@ -64,6 +71,7 @@ class Scaffold:
                         "get_db_fn": f"get_{db.key}_db",
                     },
                 )
+
         else:
             yield StaticFile(
                 path="db/session.py",
@@ -81,53 +89,77 @@ class Scaffold:
                 },
             )
 
-        auth = getattr(config, "auth", None)
-        if auth is not None:
+
+@operation("auth_scaffold", scope="project")
+class AuthScaffold:
+    """Generate ``auth/`` infrastructure files."""
+
+    def when(self, ctx: BuildContext[KilnConfig]) -> bool:
+        """Apply only when the project config has ``auth`` set.
+
+        Args:
+            ctx: Build context with project config.
+
+        Returns:
+            ``True`` when ``ctx.instance.auth`` is not ``None``.
+
+        """
+        return ctx.instance.auth is not None
+
+    def build(
+        self,
+        ctx: BuildContext[KilnConfig],
+        _options: BaseModel,
+    ) -> Iterable[StaticFile]:
+        """Produce static files for auth dependencies and router.
+
+        Args:
+            ctx: Build context with project config.  ``when`` has
+                already confirmed ``ctx.instance.auth is not None``.
+            _options: Unused (no options).
+
+        Yields:
+            :class:`StaticFile` for the ``auth/`` package, the
+            dependencies module, and the JWT router (only when
+            using the default flow).
+
+        """
+        auth = cast("AuthConfig", ctx.instance.auth)
+
+        yield StaticFile(
+            path="auth/__init__.py",
+            template="",
+            context={},
+        )
+
+        gcu_module = None
+        gcu_name = None
+        if auth.get_current_user_fn:
+            gcu_module, gcu_name = auth.get_current_user_fn.rsplit(".", 1)
+
+        yield StaticFile(
+            path="auth/dependencies.py",
+            template="init/auth_dependencies.py.j2",
+            context={
+                "gcu_module": gcu_module,
+                "gcu_name": gcu_name,
+                "secret_env": auth.secret_env,
+                "algorithm": auth.algorithm,
+                "token_url": auth.token_url,
+            },
+        )
+
+        if auth.get_current_user_fn is None:
+            vcf = cast("str", auth.verify_credentials_fn)
+            vcf_module, vcf_name = vcf.rsplit(".", 1)
             yield StaticFile(
-                path="auth/__init__.py",
-                template="",
-                context={},
+                path="auth/router.py",
+                template="init/auth_router.py.j2",
+                context={
+                    "vcf_module": vcf_module,
+                    "vcf_name": vcf_name,
+                    "secret_env": auth.secret_env,
+                    "algorithm": auth.algorithm,
+                    "token_url": auth.token_url,
+                },
             )
-            yield _auth_deps_static(auth)
-            if auth.get_current_user_fn is None:
-                yield _auth_router_static(auth)
-
-
-def _auth_deps_static(auth: object) -> StaticFile:
-    """Build the auth/dependencies.py static file."""
-    gcu_fn = getattr(auth, "get_current_user_fn", None)
-    gcu_module = None
-    gcu_name = None
-    if gcu_fn:
-        gcu_module, gcu_name = gcu_fn.rsplit(".", 1)
-    return StaticFile(
-        path="auth/dependencies.py",
-        template="init/auth_dependencies.py.j2",
-        context={
-            "gcu_module": gcu_module,
-            "gcu_name": gcu_name,
-            "secret_env": getattr(auth, "secret_env", "JWT_SECRET"),
-            "algorithm": getattr(auth, "algorithm", "HS256"),
-            "token_url": getattr(auth, "token_url", "/auth/token"),
-        },
-    )
-
-
-def _auth_router_static(auth: object) -> StaticFile:
-    """Build the auth/router.py static file."""
-    vcf = getattr(auth, "verify_credentials_fn", None)
-    if vcf is None:  # pragma: no cover
-        msg = "verify_credentials_fn is required"
-        raise ValueError(msg)
-    vcf_module, vcf_name = vcf.rsplit(".", 1)
-    return StaticFile(
-        path="auth/router.py",
-        template="init/auth_router.py.j2",
-        context={
-            "vcf_module": vcf_module,
-            "vcf_name": vcf_name,
-            "secret_env": getattr(auth, "secret_env", "JWT_SECRET"),
-            "algorithm": getattr(auth, "algorithm", "HS256"),
-            "token_url": getattr(auth, "token_url", "/auth/token"),
-        },
-    )

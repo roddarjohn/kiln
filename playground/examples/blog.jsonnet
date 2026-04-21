@@ -4,8 +4,8 @@
 // This config only defines which routes to expose and what fields each exposes.
 //
 // Demonstrates:
-//   - read_only preset (Author)
-//   - full preset with int PK and no auth (Tag)
+//   - Read-only resource (Author)
+//   - Full CRUD with int PK and no auth (Tag)
 //   - Custom CRUD with per-operation auth and uuid PK (Article)
 //   - Actions with params
 
@@ -16,8 +16,33 @@ local resource = import "kiln/resources/presets.libsonnet";
   module: "blog",
 
   resources: [
-    // Authors: read-only, all fields
-    resource.read_only("blog.models.Author"),
+    // Authors: read-only (get + list)
+    {
+      model: "blog.models.Author",
+      pk: "id",
+      pk_type: "uuid",
+      require_auth: false,
+
+      operations: [
+        {
+          name: "get",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "name", type: "str" },
+            { name: "email", type: "email" },
+            { name: "bio", type: "str" },
+          ],
+        },
+        {
+          name: "list",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "name", type: "str" },
+            { name: "email", type: "email" },
+          ],
+        },
+      ],
+    },
 
     // Articles: full CRUD — specific fields per operation, two actions
     {
@@ -27,7 +52,17 @@ local resource = import "kiln/resources/presets.libsonnet";
       require_auth: false,
 
       operations: [
-        "get",
+        {
+          name: "get",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "title", type: "str" },
+            { name: "slug", type: "str" },
+            { name: "body", type: "str" },
+            { name: "published", type: "bool" },
+            { name: "author_id", type: "uuid" },
+          ],
+        },
         {
           name: "list",
           fields: [
@@ -85,7 +120,46 @@ local resource = import "kiln/resources/presets.libsonnet";
       ],
     },
 
-    // Tags: full CRUD, int PK, all fields
-    resource.full("blog.models.Tag", pk="id", pk_type="int", require_auth=false),
+    // Tags: full CRUD, int PK, no auth
+    {
+      model: "blog.models.Tag",
+      pk: "id",
+      pk_type: "int",
+      require_auth: false,
+
+      operations: [
+        {
+          name: "get",
+          fields: [
+            { name: "id", type: "int" },
+            { name: "name", type: "str" },
+            { name: "slug", type: "str" },
+          ],
+        },
+        {
+          name: "list",
+          fields: [
+            { name: "id", type: "int" },
+            { name: "name", type: "str" },
+            { name: "slug", type: "str" },
+          ],
+        },
+        {
+          name: "create",
+          fields: [
+            { name: "name", type: "str" },
+            { name: "slug", type: "str" },
+          ],
+        },
+        {
+          name: "update",
+          fields: [
+            { name: "name", type: "str" },
+            { name: "slug", type: "str" },
+          ],
+        },
+        "delete",
+      ],
+    },
   ],
 }

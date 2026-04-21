@@ -92,6 +92,10 @@ def _find_resource(
     lookup here so renderers can fetch the resource without the
     engine having to thread it through.
 
+    Searches the top-level ``resources`` list first, then every
+    app's nested ``config.resources`` — a multi-app project has
+    no top-level resources, so the nested walk is required.
+
     Args:
         config: The top-level config passed to the assembler.
         instance_id: The engine's scope-instance identifier.
@@ -100,7 +104,7 @@ def _find_resource(
         Matching resource config, or ``None`` when not found.
 
     """
-    for resource in getattr(config, "resources", []):
+    for resource in _iter_all_resources(config):
         model = getattr(resource, "model", "")
         if "." not in model:
             continue
@@ -108,6 +112,28 @@ def _find_resource(
         if name.lower == instance_id:
             return resource
     return None
+
+
+def _iter_all_resources(config: BaseModel) -> list[BaseModel]:
+    """Yield every :class:`ResourceConfig` in a project config.
+
+    Resources can live at the root (single-app) or inside each
+    ``AppRef.config`` (multi-app); both are yielded here.
+
+    Args:
+        config: Top-level project config.
+
+    Returns:
+        Flat list of resource configs across all apps.
+
+    """
+    resources: list[BaseModel] = list(getattr(config, "resources", []))
+    for app_ref in getattr(config, "apps", []):
+        app_cfg = getattr(app_ref, "config", None)
+        if app_cfg is None:
+            continue
+        resources.extend(getattr(app_cfg, "resources", []))
+    return resources
 
 
 def _merge_fragments(

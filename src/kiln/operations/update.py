@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
+    from kiln.config.schema import ResourceConfig
 
 
 @dataclass
@@ -39,7 +40,7 @@ class Update:
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for PATCH /{pk}.
@@ -92,11 +93,11 @@ class Update:
 
 
 @registry.renders(UpdateRoute)
-def _render(h: UpdateRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: UpdateRoute, ctx: RenderCtx) -> Fragment:
     return build_handler_fragment(
-        h,
+        handler,
         ctx,
         body_template="fastapi/ops/update.py.j2",
         body_extra={},
-        extra_imports=[("sqlalchemy", "update"), *utils_imports(ctx)],
+        extra_imports=[("sqlalchemy", "update"), *utils_imports()],
     )

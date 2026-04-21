@@ -47,10 +47,36 @@ def test_scope_config_key():
     assert by_name["item"].config_key == "items"
 
 
-def test_scope_parent_is_project():
+def test_scope_tree_structure():
+    """``item`` appears at two places in TopConfig: nested and direct.
+
+    ``TopConfig.things[].items`` produces one ``item`` scope with
+    ``parent=thing``; ``TopConfig.items`` produces a second with
+    ``parent=PROJECT``.  Both coexist — ops dispatch by scope name
+    and run at every node.
+    """
     scopes = discover_scopes(TopConfig)
-    for s in scopes[1:]:
-        assert s.parent is PROJECT
+    thing = next(s for s in scopes if s.name == "thing")
+    items = [s for s in scopes if s.name == "item"]
+
+    assert thing.parent is PROJECT
+    parents = {s.parent for s in items}
+    assert PROJECT in parents
+    assert thing in parents
+
+
+def test_nested_scope_resolve_path_is_field_name_only():
+    """A child scope resolves from its *parent scope instance*.
+
+    So resolve_path carries just the field names needed to reach
+    the list from the parent scope's instance — not from the root.
+    """
+    scopes = discover_scopes(TopConfig)
+    thing = next(s for s in scopes if s.name == "thing")
+    assert thing.resolve_path == ("things",)
+    # Nested item: starts from a SubConfig instance, so path is ("items",).
+    nested = next(s for s in scopes if s.name == "item" and s.parent is thing)
+    assert nested.resolve_path == ("items",)
 
 
 def test_empty_model():
@@ -74,3 +100,44 @@ def test_singularize_resources():
     assert _singularize("apps") == "app"
     assert _singularize("s") == "s"
     assert _singularize("data") == "data"
+
+
+def test_descends_through_non_list_basemodel_fields():
+    """Non-list BaseModel fields are traversed, their inner lists surfaced."""
+
+    class Widget(BaseModel):
+        name: str
+
+    class Middle(BaseModel):
+        widgets: list[Widget] = []
+
+    class Root(BaseModel):
+        middle: Middle = Middle()
+
+    scopes = discover_scopes(Root)
+    names = [s.name for s in scopes]
+    assert "widget" in names
+    widget = next(s for s in scopes if s.name == "widget")
+    # The widget list lives at ``parent_instance.middle.widgets``.
+    assert widget.resolve_path == ("middle", "widgets")
+    assert widget.parent is PROJECT
+
+
+def test_cycle_detection_terminates():
+    """Recursive Pydantic models don't send discovery into a loop.
+
+    A self-referential ``list[Node]`` field produces one scope
+    at the top level and one nested scope under it; recursion
+    stops there — no infinite chain.
+    """
+
+    class Node(BaseModel):
+        name: str = ""
+        kids: list["Node"] = []
+
+    Node.model_rebuild()
+    scopes = discover_scopes(Node)
+    names = [s.name for s in scopes]
+    # First descent into Node via `kids` is fine; the nested
+    # `kids` field on that inner Node triggers the cycle break.
+    assert names.count("kid") == 2

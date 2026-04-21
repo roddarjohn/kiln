@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
+    from kiln.config.schema import ResourceConfig
 
 
 @dataclass
@@ -41,7 +42,7 @@ class Get:
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for GET /{pk}.
@@ -99,5 +100,5 @@ def _render(handler: GetRoute, ctx: RenderCtx) -> Fragment:
             "response_schema": _response_schema_name(handler),
             "serializer_fn": handler.serializer_fn,
         },
-        extra_imports=[("sqlalchemy", "select"), *utils_imports(ctx)],
+        extra_imports=[("sqlalchemy", "select"), *utils_imports()],
     )

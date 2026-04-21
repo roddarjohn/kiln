@@ -214,7 +214,7 @@ def test_test_case_full():
 
 
 def test_static_file_defaults():
-    f = StaticFile(path="utils.py", template="fastapi/utils.py.j2")
+    f = StaticFile(path="db/session.py", template="init/db_session.py.j2")
     assert f.context == {}
 
 

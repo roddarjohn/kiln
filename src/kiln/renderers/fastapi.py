@@ -232,17 +232,16 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Fragment:
 # -------------------------------------------------------------------
 
 
-def utils_imports(ctx: RenderCtx) -> list[tuple[str, str]]:
-    """Return import pairs for the generated ``utils`` module.
+def utils_imports() -> list[tuple[str, str]]:
+    """Return import pairs for the ``ingot`` runtime helpers.
 
     The three CRUD ops that load-or-404 a row (get, update,
     delete) all need ``get_object_from_query_or_404`` and
     ``assert_rowcount``; this centralizes the pair.
     """
-    utils_mod = prefix_import(ctx.package_prefix, "utils")
     return [
-        (utils_mod, "get_object_from_query_or_404"),
-        (utils_mod, "assert_rowcount"),
+        ("ingot", "get_object_from_query_or_404"),
+        ("ingot", "assert_rowcount"),
     ]
 
 
@@ -307,7 +306,6 @@ def build_handler_fragment(
             "model_lower": info.model.lower,
             "route_prefix": info.route_prefix,
             "route_handlers": [rendered],
-            "utils_module": prefix_import(info.pkg, "utils"),
         },
         imports=imports,
     )

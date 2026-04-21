@@ -262,7 +262,6 @@ The built-ins are registered in kiln's own ``pyproject.toml``:
 
    [project.entry-points."kiln.operations"]
    scaffold       = "kiln.operations.scaffold:Scaffold"
-   utils          = "kiln.operations.infra:Utils"
    get            = "kiln.operations.get:Get"
    list           = "kiln.operations.list:List"
    create         = "kiln.operations.create:Create"
@@ -307,7 +306,6 @@ Source layout
        │   ├── action.py
        │   ├── auth.py
        │   ├── scaffold.py
-       │   ├── infra.py
        │   ├── routing.py
        │   ├── _shared.py      # helpers shared by the per-op modules
        │   ├── _introspect.py  # action-fn introspection

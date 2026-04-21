@@ -111,11 +111,6 @@ protocol.
      - project
      - Emits ``db/*_session.py`` and (if ``auth`` is configured)
        ``auth/dependencies.py`` + ``auth/router.py``.
-   * - ``utils``
-     - :mod:`kiln.operations.infra`
-     - app
-     - Emits ``utils.py`` with ``get_object_from_query_or_404`` /
-       ``assert_rowcount`` helpers.
    * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
      - :mod:`kiln.operations.get`, :mod:`~kiln.operations.list`,
        :mod:`~kiln.operations.create`, :mod:`~kiln.operations.update`,
@@ -174,9 +169,6 @@ snake-cased model name.
      - Yes
    * - ``auth/router.py``
      - ``scaffold``
-     - Yes
-   * - ``{module}/utils.py``
-     - ``utils``
      - Yes
    * - ``{module}/schemas/{name}.py``
      - ``get`` / ``list`` / ``create`` / ``update``

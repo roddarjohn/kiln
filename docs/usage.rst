@@ -164,9 +164,6 @@ Built-in operations
    * - ``scaffold``
      - project
      - ``db/*_session.py``, ``auth/dependencies.py``, ``auth/router.py``
-   * - ``utils``
-     - app
-     - ``utils.py`` helpers used by generated routes
    * - ``get``
      - resource
      - GET /{pk} route handler + response schema
