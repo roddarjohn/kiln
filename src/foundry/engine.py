@@ -179,14 +179,12 @@ def _run_ops(
         if has_when and when_fn is not None and not when_fn(ctx):
             continue
         options = _resolve_options(op_cls, ctx.instance)
-        objects = op.build(ctx, options)
-        if objects:
-            ctx.store.add(
-                ctx.scope.name,
-                ctx.instance_id,
-                meta.name,
-                *objects,
-            )
+        ctx.store.add(
+            ctx.scope.name,
+            ctx.instance_id,
+            meta.name,
+            *op.build(ctx, options),
+        )
 
 
 def _scope_instances(

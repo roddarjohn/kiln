@@ -26,6 +26,8 @@ from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
@@ -59,7 +61,7 @@ class Auth:
         self,
         ctx: BuildContext,
         _options: BaseModel,
-    ) -> list[object]:
+    ) -> Iterable[object]:
         """Mutate earlier handlers/tests to require auth.
 
         Args:
@@ -67,7 +69,8 @@ class Auth:
             _options: Unused.
 
         Returns:
-            Empty list -- this operation only mutates.
+            Empty iterable -- this operation only mutates earlier
+            output and emits no new objects.
 
         """
         auth_mod = prefix_import(
@@ -85,5 +88,4 @@ class Auth:
                 obj.extra_imports.append(import_pair)
             elif isinstance(obj, TestCase):
                 obj.requires_auth = True
-
-        return []
+        return ()

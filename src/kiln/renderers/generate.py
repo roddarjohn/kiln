@@ -18,7 +18,7 @@ from foundry.operation import get_operation_meta
 from foundry.render import RenderCtx
 from kiln.generators._env import env
 from kiln.renderers.assembler import assemble
-from kiln.renderers.fastapi import create_registry
+from kiln.renderers.fastapi import FASTAPI_REGISTRY
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -45,7 +45,7 @@ def generate(config: BaseModel) -> list[GeneratedFile]:
 
     """
     operations = _discover_operations()
-    registry = create_registry()
+    registry = FASTAPI_REGISTRY
     registry.active_tags["framework"] = getattr(
         config,
         "framework",

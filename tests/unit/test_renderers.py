@@ -20,12 +20,10 @@ from kiln.config.schema import AuthConfig, KilnConfig, ResourceConfig
 from kiln.generators._env import env as jinja_env
 from kiln.renderers.assembler import assemble
 from kiln.renderers.fastapi import (
-    _build_action_body,
+    FASTAPI_REGISTRY,
     _render_handler_string,
-    _ResourceInfo,
     _response_schema_name,
     _status_suffix,
-    create_registry,
     render_enum_class,
     render_router_mount,
     render_schema_class,
@@ -39,7 +37,7 @@ from kiln.renderers.fastapi import (
 
 @pytest.fixture
 def registry():
-    return create_registry()
+    return FASTAPI_REGISTRY
 
 
 @pytest.fixture
@@ -209,7 +207,7 @@ def test_render_router_mount_no_prefix():
 
 # -------------------------------------------------------------------
 # Registry registrations (only assert shape; Fragment content is
-# exercised via the assembler tests and golden output).
+# exercised via the assembler tests).
 # -------------------------------------------------------------------
 
 
@@ -274,7 +272,7 @@ def test_assemble_static_files():
     env.get_template.return_value = tmpl
     rctx = RenderCtx(env=env, config={})
 
-    reg = create_registry()
+    reg = FASTAPI_REGISTRY
     files = assemble(store, reg, rctx)
     assert len(files) == 1
     assert files[0].path == "main.py"
@@ -286,7 +284,7 @@ def test_assemble_empty_store():
     store = BuildStore()
     env = MagicMock()
     rctx = RenderCtx(env=env, config={})
-    reg = create_registry()
+    reg = FASTAPI_REGISTRY
     files = assemble(store, reg, rctx)
     assert files == []
 
@@ -302,7 +300,7 @@ def test_assemble_empty_template_static_file():
     )
     env = MagicMock()
     rctx = RenderCtx(env=env, config={})
-    reg = create_registry()
+    reg = FASTAPI_REGISTRY
     files = assemble(store, reg, rctx)
     assert len(files) == 1
     assert files[0].path == "pkg/__init__.py"
@@ -553,36 +551,46 @@ def test_response_schema_name_plain():
     assert _response_schema_name(h) == "PostResource"
 
 
-def test_build_action_body_context():
-    from foundry.naming import Name
+def test_action_route_dispatches_via_registry(registry):
+    """ActionRoute instances hit the action renderer (via type dispatch).
 
-    info = _ResourceInfo(
-        model=Name("Post"),
-        model_module="myapp.models",
-        app="myapp",
-        pkg="_generated",
-        route_prefix="/posts",
-        pk_name="id",
-        pk_py_type="uuid.UUID",
-        has_auth=False,
-        session_module="db.session",
-        get_db_fn="get_db",
-        generate_tests=False,
+    The jinja env is mocked because ``fastapi/ops/action.py.j2``
+    expects an ``action.*`` namespace that the body builder does not
+    supply; that is a pre-existing template/handler mismatch.  This
+    test stays focused on renderer dispatch + Fragment shape.
+    """
+    from kiln.config.schema import KilnConfig
+    from kiln.operations.action import ActionRoute
+
+    tmpl = MagicMock()
+    tmpl.render.return_value = "def publish_action(): ..."
+    env = MagicMock()
+    env.get_template.return_value = tmpl
+    config = KilnConfig(module="myapp", resources=[_resource()])
+    rctx = RenderCtx(
+        env=env,
+        config=config,
+        package_prefix="_generated",
+        extras={"resource": _resource()},
     )
-    h = RouteHandler(
+
+    h = ActionRoute(
         method="POST",
         path="/publish",
         function_name="publish_action",
-        op_name="action",
         response_model="PostResource",
         request_schema="PostPublishRequest",
     )
-    template, extras = _build_action_body(h, info)
-    assert template == "fastapi/ops/action.py.j2"
-    assert extras["function_name"] == "publish_action"
-    assert extras["method"] == "post"
-    assert extras["response_class"] == "PostResource"
-    assert extras["request_class"] == "PostPublishRequest"
+    fragments = registry.render(h, rctx)
+    assert len(fragments) == 1
+    frag = fragments[0]
+    assert frag.path == "myapp/routes/post.py"
+    env.get_template.assert_called_with("fastapi/ops/action.py.j2")
+    call_kwargs = tmpl.render.call_args.kwargs
+    assert call_kwargs["function_name"] == "publish_action"
+    assert call_kwargs["method"] == "post"
+    assert call_kwargs["response_class"] == "PostResource"
+    assert call_kwargs["request_class"] == "PostPublishRequest"
 
 
 def test_response_schema_name_list_envelope():

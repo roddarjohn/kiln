@@ -15,10 +15,7 @@ async def list_{{ model_lower }}(
 {% endfor %}
 {% if result_expression %}
     {{ result_expression }}
-{% elif serializer_fn %}
-    result = await db.execute(stmt)
-    return [{{ serializer_fn }}(obj) for obj in result.scalars()]
 {% else %}
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    return [{{ serializer_fn }}(obj) for obj in result.scalars()]
 {% endif %}

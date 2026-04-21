@@ -8,6 +8,8 @@ from foundry.operation import operation
 from foundry.outputs import RouterMount, StaticFile
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
@@ -26,23 +28,23 @@ class Router:
         self,
         ctx: BuildContext,
         _options: BaseModel,
-    ) -> list[RouterMount | StaticFile]:
+    ) -> Iterable[RouterMount | StaticFile]:
         """Produce router mounts for each resource.
 
         Args:
             ctx: Build context; instance is the config.
             _options: Unused.
 
-        Returns:
-            List of :class:`RouterMount` and :class:`StaticFile`
-            objects.
+        Yields:
+            :class:`RouterMount` objects for each resource and a
+            :class:`StaticFile` for the aggregated router module.
 
         """
         config = ctx.config
         module = getattr(config, "module", "app")
         resources = getattr(config, "resources", [])
 
-        mounts: list[RouterMount | StaticFile] = []
+        mounts: list[RouterMount] = []
         for resource in resources:
             model = getattr(resource, "model", "")
             _, _, class_name = model.rpartition(".")
@@ -55,28 +57,24 @@ class Router:
             )
 
         if not mounts:
-            return []
+            return
 
-        mounts.append(
-            StaticFile(
-                path=f"{module}/routes/__init__.py",
-                template="fastapi/router.py.j2",
-                context={
-                    "module": module,
-                    "routes": [
-                        {
-                            "module_name": m.alias.removesuffix(
-                                "_router",
-                            ),
-                            "alias": m.alias,
-                        }
-                        for m in mounts
-                        if isinstance(m, RouterMount)
-                    ],
-                },
-            )
+        yield from mounts
+
+        yield StaticFile(
+            path=f"{module}/routes/__init__.py",
+            template="fastapi/router.py.j2",
+            context={
+                "module": module,
+                "routes": [
+                    {
+                        "module_name": m.alias.removesuffix("_router"),
+                        "alias": m.alias,
+                    }
+                    for m in mounts
+                ],
+            },
         )
-        return mounts
 
 
 @operation("project_router", scope="project")
@@ -87,7 +85,7 @@ class ProjectRouter:
         self,
         ctx: BuildContext,
         _options: BaseModel,
-    ) -> list[StaticFile]:
+    ) -> Iterable[StaticFile]:
         """Produce the project-level router file.
 
         Only produces output for multi-app configs (those
@@ -97,39 +95,37 @@ class ProjectRouter:
             ctx: Build context; instance is the project config.
             _options: Unused.
 
-        Returns:
+        Yields:
             Single :class:`StaticFile` for the project router,
-            or empty list for single-level configs.
+            or nothing for single-level configs.
 
         """
         config = ctx.config
         apps = getattr(config, "apps", [])
         if not apps:
-            return []
+            return
 
         pkg = getattr(config, "package_prefix", "")
         has_auth = getattr(config, "auth", None) is not None
         auth_module = f"{pkg}.auth" if pkg else "auth"
 
-        return [
-            StaticFile(
-                path="routes/__init__.py",
-                template="fastapi/project_router.py.j2",
-                context={
-                    "has_auth": has_auth,
-                    "auth_module": auth_module,
-                    "apps": [
-                        {
-                            "module": (
-                                f"{pkg}.{app_ref.config.module}"
-                                if pkg
-                                else app_ref.config.module
-                            ),
-                            "alias": app_ref.config.module,
-                            "prefix": app_ref.prefix,
-                        }
-                        for app_ref in apps
-                    ],
-                },
-            )
-        ]
+        yield StaticFile(
+            path="routes/__init__.py",
+            template="fastapi/project_router.py.j2",
+            context={
+                "has_auth": has_auth,
+                "auth_module": auth_module,
+                "apps": [
+                    {
+                        "module": (
+                            f"{pkg}.{app_ref.config.module}"
+                            if pkg
+                            else app_ref.config.module
+                        ),
+                        "alias": app_ref.config.module,
+                        "prefix": app_ref.prefix,
+                    }
+                    for app_ref in apps
+                ],
+            },
+        )

@@ -37,7 +37,19 @@ kiln.renderers.fastapi
 kiln.operations
 ---------------
 
-.. automodule:: kiln.operations.crud
+.. automodule:: kiln.operations.get
+   :members:
+
+.. automodule:: kiln.operations.list
+   :members:
+
+.. automodule:: kiln.operations.create
+   :members:
+
+.. automodule:: kiln.operations.update
+   :members:
+
+.. automodule:: kiln.operations.delete
    :members:
 
 .. automodule:: kiln.operations.action

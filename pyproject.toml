@@ -35,11 +35,11 @@ kiln = "kiln.cli:app"
 [project.entry-points."kiln.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
 utils = "kiln.operations.infra:Utils"
-get = "kiln.operations.crud:Get"
-list = "kiln.operations.crud:List"
-create = "kiln.operations.crud:Create"
-update = "kiln.operations.crud:Update"
-delete = "kiln.operations.crud:Delete"
+get = "kiln.operations.get:Get"
+list = "kiln.operations.list:List"
+create = "kiln.operations.create:Create"
+update = "kiln.operations.update:Update"
+delete = "kiln.operations.delete:Delete"
 action = "kiln.operations.action:Action"
 auth = "kiln.operations.auth:Auth"
 router = "kiln.operations.routing:Router"
@@ -77,7 +77,7 @@ lint = ["ruff>=0.15.5", "types-jsonnet>=0.22.0.20260408", "zuban>=0.7.0"]
 
 [tool.ruff]
 line-length = 80
-exclude = ["docs", "playground", "tests/unit/golden"]
+exclude = ["docs", "playground"]
 
 
 [tool.ruff.lint]

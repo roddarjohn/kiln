@@ -12,6 +12,8 @@ from foundry.operation import operation
 from foundry.outputs import StaticFile
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
@@ -25,34 +27,29 @@ class Scaffold:
         self,
         ctx: BuildContext,
         _options: BaseModel,
-    ) -> list[StaticFile]:
+    ) -> Iterable[StaticFile]:
         """Produce static files for db sessions and auth.
 
         Args:
             ctx: Build context with project config.
             _options: Unused (no options).
 
-        Returns:
-            List of :class:`StaticFile` objects.
+        Yields:
+            :class:`StaticFile` objects for db and auth infrastructure.
 
         """
         config = ctx.config
-        files: list[StaticFile] = []
 
-        # db/__init__.py
-        files.append(
-            StaticFile(
-                path="db/__init__.py",
-                template="",
-                context={},
-            )
+        yield StaticFile(
+            path="db/__init__.py",
+            template="",
+            context={},
         )
 
-        # Database session files
         databases = getattr(config, "databases", [])
         if databases:
-            files.extend(
-                StaticFile(
+            for db in databases:
+                yield StaticFile(
                     path=f"db/{db.key}_session.py",
                     template="init/db_session.py.j2",
                     context={
@@ -67,46 +64,33 @@ class Scaffold:
                         "get_db_fn": f"get_{db.key}_db",
                     },
                 )
-                for db in databases
-            )
         else:
-            files.append(
-                StaticFile(
-                    path="db/session.py",
-                    template="init/db_session.py.j2",
-                    context={
-                        "key": None,
-                        "url_env": "DATABASE_URL",
-                        "echo": False,
-                        "pool_size": 5,
-                        "max_overflow": 10,
-                        "pool_timeout": 30,
-                        "pool_recycle": -1,
-                        "pool_pre_ping": True,
-                        "get_db_fn": "get_db",
-                    },
-                )
+            yield StaticFile(
+                path="db/session.py",
+                template="init/db_session.py.j2",
+                context={
+                    "key": None,
+                    "url_env": "DATABASE_URL",
+                    "echo": False,
+                    "pool_size": 5,
+                    "max_overflow": 10,
+                    "pool_timeout": 30,
+                    "pool_recycle": -1,
+                    "pool_pre_ping": True,
+                    "get_db_fn": "get_db",
+                },
             )
 
-        # Auth files
         auth = getattr(config, "auth", None)
         if auth is not None:
-            files.append(
-                StaticFile(
-                    path="auth/__init__.py",
-                    template="",
-                    context={},
-                )
+            yield StaticFile(
+                path="auth/__init__.py",
+                template="",
+                context={},
             )
-            files.append(
-                _auth_deps_static(auth),
-            )
+            yield _auth_deps_static(auth)
             if auth.get_current_user_fn is None:
-                files.append(
-                    _auth_router_static(auth),
-                )
-
-        return files
+                yield _auth_router_static(auth)
 
 
 def _auth_deps_static(auth: object) -> StaticFile:

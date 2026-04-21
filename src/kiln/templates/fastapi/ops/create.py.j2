@@ -1,27 +1,11 @@
-@router.post(
-    "/",
-{% if response_schema %}
-    response_model={{ response_schema }},
-{% endif %}
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_{{ model_lower }}(
-{% if has_schema %}
     body: {{ model_name }}CreateRequest,
-{% endif %}
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% for dep in extra_deps|default([]) %}
     {{ dep }}
 {% endfor %}
-) -> {% if response_schema %}{{ response_schema }}{% else %}None{% endif %}:
+) -> None:
     """Create a {{ model_name }}."""
-{% if response_schema %}
-    result = await db.execute(
-        insert({{ model_name }}).values({% if has_schema %}**body.model_dump(){% endif %}).returning({{ model_name }})
-    )
+    await db.execute(insert({{ model_name }}).values(**body.model_dump()))
     await db.commit()
-    return to_{{ model_lower }}_resource(result.scalars().one())
-{% else %}
-    await db.execute(insert({{ model_name }}).values({% if has_schema %}**body.model_dump(){% endif %}))
-    await db.commit()
-{% endif %}

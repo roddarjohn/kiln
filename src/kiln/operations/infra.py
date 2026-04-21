@@ -8,6 +8,8 @@ from foundry.operation import operation
 from foundry.outputs import StaticFile
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
@@ -21,20 +23,18 @@ class Utils:
         self,
         _ctx: BuildContext,
         _options: BaseModel,
-    ) -> list[StaticFile]:
+    ) -> Iterable[StaticFile]:
         """Produce the utils static file.
 
         Args:
             _ctx: Build context (unused).
             _options: Unused (no options).
 
-        Returns:
+        Yields:
             Single :class:`StaticFile` for ``utils.py``.
 
         """
-        return [
-            StaticFile(
-                path="utils.py",
-                template="fastapi/utils.py.j2",
-            )
-        ]
+        yield StaticFile(
+            path="utils.py",
+            template="fastapi/utils.py.j2",
+        )
