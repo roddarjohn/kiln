@@ -1,0 +1,302 @@
+"""Render registry for output types.
+
+The ``@renders`` decorator registers a function that knows how
+to turn a build output into a :class:`Fragment` -- a path,
+import set, and shell-template spec.  The engine/assembler
+calls renderers after the build phase and then groups fragments
+by output path to produce final files.
+
+Renderers can carry tags (e.g. ``tags={"framework": "fastapi"}``)
+that act as a *profile selector*.  The registry holds an
+``active_tags`` dict; at dispatch time, only renderers whose
+tags are a subset of the active tags are considered.  Untagged
+renderers are universal.  This lets a single registry host
+multiple mutually-exclusive framework profiles (fastapi, flask,
+...) and select one per run.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from foundry.imports import ImportCollector
+
+if TYPE_CHECKING:
+    import jinja2
+
+
+@dataclass(frozen=True)
+class RenderCtx:
+    """Context passed to every renderer function.
+
+    Attributes:
+        env: Jinja2 environment for template lookups.
+        config: The full project config dict (or model).
+        package_prefix: Dotted prefix for generated imports,
+            e.g. ``"_generated"``.
+        extras: Per-dispatch extras supplied by the assembler,
+            typically the current scope instance (e.g.
+            ``{"resource": <ResourceConfig>}``) so that renderers
+            can derive paths and imports without the assembler
+            having to know per-type details.
+
+    """
+
+    env: jinja2.Environment
+    config: Any
+    package_prefix: str = ""
+    extras: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Fragment:
+    """A single renderer's contribution to one output file.
+
+    The assembler groups fragments by :attr:`path` and produces
+    the final file by rendering :attr:`shell_template` with a
+    merged :attr:`shell_context`.  Imports from every fragment
+    targeting the same path are unioned.  In the merged context,
+    list-valued entries with the same key are concatenated in
+    fragment order; scalar entries keep the first seen value.
+
+    Attributes:
+        path: Output path relative to the output directory.
+        shell_template: Jinja2 template name that wraps the
+            accumulated content (e.g. ``"fastapi/route.py.j2"``).
+        shell_context: Template variables.  List values for the
+            same key across fragments concatenate; scalar values
+            are first-write-wins.
+        imports: Imports this fragment requires; merged with other
+            fragments at assembly time.
+
+    """
+
+    path: str
+    shell_template: str
+    shell_context: dict[str, Any] = field(default_factory=dict)
+    imports: ImportCollector = field(default_factory=ImportCollector)
+
+
+_RendererFn = Callable[[Any, RenderCtx], "Fragment | list[Fragment]"]
+
+
+@dataclass
+class _RendererEntry:
+    """One registered renderer with its profile tags."""
+
+    fn: _RendererFn
+    tags: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class RenderRegistry:
+    """Maps output types to renderer functions, filtered by tags.
+
+    Renderers register with optional ``tags``; the registry has
+    a matching ``active_tags`` dict.  A renderer matches iff all
+    of its tag constraints are satisfied by ``active_tags``.
+    Untagged renderers always match.
+
+    Example::
+
+        registry = RenderRegistry(active_tags={"framework": "fastapi"})
+
+        @registry.renders(RouteHandler, tags={"framework": "fastapi"})
+        def render_route(handler, ctx):
+            return Fragment(...)
+
+    """
+
+    active_tags: dict[str, str] = field(default_factory=dict)
+    _entries: dict[type, list[_RendererEntry]] = field(
+        default_factory=dict,
+    )
+
+    def renders(
+        self,
+        output_type: type,
+        *,
+        tags: Mapping[str, str] | None = None,
+    ) -> Callable[[_RendererFn], _RendererFn]:
+        """Register a renderer for *output_type*.
+
+        Args:
+            output_type: The output class this renderer handles.
+            tags: Optional profile tags; the renderer only fires
+                when every ``(key, value)`` in ``tags`` matches
+                the registry's ``active_tags``.
+
+        Returns:
+            The original function, unmodified.
+
+        """
+
+        def decorator(fn: _RendererFn) -> _RendererFn:
+            entries = self._entries.setdefault(output_type, [])
+            entries.append(
+                _RendererEntry(fn=fn, tags=dict(tags or {})),
+            )
+            return fn
+
+        return decorator
+
+    def render(
+        self,
+        obj: object,
+        ctx: RenderCtx,
+    ) -> list[Fragment]:
+        """Produce :class:`Fragment` objects for a build output.
+
+        A renderer may return a single fragment or a list of
+        fragments; both forms are normalized here.  Multiple
+        fragments let one output contribute to more than one
+        file (e.g. a serializer emits both its serializer file
+        and an auxiliary fragment enriching the test file).
+
+        Args:
+            obj: The build output to render.
+            ctx: Render context with env, config, and per-scope
+                extras.
+
+        Returns:
+            A list of :class:`Fragment` objects, each targeting
+            some output file.  May be empty if the renderer
+            decides not to contribute.
+
+        Raises:
+            LookupError: No renderer registered for the type
+                matches the active tags.
+
+        """
+        output_type = type(obj)
+        for entry in self._entries.get(output_type, []):
+            if self._matches(entry):
+                result = entry.fn(obj, ctx)
+                if isinstance(result, Fragment):
+                    return [result]
+                return list(result)
+        msg = (
+            f"No renderer for {output_type.__name__} "
+            f"matching active tags {self.active_tags!r}"
+        )
+        raise LookupError(msg)
+
+    def has_renderer(self, output_type: type) -> bool:
+        """Return whether any renderer is registered for *output_type*."""
+        return output_type in self._entries
+
+    def _matches(self, entry: _RendererEntry) -> bool:
+        """Return ``True`` when *entry*'s tags match ``active_tags``."""
+        return all(self.active_tags.get(k) == v for k, v in entry.tags.items())
+
+
+@dataclass
+class BuildStore:
+    """Accumulator for objects produced during the build phase.
+
+    Objects are keyed by ``(scope_name, instance_id, op_name)``
+    so the engine and later operations can query earlier output.
+
+    Attributes:
+        _items: Internal storage mapping keys to object lists.
+
+    """
+
+    _items: dict[tuple[str, str, str], list[object]] = field(
+        default_factory=dict
+    )
+
+    def add(
+        self,
+        scope: str,
+        instance_id: str,
+        op_name: str,
+        *objects: object,
+    ) -> None:
+        """Store build outputs for a build step.
+
+        Args:
+            scope: Scope name (e.g. ``"resource"``).
+            instance_id: Instance identifier within the scope.
+            op_name: Operation name that produced these objects.
+            *objects: The build outputs to store.
+
+        """
+        key = (scope, instance_id, op_name)
+        self._items.setdefault(key, []).extend(objects)
+
+    def get(
+        self,
+        scope: str,
+        instance_id: str,
+        op_name: str,
+    ) -> list[object]:
+        """Retrieve build outputs for a specific build step.
+
+        Args:
+            scope: Scope name.
+            instance_id: Instance identifier.
+            op_name: Operation name.
+
+        Returns:
+            List of build outputs, empty if none stored.
+
+        """
+        return list(self._items.get((scope, instance_id, op_name), []))
+
+    def get_by_scope(
+        self,
+        scope: str,
+        instance_id: str,
+    ) -> list[object]:
+        """Retrieve all build outputs for a scope instance.
+
+        Args:
+            scope: Scope name.
+            instance_id: Instance identifier.
+
+        Returns:
+            All build outputs across all operations for this
+            scope instance.
+
+        """
+        result: list[object] = []
+        for (s, iid, _), items in self._items.items():
+            if s == scope and iid == instance_id:
+                result.extend(items)
+        return result
+
+    def get_by_type(self, output_type: type) -> list[object]:
+        """Retrieve all build outputs of a given type.
+
+        Args:
+            output_type: The output class to filter by.
+
+        Returns:
+            All matching build outputs across all keys.
+
+        """
+        result: list[object] = []
+        for items in self._items.values():
+            result.extend(obj for obj in items if isinstance(obj, output_type))
+        return result
+
+    def all_items(self) -> list[object]:
+        """Return every stored build output."""
+        result: list[object] = []
+        for items in self._items.values():
+            result.extend(items)
+        return result
+
+    def entries(
+        self,
+    ) -> Iterator[tuple[str, str, str, list[object]]]:
+        """Iterate stored entries as ``(scope, instance_id, op_name, items)``.
+
+        Used by the assembler to walk the store and dispatch
+        each item to the correct renderer with scope-aware context.
+        """
+        for (scope, iid, op_name), items in self._items.items():
+            yield scope, iid, op_name, items

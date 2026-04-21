@@ -1,167 +1,112 @@
 Extending kiln
 ==============
 
-Kiln is designed to be extended.  There are two ways to add new
-generation capabilities:
+.. contents:: On this page
+   :local:
+   :depth: 2
 
-1. **Entry-point generators** — a Python package that plugs in via
-   ``pyproject.toml``.  This is the recommended approach for
-   generators you want to reuse across projects or share publicly.
+kiln is designed to be extended at three levels:
 
-2. **Jsonnet stdlib additions** — pure-config helpers that compose
-   existing kiln primitives.  No Python required.
+1. **Add an operation.**  The most common extension -- contribute a
+   new CRUD-like endpoint, a cross-cutting concern (auth, rate
+   limiting, caching), or a completely new file type.
+2. **Swap a renderer.**  Replace or augment how an existing output
+   type is turned into code, without touching the operation that
+   produces it.
+3. **Ship a new target.**  Build a generator for a different
+   framework entirely by using ``foundry`` directly -- no
+   dependency on ``kiln``'s FastAPI-specific bits.
 
-Writing a custom generator
---------------------------
+This document covers all three, in increasing order of ambition.
+For background on the architecture, see :doc:`architecture`.
 
-A generator is any class that satisfies the
-:class:`~kiln.generators.base.Generator` protocol:
+Adding an operation
+-------------------
 
-.. code-block:: python
+An operation is a class decorated with
+:func:`~foundry.operation.operation` that produces typed output
+objects in its :meth:`build` method.  The engine takes care of
+scheduling: scope walking, dependency ordering, and options parsing.
 
-   from kiln.config.schema import KilnConfig
-   from kiln.generators.base import GeneratedFile
-
-
-   class TypeScriptClientGenerator:
-       """Generates a TypeScript API client from the kiln config."""
-
-       @property
-       def name(self) -> str:
-           return "typescript_client"
-
-       def can_generate(self, config: KilnConfig) -> bool:
-           # Only run when resources with operations are present
-           return any(r.operations for r in config.resources)
-
-       def generate(self, config: KilnConfig) -> list[GeneratedFile]:
-           files = []
-           for resource in config.resources:
-               if not resource.operations:
-                   continue
-               files.append(GeneratedFile(
-                   path=f"client/{resource.model.split('.')[-1].lower()}.ts",
-                   content=_render_ts_client(resource),
-               ))
-           return files
-
-The :class:`~kiln.generators.base.GeneratedFile` ``overwrite`` flag
-controls whether re-running ``kiln generate`` replaces existing output:
-
-* ``overwrite=True`` (default) — always refresh on re-generation.
-* ``overwrite=False`` — write only if the file does not already exist.
-  Use this for stubs the developer is expected to fill in.
-
-Registering via entry points
-----------------------------
-
-Add the generator to your package's ``pyproject.toml``:
-
-.. code-block:: toml
-
-   [project.entry-points."kiln.generators"]
-   typescript = "my_package.generators:TypeScriptClientGenerator"
-
-Kiln discovers all installed generators in this group automatically
-when :meth:`~kiln.generators.registry.GeneratorRegistry.default` is
-called (which is what ``kiln generate`` uses).
-
-Multiple generators can be registered from the same package:
-
-.. code-block:: toml
-
-   [project.entry-points."kiln.generators"]
-   typescript = "my_package:TypeScriptClientGenerator"
-   openapi    = "my_package:OpenAPISpecGenerator"
-
-Customising CRUD operations
-----------------------------
-
-The built-in :class:`~kiln.generators.fastapi.resource.ResourceGenerator`
-uses a **pipeline** of composable operations.  Each CRUD action (get,
-list, create, update, delete) is a separate
-:class:`~kiln.generators.fastapi.operations.Operation` that contributes
-schema classes and route handlers to the generated files.
-
-Operations are discovered via the ``kiln.operations`` entry-point group,
-using the same mechanism as generators.  You can add custom operations
-by registering them in your package's ``pyproject.toml``.
-
-Adding a custom operation
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Create a class that satisfies the
-:class:`~kiln.generators.fastapi.operations.Operation` protocol:
+Step 1 -- write the class
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-   from kiln.config.schema import OperationConfig, ResourceConfig
-   from kiln.generators.fastapi.operations import SharedContext
-   from kiln.generators.base import FileSpec
+   from pydantic import BaseModel
+
+   from foundry.engine import BuildContext
+   from foundry.operation import operation
+   from foundry.outputs import RouteHandler, RouteParam
 
 
-   class BulkCreateOperation:
-       """POST /bulk — create multiple resources at once."""
+   @operation("bulk_create", scope="resource", requires=["create"])
+   class BulkCreate:
+       """POST /bulk -- insert many resources in one request."""
 
-       name = "bulk_create"
+       class Options(BaseModel):
+           max_items: int = 100
 
-       def validate(self, op_config: OperationConfig) -> None:
-           max_items = op_config.options.get("max_items", 100)
-           if max_items < 1:
-               raise ValueError("max_items must be >= 1")
-
-       def contribute(
+       def build(
            self,
-           specs: dict[str, FileSpec],
-           resource: ResourceConfig,
-           ctx: SharedContext,
-           op_config: OperationConfig,
-       ) -> None:
-           schema = specs["schema"]
-           route = specs["route"]
-           max_items = op_config.options.get("max_items", 100)
-
-           # Add a BulkCreateRequest schema class
-           schema.imports.add_from("pydantic", "BaseModel")
-           snippet = f'''
-   class {ctx.model.pascal}BulkCreateRequest(BaseModel):
-       """Bulk create request (max {max_items} items)."""
-
-       items: list[{ctx.model.suffixed("CreateRequest")}]
-   '''
-           schema.context["schema_classes"].append(snippet)
-           schema.exports.append(
-               ctx.model.suffixed("BulkCreateRequest")
+           ctx: BuildContext,
+           options: "Options",
+       ) -> list[object]:
+           model = ctx.instance.model.rpartition(".")[-1]
+           handler = RouteHandler(
+               method="post",
+               path="/bulk",
+               function_name=f"bulk_create_{model.lower()}",
+               op_name="bulk_create",
+               params=[
+                   RouteParam(
+                       name="payload",
+                       annotation=f"list[{model}CreateRequest]",
+                   ),
+               ],
+               body_lines=[
+                   f"if len(payload) > {options.max_items}:",
+                   "    raise HTTPException(413)",
+                   f"stmt = insert({model}).values(",
+                   "    [p.model_dump() for p in payload]",
+                   ")",
+                   "await db.execute(stmt)",
+                   "await db.commit()",
+               ],
+               status_code=201,
            )
+           return [handler]
 
-           # Add a POST /bulk route handler
-           route.imports.add_from("sqlalchemy", "insert")
-           route.imports.add_from(
-               ctx.model_module, ctx.model.pascal
-           )
-           handler = f'''
-   @router.post("/bulk", status_code=status.HTTP_201_CREATED)
-   async def bulk_create_{ctx.model.lower}(
-       payload: {ctx.model.suffixed("BulkCreateRequest")},
-       db: Annotated[AsyncSession, Depends({ctx.get_db_fn})],
-   ):
-       for item in payload.items:
-           stmt = insert({ctx.model.pascal}).values(
-               **item.model_dump()
-           )
-           await db.execute(stmt)
-       await db.commit()
-   '''
-           route.context["route_handlers"].append(handler)
+A few things to notice:
 
-Register it as an entry point:
+* The class name is irrelevant to the engine -- the name from the
+  ``@operation(...)`` decorator is what matters.
+* ``scope="resource"`` means ``build()`` runs once per
+  :class:`~kiln.config.schema.ResourceConfig`.
+* ``requires=["create"]`` ensures the ``create`` operation builds
+  first, so its schemas are available in the build store before this
+  runs (useful if you want to inspect or extend them).
+* ``Options`` is optional.  When omitted, operations receive
+  :class:`~foundry.operation.EmptyOptions`.
+
+Step 2 -- register via entry point
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Add your operation to your package's ``pyproject.toml``:
 
 .. code-block:: toml
 
    [project.entry-points."kiln.operations"]
-   bulk_create = "my_package.ops:BulkCreateOperation"
+   bulk_create = "my_pkg.ops:BulkCreate"
 
-Then use it in your config:
+``kiln generate`` discovers all installed operations at startup, so
+as long as your package is ``pip install``\ ed alongside kiln the
+operation is available.
+
+Step 3 -- opt resources in
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Add the operation name to the resource's ``operations`` list:
 
 .. code-block:: jsonnet
 
@@ -175,154 +120,293 @@ Then use it in your config:
      }],
    }
 
-Configuring operations
-~~~~~~~~~~~~~~~~~~~~~~
+Options come from the extra keys on the operation entry.  Pydantic
+validates them against the ``Options`` class.
 
-Operations are configured at three levels, with more specific levels
-overriding more general ones:
+Cross-cutting operations with ``when()``
+----------------------------------------
 
-1. **Project-level** — ``operations`` on the top-level ``KilnConfig``
-   sets the default for all apps.
-2. **App-level** — ``operations`` on an app's ``KilnConfig`` overrides
-   the project default.
-3. **Resource-level** — ``operations`` on a ``ResourceConfig`` overrides
-   the app default.
+Some operations should not appear in the user's ``operations`` list
+at all -- they activate themselves based on config and augment other
+operations' output.  Auth is the canonical example: when
+``config.auth`` is set, auth silently appends a dependency to every
+CRUD handler.
 
-When a resource does not specify ``operations``, it inherits from its
-parent config.  Use Jsonnet array concatenation to extend rather than
-replace:
+Declare a ``when()`` method instead of relying on the opt-in list:
 
-.. code-block:: jsonnet
+.. code-block:: python
 
-   // Project-level defaults
-   {
-     operations: ["get", "list", "create", "update", "delete"],
+   from foundry.engine import BuildContext
+   from foundry.operation import operation
+   from foundry.outputs import RouteHandler
 
-     apps: [{
-       config: {
-         module: "blog",
-         resources: [{
-           model: "blog.models.Article",
-           // Override: only get and list, plus a custom action
-           operations: [
-             "get", "list",
-             { name: "publish", fn: "blog.actions.publish" },
-           ],
-         }],
-       },
-       prefix: "/blog",
-     }],
-   }
 
-Each operation entry can be:
+   @operation(
+       "rate_limit",
+       scope="resource",
+       requires=["get", "list", "create", "update", "delete"],
+   )
+   class RateLimit:
+       """Add a rate-limit decorator to every write handler."""
 
-* A **string** — built-in operation name, e.g. ``"get"``.
-* An **object** with ``name`` — operation with options:
+       def when(self, ctx: BuildContext) -> bool:
+           return getattr(ctx.config, "rate_limit", None) is not None
 
-  .. code-block:: jsonnet
+       def build(self, ctx, _options):
+           limit = ctx.config.rate_limit
+           for h in ctx.store.get_by_scope(
+               ctx.scope.name, ctx.instance_id,
+           ):
+               if isinstance(h, RouteHandler) and h.method != "get":
+                   h.add_decorator(
+                       f"@limiter.limit('{limit}')",
+                   )
+                   h.extra_imports.append(
+                       ("myapp.rate_limit", "limiter"),
+                   )
+           return []
 
-     { name: "create", fields: [...], require_auth: true }
+Three important properties:
 
-* An **action** — object with ``name`` and ``fn``:
+* **``when`` bypasses the opt-in list.**  Cross-cutting operations run
+  whenever their predicate says so, regardless of the user's
+  ``operations`` config.  Users don't have to remember to opt in.
+* **``requires`` orders it after producers.**  Listing the CRUD
+  operations in ``requires`` guarantees their output exists in the
+  build store by the time ``build`` runs.
+* **The build method returns ``[]``.**  Augmenting operations mutate
+  existing objects in place; they produce no new outputs of their
+  own.
 
-  .. code-block:: jsonnet
+See ``src/kiln/operations/auth.py`` for the real-world auth
+implementation.
 
-     { name: "publish", fn: "blog.actions.publish", params: [...] }
+Augmenting vs producing
+-----------------------
 
-* A **custom operation** — object with ``class``:
+``foundry`` deliberately has one mechanism -- operations -- for
+both "produce new output" and "modify earlier output".  This keeps
+the execution model simple and uniform:
 
-  .. code-block:: jsonnet
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
 
-     { name: "bulk_create", "class": "my_pkg.BulkCreateOp", max: 100 }
+   * - Role
+     - Returns from ``build``
+     - Typical ``requires``
+   * - Producer
+     - New output objects
+     - Nothing (or earlier producers whose output you depend on)
+   * - Augmenter
+     - ``[]`` (nothing new)
+     - All producers whose output you want to mutate
+
+An operation can also do both: produce new objects *and* tweak
+earlier ones in the same ``build`` call.
+
+Mutating output objects
+-----------------------
+
+Every type in :mod:`foundry.outputs` is a mutable dataclass with
+helpers for safe modification:
+
+.. code-block:: python
+
+   from foundry.outputs import RouteHandler, SchemaClass
+
+   for handler in ctx.store.get_by_type(RouteHandler):
+       handler.add_decorator("@cache(ttl=60)")
+       handler.prepend_body("log.info('cached-endpoint-hit')")
+       handler.extra_imports.append(("myapp.cache", "cache"))
+
+   for schema in ctx.store.get_by_type(SchemaClass):
+       if schema.name.endswith("Resource"):
+           schema.add_field("cached_at", "datetime", optional=True)
+
+:meth:`RouteHandler.extra_imports` is the recommended way to add
+imports.  The assembler merges every handler's ``extra_imports`` into
+the route file's top-of-file import block automatically.
+
+Swapping a renderer
+-------------------
+
+Every output type has a default renderer in
+``kiln.renderers.fastapi``.  You can override or supplement these
+without changing the operation that produces the output.
+
+Register an additional renderer with a ``when`` predicate.  The
+registry tries registrations in order and uses the first whose
+predicate matches:
+
+.. code-block:: python
+
+   from foundry.outputs import RouteHandler
+   from foundry.render import RenderRegistry
+
+   def register_my_renderers(registry: RenderRegistry) -> None:
+
+       @registry.renders(
+           RouteHandler,
+           when=lambda cfg: getattr(cfg, "use_async_retry", False),
+       )
+       def render_retry_handler(handler, ctx):
+           # custom Jinja template that wraps the body in a retry loop
+           return ctx.env.get_template(
+               "my_pkg/retry_handler.j2",
+           ).render(h=handler)
+
+Register the predicate-guarded renderer *first* (before the default
+unguarded one) if you want it to win when the flag is on.
+
+To plug new renderers in, write your own equivalent of
+:func:`kiln.renderers.fastapi.create_registry` and wire it into your
+own ``generate()`` entry point.  There is no entry-point group for
+renderers because there can only be one registry per generation run.
+
+Adding a new output type
+------------------------
+
+You are not limited to the built-in output types.  A plugin can
+define its own dataclass, register a renderer for it, and have
+operations emit instances of it.
+
+.. code-block:: python
+
+   from dataclasses import dataclass, field
+   from foundry.operation import operation
+   from foundry.render import RenderRegistry
+
+
+   @dataclass
+   class GraphQLField:
+       name: str
+       gql_type: str
+       resolver: str | None = None
+
+
+   @operation("graphql_fields", scope="resource")
+   class GraphQLFields:
+       def build(self, ctx, _options):
+           return [
+               GraphQLField(name=f.name, gql_type=f.type.upper())
+               for f in ctx.instance.fields
+           ]
+
+
+   def register(registry: RenderRegistry) -> None:
+
+       @registry.renders(GraphQLField)
+       def render_gql(field, _ctx):
+           return f"{field.name}: {field.gql_type}"
+
+The assembler only knows how to group the built-in types.  A plugin
+that introduces a new type is also responsible for extending the
+assembler (or shipping its own) so the renderer output ends up in
+the right file.
+
+Building on ``foundry`` directly
+-----------------------------------
+
+If you are generating code for a target that has nothing to do with
+FastAPI (a Go CLI, a Terraform module, a gRPC service), skip the
+``kiln`` package entirely and use ``foundry``:
+
+.. code-block:: python
+
+   from foundry.engine import Engine
+   from foundry.render import RenderCtx, RenderRegistry
+   from foundry.env import create_jinja_env
+
+   def generate_my_thing(config):
+       engine = Engine(operations=[...])
+       store = engine.build(config)
+
+       registry = RenderRegistry()
+       register_my_renderers(registry)
+
+       env = create_jinja_env("my_pkg", "templates")
+       ctx = RenderCtx(env=env, config=config)
+
+       files = []
+       for obj in store.all_items():
+           content = registry.render(obj, ctx)
+           files.append(GeneratedFile(path=..., content=content))
+       return files
+
+You need:
+
+* A Pydantic config schema for your target.
+* Your own operations.
+* Your own renderers, registry, and assembler.
+* A Jinja2 template directory (or a different renderer backend).
+
+Everything in ``foundry`` is target-agnostic and reusable.
 
 Operation validation
-~~~~~~~~~~~~~~~~~~~~
+--------------------
 
-Each operation can validate its configuration in the ``validate()``
-method, which runs before any ``contribute()`` methods.  This ensures
-all configuration errors are reported before generation begins:
-
-.. code-block:: python
-
-   class BulkCreateOperation:
-       name = "bulk_create"
-
-       def validate(self, op_config: OperationConfig) -> None:
-           if "max_items" not in op_config.options:
-               raise ValueError("bulk_create requires 'max_items'")
-
-How operations work
-~~~~~~~~~~~~~~~~~~~
-
-Each operation receives a ``specs: dict[str, FileSpec]`` bag.
-Built-in keys are ``"schema"``, ``"route"``, and optionally
-``"serializer"`` — but extensions can add any key they like
-(e.g. ``"test"``, ``"client"``).
-
-Operations mutate specs by:
-
-- Looking up specs by key: ``schema = specs["schema"]``
-- Adding imports via ``spec.imports.add_from("module", "name")``
-- Appending content to context lists (e.g.
-  ``spec.context["schema_classes"]``)
-- Registering export names in ``spec.exports``
-- Creating entirely new specs: ``specs["myfile"] = FileSpec(...)``
-
-After all operations run, the pipeline automatically wires cross-file
-imports: every spec's exports are made available to every other spec
-via ``from module import ...`` lines.
-
-The ``SetupOperation`` (always run internally) creates the base
-``"schema"`` and ``"route"`` specs.  Custom operations that add new
-file types should create their own specs in ``contribute()``.
-
-Testing a custom generator
---------------------------
-
-Use the registry directly in tests:
+Per-operation options are validated by Pydantic at config-load time
+because they are parsed into the operation's ``Options`` model.  Any
+cross-field validation belongs in a Pydantic
+``@model_validator(mode="after")`` on that model:
 
 .. code-block:: python
 
-   from kiln.config.schema import KilnConfig
-   from kiln.generators.registry import GeneratorRegistry
-   from my_package import TypeScriptClientGenerator
+   from pydantic import BaseModel, model_validator
 
-   def test_my_generator():
-       registry = GeneratorRegistry()
-       registry.register(TypeScriptClientGenerator())
 
-       config = KilnConfig(...)
-       files = registry.run(config)
-       assert any(f.path.endswith(".ts") for f in files)
+   class BulkCreateOptions(BaseModel):
+       max_items: int = 100
+       batch_size: int = 10
 
-Jsonnet stdlib extensions
--------------------------
+       @model_validator(mode="after")
+       def _check(self):
+           if self.batch_size > self.max_items:
+               raise ValueError(
+                   "batch_size must be <= max_items",
+               )
+           return self
 
-To share config patterns without writing Python, add ``.libsonnet``
-files alongside your config and import them:
 
-.. code-block:: jsonnet
-
-   // shared/soft_delete.libsonnet
-   // Adds standard soft-delete fields to any model.
-   {
-     fields:: [
-       { name: "deleted_at", type: "datetime", nullable: true },
-       { name: "deleted_by", type: "uuid",     nullable: true },
-     ],
-   }
-
-.. code-block:: jsonnet
-
-   // myapp.jsonnet
-   local sd = import 'shared/soft_delete.libsonnet';
-   local field = import 'kiln/models/fields.libsonnet';
-
-   {
-     models: [{
-       name: "Order",
-       table: "orders",
-       fields: [field.uuid("id", primary_key=true)] + sd.fields,
+   @operation("bulk_create", scope="resource")
+   class BulkCreate:
+       Options = BulkCreateOptions
        ...
-     }],
-   }
+
+Errors raised during config loading are reported to the user before
+generation begins.
+
+Testing your extension
+----------------------
+
+Run your operations through the engine directly -- no CLI needed:
+
+.. code-block:: python
+
+   from kiln.config.schema import KilnConfig, ResourceConfig
+   from foundry.engine import Engine
+   from foundry.outputs import RouteHandler
+
+   from my_pkg.ops import BulkCreate
+
+
+   def test_bulk_create_produces_handler():
+       cfg = KilnConfig(
+           resources=[
+               ResourceConfig(
+                   model="myapp.Article",
+                   operations=["bulk_create"],
+               ),
+           ],
+       )
+       engine = Engine(operations=[BulkCreate])
+       store = engine.build(cfg)
+
+       handlers = store.get_by_type(RouteHandler)
+       assert any(h.path == "/bulk" for h in handlers)
+
+For full end-to-end coverage, load a fixture config via
+:func:`kiln.config.loader.load` and pass it through
+:func:`kiln.renderers.generate.generate` to get back the full list of
+:class:`~foundry.spec.GeneratedFile` objects.

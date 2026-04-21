@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import _jsonnet  # type: ignore[import-untyped]
+import _jsonnet
 
 from kiln.config.schema import KilnConfig
 
@@ -77,7 +77,7 @@ def _evaluate_jsonnet(path: Path) -> str:
         JSON string produced by the Jsonnet evaluator.
 
     """
-    return _jsonnet.evaluate_file(  # type: ignore[no-any-return]
+    return _jsonnet.evaluate_file(
         str(path),
         import_callback=_import_callback,
     )

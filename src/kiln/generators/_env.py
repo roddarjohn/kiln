@@ -1,26 +1,26 @@
-"""Shared Jinja2 environment for all kiln code generators."""
+"""Shared Jinja2 environment for all kiln code generators.
+
+Creates a module-level :data:`env` using kiln's bundled template
+directory and provides a convenience :func:`render_snippet` that
+delegates to :func:`foundry.env.render_snippet` with the
+pre-configured environment.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import jinja2
+from foundry.env import create_jinja_env
+from foundry.env import render_snippet as _core_render_snippet
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
-#: Jinja2 environment used by all generators.
+#: Jinja2 environment used by all kiln generators.
 #:
 #: ``trim_blocks`` and ``lstrip_blocks`` are enabled so that block
 #: tags (``{% if %}``, ``{% for %}``, etc.) do not add extra blank
 #: lines to the rendered output.
-env = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(_TEMPLATES_DIR),
-    trim_blocks=True,
-    lstrip_blocks=True,
-    keep_trailing_newline=True,
-    undefined=jinja2.StrictUndefined,
-    autoescape=False,  # noqa: S701 — generating Python source, not HTML
-)
+env = create_jinja_env(_TEMPLATES_DIR)
 
 
 def render_snippet(template_name: str, **ctx: object) -> str:
@@ -39,4 +39,4 @@ def render_snippet(template_name: str, **ctx: object) -> str:
         Rendered template string.
 
     """
-    return env.get_template(template_name).render(**ctx).strip()
+    return _core_render_snippet(env, template_name, **ctx)

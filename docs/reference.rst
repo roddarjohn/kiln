@@ -8,43 +8,23 @@ Reference
 Config schema
 -------------
 
-All config files are parsed into a :class:`~kiln.config.schema.KilnConfig`
-object.  The classes below correspond directly to the keys in your
-``.jsonnet`` / ``.json`` config file.
+All config files parse into a :class:`~kiln.config.schema.KilnConfig`
+instance.  The classes below correspond directly to the fields you
+write in ``.jsonnet`` / ``.json``.
 
 .. autoclass:: kiln.config.schema.KilnConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.AppRef
+.. autoclass:: kiln.config.schema.ResourceConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.ModelConfig
+.. autoclass:: kiln.config.schema.OperationConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.FieldConfig
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.CrudConfig
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.ViewModel
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.ViewParam
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.ViewColumn
-   :members:
-   :undoc-members:
-
-.. autoclass:: kiln.config.schema.DatabaseConfig
+.. autoclass:: kiln.config.schema.FieldSpec
    :members:
    :undoc-members:
 
@@ -52,298 +32,325 @@ object.  The classes below correspond directly to the keys in your
    :members:
    :undoc-members:
 
+.. autoclass:: kiln.config.schema.DatabaseConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.AppRef
+   :members:
+   :undoc-members:
+
 Field types
 ^^^^^^^^^^^
 
-The ``type`` field on :class:`~kiln.config.schema.FieldConfig` and
-:class:`~kiln.config.schema.ViewColumn` accepts the following values:
+The ``type`` field on :class:`~kiln.config.schema.FieldSpec` accepts:
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 30 30 25
+   :widths: 15 25 30 30
 
    * - Type
-     - SQLAlchemy column
-     - Pydantic / Python type
-     - PostgreSQL SQL type
+     - Python annotation
+     - Used in
+     - Notes
    * - ``uuid``
-     - ``pg.UUID(as_uuid=True)``
      - ``uuid.UUID``
-     - ``UUID``
+     - request/response schemas, pk
+     - Default for primary keys.
    * - ``str``
-     - ``String``
      - ``str``
-     - ``TEXT``
+     - schemas, action params
+     -
    * - ``email``
-     - ``String``
      - ``str``
-     - ``TEXT``
+     - schemas
+     - Added ``pydantic.EmailStr`` validation.
    * - ``int``
-     - ``Integer``
      - ``int``
-     - ``INTEGER``
+     - schemas, pk
+     -
    * - ``float``
-     - ``Float``
      - ``float``
-     - ``DOUBLE PRECISION``
+     - schemas
+     -
    * - ``bool``
-     - ``Boolean``
      - ``bool``
-     - ``BOOLEAN``
+     - schemas
+     -
    * - ``datetime``
-     - ``pg.TIMESTAMP(timezone=True)``
-     - ``datetime``
-     - ``TIMESTAMPTZ``
+     - ``datetime.datetime``
+     - schemas
+     -
    * - ``date``
-     - ``pg.DATE``
-     - ``date``
-     - ``DATE``
+     - ``datetime.date``
+     - schemas
+     -
    * - ``json``
-     - ``pg.JSONB``
      - ``dict[str, Any]``
-     - ``JSONB``
+     - schemas
+     -
 
-Built-in generators
+Built-in operations
 -------------------
 
-Kiln ships four app-level generators and two structural generators.
-All are registered automatically when you call
-:meth:`~kiln.generators.registry.GeneratorRegistry.default`.
-
-App-level generators
-^^^^^^^^^^^^^^^^^^^^
-
-These run once per app (or once in app mode) for every ``kiln generate``
-invocation.
+Every built-in operation is registered under the ``kiln.operations``
+entry-point group in kiln's own ``pyproject.toml``.  See :doc:`usage`
+for what each one generates and :doc:`extending` for the operation
+protocol.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 25 45
+   :widths: 20 18 18 44
 
-   * - Generator
-     - Runs when
-     - Output files
-   * - :class:`~kiln.generators.fastapi.models.PGCraftModelGenerator`
-     - ``config.models`` is non-empty
-     - ``{module}/models/{name}.py`` — one pgcraft declarative class per model
-   * - :class:`~kiln.generators.fastapi.crud.CRUDGenerator`
-     - any model has ``crud`` set
-     - ``{module}/routes/{name}.py`` — CRUD router; ``{module}/schemas/{name}.py`` — Pydantic schemas
-   * - :class:`~kiln.generators.fastapi.views.ViewGenerator`
-     - ``config.views`` is non-empty
-     - ``{module}/routes/{name}.py`` — one FastAPI route per view
-   * - :class:`~kiln.generators.fastapi.router.RouterGenerator`
-     - models or views are present
-     - ``{module}/routes/__init__.py`` — aggregated router
-
-Structural generators
-^^^^^^^^^^^^^^^^^^^^^
-
-These run outside the per-generator loop and produce shared infrastructure.
-
-**ScaffoldGenerator**
-
-Runs when auth or databases are configured (in app mode), or once at
-the start of every project-mode build.  Produces:
-
-* ``db/base.py`` — ``PGCraftBase`` subclass (``Base``) shared by all models
-* ``db/{key}_session.py`` — async SQLAlchemy engine + ``AsyncSession`` factory per database
-* ``auth/dependencies.py`` — ``get_current_user`` FastAPI dependency (JWT or custom)
-
-**ProjectRouterGenerator**
-
-Runs only in project mode (``config.apps`` is non-empty).  Produces:
-
-* ``routes/__init__.py`` — root ``APIRouter`` that mounts every app router
-  at its configured prefix
-
-Generator details
-^^^^^^^^^^^^^^^^^
-
-.. autoclass:: kiln.generators.fastapi.models.PGCraftModelGenerator
-   :members: name, can_generate, generate
-
-.. autoclass:: kiln.generators.fastapi.crud.CRUDGenerator
-   :members: name, can_generate, generate
-
-.. autoclass:: kiln.generators.fastapi.views.ViewGenerator
-   :members: name, can_generate, generate
-
-.. autoclass:: kiln.generators.fastapi.router.RouterGenerator
-   :members: name, can_generate, generate
-
-.. autoclass:: kiln.generators.init.scaffold.ScaffoldGenerator
-   :members: name, can_generate, generate
-
-.. autoclass:: kiln.generators.fastapi.project_router.ProjectRouterGenerator
-   :members: name, can_generate, generate
-
-Generator registry
-------------------
-
-.. autoclass:: kiln.generators.registry.GeneratorRegistry
-   :members:
-
-Generator protocol
-------------------
-
-.. autoclass:: kiln.generators.base.Generator
-   :members:
-
-.. autoclass:: kiln.generators.base.GeneratedFile
-   :members:
+   * - Name
+     - Module
+     - Scope
+     - Description
+   * - ``scaffold``
+     - :mod:`kiln.operations.scaffold`
+     - project
+     - Emits ``db/*_session.py`` and (if ``auth`` is configured)
+       ``auth/dependencies.py`` + ``auth/router.py``.
+   * - ``utils``
+     - :mod:`kiln.operations.infra`
+     - app
+     - Emits ``utils.py`` with ``get_object_from_query_or_404`` /
+       ``assert_rowcount`` helpers.
+   * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
+     - :mod:`kiln.operations.crud`
+     - resource
+     - The five CRUD endpoints.
+   * - ``action``
+     - :mod:`kiln.operations.action`
+     - resource
+     - Custom action endpoints: ``POST /{pk}/{slug}`` for per-instance
+       actions, ``POST /{slug}`` for collection-level actions.
+   * - ``auth``
+     - :mod:`kiln.operations.auth`
+     - resource
+     - Cross-cutting augmenter.  Appends ``current_user`` dependency
+       to every CRUD / action handler when ``config.auth`` is set.
+   * - ``router``
+     - :mod:`kiln.operations.routing`
+     - app
+     - Emits ``routes/__init__.py`` for one app, aggregating every
+       resource router via ``include_router``.
+   * - ``project_router``
+     - :mod:`kiln.operations.routing`
+     - project
+     - Multi-app projects only.  Emits the top-level
+       ``routes/__init__.py`` that mounts each app at its prefix.
 
 Generated file layout
 ---------------------
 
-The table below summarises every file kiln can generate and which
-generator produces it.  All paths are relative to the ``--out``
-directory.
+The table below summarises every file kiln can produce.  Paths are
+relative to the ``--out`` directory (or to the config's
+``package_prefix`` when ``--out`` is omitted).  ``{module}`` is the
+app's ``module`` config field.  ``{name}`` is the lowercase,
+snake-cased model name.
 
 .. list-table::
    :header-rows: 1
-   :widths: 45 30 25
+   :widths: 50 35 15
 
    * - Path
-     - Generator
+     - Produced by
      - Overwrite
-   * - ``db/base.py``
-     - ScaffoldGenerator
+   * - ``db/__init__.py``
+     - ``scaffold``
      - Yes
-   * - ``db/{key}_session.py``
-     - ScaffoldGenerator
+   * - ``db/{db_key}_session.py`` (or ``db/session.py``)
+     - ``scaffold``
+     - Yes
+   * - ``auth/__init__.py``
+     - ``scaffold``
      - Yes
    * - ``auth/dependencies.py``
-     - ScaffoldGenerator
+     - ``scaffold``
      - Yes
-   * - ``{module}/models/__init__.py``
-     - PGCraftModelGenerator
+   * - ``auth/router.py``
+     - ``scaffold``
      - Yes
-   * - ``{module}/models/{name}.py``
-     - PGCraftModelGenerator
+   * - ``{module}/utils.py``
+     - ``utils``
      - Yes
    * - ``{module}/schemas/{name}.py``
-     - CRUDGenerator
+     - ``get`` / ``list`` / ``create`` / ``update``
      - Yes
-   * - ``{module}/routes/{name}.py`` (CRUD)
-     - CRUDGenerator
+   * - ``{module}/serializers/{name}.py``
+     - ``get`` / ``list``
      - Yes
-   * - ``{module}/routes/{name}.py`` (view)
-     - ViewGenerator
+   * - ``{module}/routes/{name}.py``
+     - CRUD + ``action``
      - Yes
    * - ``{module}/routes/__init__.py``
-     - RouterGenerator
+     - ``router``
+     - Yes
+   * - ``{module}/tests/test_{name}.py``
+     - CRUD + ``action`` (when ``generate_tests: true``)
      - Yes
    * - ``routes/__init__.py``
-     - ProjectRouterGenerator
+     - ``project_router``
      - Yes
 
-All files use ``overwrite=True`` — re-running ``kiln generate`` always
-produces a clean, up-to-date output directory.  Source-control the
-config files, not the generated output.
+Every file is overwritten on every generation run.
+
+foundry API
+-------------
+
+Engine
+^^^^^^
+
+.. autoclass:: foundry.engine.Engine
+   :members:
+
+.. autoclass:: foundry.engine.BuildContext
+   :members:
+
+Operations
+^^^^^^^^^^
+
+.. autofunction:: foundry.operation.operation
+
+.. autoclass:: foundry.operation.OperationMeta
+   :members:
+
+.. autoclass:: foundry.operation.EmptyOptions
+   :members:
+
+.. autofunction:: foundry.operation.topological_sort
+
+Scopes
+^^^^^^
+
+.. autoclass:: foundry.scope.Scope
+   :members:
+
+.. autofunction:: foundry.scope.discover_scopes
+
+.. data:: foundry.scope.PROJECT
+
+    The root scope -- always present in every generation run.
+
+Typed outputs
+^^^^^^^^^^^^^
+
+Every operation's ``build`` method returns instances of the types
+below.  All are mutable dataclasses.
+
+.. autoclass:: foundry.outputs.RouteHandler
+   :members:
+
+.. autoclass:: foundry.outputs.RouteParam
+   :members:
+
+.. autoclass:: foundry.outputs.SchemaClass
+   :members:
+
+.. autoclass:: foundry.outputs.Field
+   :members:
+
+.. autoclass:: foundry.outputs.EnumClass
+   :members:
+
+.. autoclass:: foundry.outputs.SerializerFn
+   :members:
+
+.. autoclass:: foundry.outputs.TestCase
+   :members:
+
+.. autoclass:: foundry.outputs.RouterMount
+   :members:
+
+.. autoclass:: foundry.outputs.StaticFile
+   :members:
+
+Render registry
+^^^^^^^^^^^^^^^
+
+.. autoclass:: foundry.render.RenderRegistry
+   :members:
+
+.. autoclass:: foundry.render.RenderCtx
+   :members:
+
+.. autoclass:: foundry.render.BuildStore
+   :members:
+
+Output
+^^^^^^
+
+.. autoclass:: foundry.spec.GeneratedFile
+   :members:
+
+.. autofunction:: foundry.output.write_files
+
+Naming and imports
+^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: foundry.naming.Name
+   :members:
+
+.. autofunction:: foundry.naming.prefix_import
+
+.. autofunction:: foundry.naming.split_dotted_class
+
+.. autoclass:: foundry.imports.ImportCollector
+   :members:
+
+Jinja environment
+^^^^^^^^^^^^^^^^^
+
+.. autofunction:: foundry.env.create_jinja_env
+
+.. autofunction:: foundry.env.render_snippet
 
 Stdlib reference
 ----------------
 
-The following ``.libsonnet`` files are bundled with kiln and importable
-from any config file without any path prefix.
-
-``kiln/models/fields.libsonnet``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Provides field constructor helpers.  Each returns a :class:`~kiln.config.schema.FieldConfig`-compatible object.
-
-.. code-block:: jsonnet
-
-   local field = import 'kiln/models/fields.libsonnet';
-
-   field.uuid("id", primary_key=true)
-   field.str("title", unique=false, nullable=false, index=false)
-   field.email("address", unique=true)
-   field.int("count", nullable=false)
-   field.float("price")
-   field.bool("active")
-   field.datetime("created_at", auto_now_add=true)
-   field.datetime("updated_at", auto_now=true)
-   field.date("due_on")
-   field.json("payload", nullable=true)
-
-Foreign keys use the ``foreign_key`` parameter on ``uuid`` or ``int``:
-
-.. code-block:: jsonnet
-
-   field.uuid("author_id", foreign_key="authors.id")
-   // or fully qualified:
-   field.uuid("product_id", foreign_key="inventory.products.id")
-
-``kiln/crud/presets.libsonnet``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Provides CRUD preset helpers.  Each returns a
-:class:`~kiln.config.schema.CrudConfig`-compatible object.
-
-.. code-block:: jsonnet
-
-   local crud = import 'kiln/crud/presets.libsonnet';
-
-   crud.full({})                                        // all five operations
-   crud.full({ require_auth: ["create", "update", "delete"] })
-   crud.read_only({})                                   // read + list only
-   crud.no_list({})                                     // create/read/update/delete
-   crud.write_only({})                                  // create/update/delete
-
-``paginated: true`` (the default) adds ``offset`` and ``limit`` query
-parameters to the list endpoint.
+The following ``.libsonnet`` files ship inside the kiln package and
+are importable from any config file using the ``kiln/`` prefix.
 
 ``kiln/auth/jwt.libsonnet``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Configures JWT authentication for the generated ``auth/dependencies.py``.
+Configures JWT authentication.
 
 .. code-block:: jsonnet
 
    local auth = import 'kiln/auth/jwt.libsonnet';
 
    auth.jwt({
-     secret_env:   "JWT_SECRET",      // env var holding the signing secret
-     algorithm:    "HS256",           // HMAC algorithm
-     token_url:    "/auth/token",     // URL for the OAuth2 token endpoint
-     exclude_paths: ["/docs", "/openapi.json", "/health"],
+     secret_env:            "JWT_SECRET",
+     algorithm:             "HS256",
+     token_url:             "/auth/token",
+     exclude_paths:         ["/docs", "/openapi.json", "/health"],
+     verify_credentials_fn: "myapp.auth.verify_credentials",
    })
 
-To use a custom ``get_current_user`` dependency instead of the generated
-JWT implementation, set ``get_current_user_fn`` to a dotted import path:
-
-.. code-block:: jsonnet
-
-   auth.jwt({
-     secret_env: "JWT_SECRET",
-     get_current_user_fn: "myapp.auth.custom.get_current_user",
-   })
+To supply a custom ``get_current_user`` dependency instead of the
+generated JWT flow, set ``get_current_user_fn`` to a dotted import
+path.  In that case ``verify_credentials_fn`` is not required.
 
 ``kiln/db/databases.libsonnet``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Configures async PostgreSQL database connections.
+Configures async PostgreSQL connections.
 
 .. code-block:: jsonnet
 
    local db = import 'kiln/db/databases.libsonnet';
 
    db.postgres("primary", {
-     url_env:       "DATABASE_URL",   // env var holding the connection URL
-     default:       true,             // use this db when a route omits db_key
-     echo:          false,            // log SQL to stderr
-     pool_size:     5,                // connections kept open
-     max_overflow:  10,               // extra connections above pool_size
-     pool_timeout:  30,               // seconds to wait for a connection
-     pool_recycle:  -1,               // seconds before recycling; -1 = never
-     pool_pre_ping: true,             // test connections before use
+     url_env:       "DATABASE_URL",
+     default:       true,
+     echo:          false,
+     pool_size:     5,
+     max_overflow:  10,
+     pool_timeout:  30,
+     pool_recycle:  -1,
+     pool_pre_ping: true,
    })
 
-When multiple databases are configured, models and views can opt in to a
-specific one via ``db_key``:
-
-.. code-block:: jsonnet
-
-   { name: "Report", ..., db_key: "analytics" }
+Resources that omit ``db_key`` use the database with ``default: true``.

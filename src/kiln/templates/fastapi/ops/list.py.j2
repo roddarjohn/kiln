@@ -1,9 +1,9 @@
 @router.{{ http_method }}("{{ route_path }}", response_model={{ response_model }})
 async def list_{{ model_lower }}(
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% if has_auth and requires_auth %}
-    current_user: Annotated[dict, Depends(get_current_user)],
-{% endif %}
+{% for dep in extra_deps|default([]) %}
+    {{ dep }}
+{% endfor %}
 {% for param in extra_params %}
     {{ param }}
 {% endfor %}
@@ -15,9 +15,9 @@ async def list_{{ model_lower }}(
 {% endfor %}
 {% if result_expression %}
     {{ result_expression }}
-{% elif has_resource_schema %}
+{% elif serializer_fn %}
     result = await db.execute(stmt)
-    return [to_{{ model_lower }}_resource(obj) for obj in result.scalars()]
+    return [{{ serializer_fn }}(obj) for obj in result.scalars()]
 {% else %}
     result = await db.execute(stmt)
     return list(result.scalars().all())

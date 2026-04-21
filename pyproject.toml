@@ -33,20 +33,24 @@ Issues = "https://github.com/roddarjohn/kiln/issues"
 kiln = "kiln.cli:app"
 
 [project.entry-points."kiln.operations"]
-setup = "kiln.generators.fastapi.operations:SetupOperation"
-get = "kiln.generators.fastapi.operations:GetOperation"
-list = "kiln.generators.fastapi.operations:ListOperation"
-create = "kiln.generators.fastapi.operations:CreateOperation"
-update = "kiln.generators.fastapi.operations:UpdateOperation"
-delete = "kiln.generators.fastapi.operations:DeleteOperation"
-action = "kiln.generators.fastapi.operations:ActionOperation"
+scaffold = "kiln.operations.scaffold:Scaffold"
+utils = "kiln.operations.infra:Utils"
+get = "kiln.operations.crud:Get"
+list = "kiln.operations.crud:List"
+create = "kiln.operations.crud:Create"
+update = "kiln.operations.crud:Update"
+delete = "kiln.operations.crud:Delete"
+action = "kiln.operations.action:Action"
+auth = "kiln.operations.auth:Auth"
+router = "kiln.operations.routing:Router"
+project_router = "kiln.operations.routing:ProjectRouter"
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "kiln"
+module-name = ["kiln", "foundry"]
 
 
 [dependency-groups]
@@ -69,11 +73,11 @@ docs = [
   "sphinx-autodoc-typehints>=3.0.1",
   "sphinx-copybutton>=0.5.2",
 ]
-lint = ["ruff>=0.15.5", "ty>=0.0.20"]
+lint = ["ruff>=0.15.5", "types-jsonnet>=0.22.0.20260408", "zuban>=0.7.0"]
 
 [tool.ruff]
 line-length = 80
-exclude = ["docs", "playground"]
+exclude = ["docs", "playground", "tests/unit/golden"]
 
 
 [tool.ruff.lint]
@@ -109,6 +113,8 @@ ignore = [
   "S112",    # try/except/continue is intentional for plugin discovery
   "ANN401",  # Any is acceptable for Python value serialisation helpers
   "PLR0911", # multiple returns fine in type-dispatch helpers
+  "E402",    # sys.path tweaks must precede imports in some scripts
+  "D103",    # top-level main() helpers don't need docstrings
 ]
 "tests/**" = [
   "S101",    # assert is fine in tests
@@ -122,11 +128,12 @@ ignore = [
   "S607",    # partial paths (uv, ruff) are intentional
 ]
 
-[tool.ty.analysis]
-allowed-unresolved-imports = ["_jsonnet"]
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
 
 [tool.coverage.run]
-source = ["kiln"]
+source = ["kiln", "foundry"]
 branch = true
 
 [tool.coverage.report]

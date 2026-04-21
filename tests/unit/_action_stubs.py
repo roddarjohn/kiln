@@ -66,7 +66,7 @@ async def collection_action_no_body(
 async def action_no_return(
     obj: StubModel,
     db: AsyncSession,
-) -> dict:  # type: ignore[type-arg]
+) -> dict:
     """Action with non-BaseModel return — should fail."""
     return {}
 
@@ -74,3 +74,13 @@ async def action_no_return(
 async def action_no_annotations(obj, db):
     """Action with no annotations — should fail."""
     return {}
+
+
+async def action_two_bodies(
+    obj: StubModel,
+    db: AsyncSession,
+    body: StubRequest,
+    extra: StubRequest,
+) -> StubResponse:
+    """Action with two BaseModel params — should fail."""
+    return StubResponse(ok=True)

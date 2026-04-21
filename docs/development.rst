@@ -116,7 +116,8 @@ Jsonnet::
 Type checking
 -------------
 
-kiln uses `ty <https://github.com/astral-sh/ty>`_ for type checking::
+kiln uses `zuban <https://zubanls.com>`_ for type checking (native mode,
+not mypy-compatible)::
 
     just type-check
 
@@ -133,6 +134,23 @@ To build the docs::
 To serve the docs locally with live reload at ``http://localhost:8000``::
 
     just serve-docs-autoreload
+
+Repository layout
+-----------------
+
+The source is split into two packages:
+
+``src/foundry/``
+    Target-agnostic code-generation engine.  Scope discovery, the
+    ``@operation`` protocol, the build store, the render registry,
+    and typed output dataclasses live here.
+
+``src/kiln/``
+    FastAPI / SQLAlchemy generator built on ``foundry``.  The
+    config schema, CLI, built-in operations, Jinja templates, and
+    renderers live here.
+
+See :doc:`architecture` for how the pieces fit together.
 
 Contributing
 ------------

@@ -2,11 +2,7 @@
 {{ file_header("Serializers for " ~ model_name) }}
 
 {{ import_block }}
+{% for fn in serializer_fns %}
 
-def to_{{ model_lower }}_resource(obj: {{ model_name }}) -> {{ model_name }}Resource:
-    """Serialize a {{ model_name }} instance to :class:`{{ model_name }}Resource`."""
-    return {{ model_name }}Resource(
-{% for f in resource_fields %}
-        {{ f.name }}=obj.{{ f.name }},
+{{ fn }}
 {% endfor %}
-    )

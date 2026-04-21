@@ -84,15 +84,13 @@ class FieldSpec(BaseModel):
 
 
 class OperationConfig(BaseModel):
-    """Configuration for a single pipeline operation.
+    """Configuration for a single operation.
 
     Known fields (``name``, ``require_auth``) are parsed normally.
     All other keys are collected into :attr:`options` via Pydantic's
     ``extra="allow"`` setting and passed to the operation's
-    :meth:`~kiln.generators.fastapi.operations.Operation.validate`
-    and
-    :meth:`~kiln.generators.fastapi.operations.Operation.contribute`
-    methods.
+    ``Options`` model (see
+    :func:`foundry.operation.operation`).
 
     Examples::
 
@@ -166,15 +164,14 @@ class ResourceConfig(BaseModel):
 
 
 class KilnConfig(BaseModel):
-    """Top-level kiln configuration.
-
-    Can be used as either an app-level config or a project-level config.
-    When ``apps`` is non-empty kiln treats the file as a project config
-    and runs generation for every listed app.
-    """
+    """Top-level kiln configuration."""
 
     version: str = "1"
     module: str = "app"
+    framework: str = "fastapi"
+    """Target framework profile.  Selects which renderer set runs;
+    each renderer is tagged with the framework it implements, and
+    only those matching this value are used."""
     package_prefix: str = "_generated"
     """Directory prefix prepended to all generated file paths and Python
     import paths.  Defaults to ``"_generated"`` so generated code lives

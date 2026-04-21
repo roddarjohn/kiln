@@ -46,7 +46,7 @@ just setup
 
 # Run checks
 just lint          # ruff check + format
-just type-check    # ty check src/
+just type-check    # zuban check src/
 just dev-test      # pytest (fast, local dev)
 just test          # tox (full isolation)
 just docs          # build Sphinx HTML docs

@@ -17,4 +17,4 @@ jobs:
       - run: SKIP=ruff,ruff-format uvx pre-commit run --all-files
       - run: uv run --group lint ruff check
       - run: uv run --group lint ruff format --check
-      - run: uv run --group lint ty check src/
+      - run: uv run --group lint zuban check src/

@@ -1,0 +1,12 @@
+class {{ class_name }}(BaseModel):
+{% if doc %}
+    """{{ doc }}"""
+{% endif %}
+
+{% for f in fields %}
+{% if f.optional %}
+    {{ f.name }}: {{ f.py_type }} | None = None
+{% else %}
+    {{ f.name }}: {{ f.py_type }}
+{% endif %}
+{% endfor %}

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from kiln.cli import _write_files, app
-from kiln.generators.base import GeneratedFile
+from foundry import GeneratedFile, write_files
+from kiln.cli import app
 
 runner = CliRunner()
 
@@ -39,7 +39,7 @@ def _write_json_config(tmp_path: Path, data: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# generate — app mode (no apps list)
+# generate
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +120,7 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# generate — project mode (apps list)
+# generate — multi-app
 # ---------------------------------------------------------------------------
 
 
@@ -174,21 +174,21 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# _write_files
+# write_files
 # ---------------------------------------------------------------------------
 
 
-def test_write_files_always_overwrites(tmp_path: Path):
+def testwrite_files_always_overwrites(tmp_path: Path):
     f = GeneratedFile(path="bar.py", content="# v1")
-    _write_files([f], tmp_path)
+    write_files([f], tmp_path)
     f2 = GeneratedFile(path="bar.py", content="# v2")
-    written = _write_files([f2], tmp_path)
+    written = write_files([f2], tmp_path)
     assert written == 1
     assert (tmp_path / "bar.py").read_text() == "# v2"
 
 
-def test_write_files_creates_subdirs(tmp_path: Path):
+def testwrite_files_creates_subdirs(tmp_path: Path):
     f = GeneratedFile(path="a/b/c.py", content="x")
-    written = _write_files([f], tmp_path)
+    written = write_files([f], tmp_path)
     assert written == 1
     assert (tmp_path / "a" / "b" / "c.py").exists()
