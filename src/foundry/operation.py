@@ -122,7 +122,7 @@ def operation(
         )
         setattr(cls, _OPERATION_META_ATTR, meta)
         if not hasattr(cls, "Options"):
-            cls.Options = EmptyOptions  # ty: ignore[invalid-assignment]
+            cls.Options = EmptyOptions
         return cls
 
     return decorator

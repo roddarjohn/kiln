@@ -116,7 +116,8 @@ Jsonnet::
 Type checking
 -------------
 
-kiln uses `ty <https://github.com/astral-sh/ty>`_ for type checking::
+kiln uses `zuban <https://zubanls.com>`_ for type checking (native mode,
+not mypy-compatible)::
 
     just type-check
 

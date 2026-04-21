@@ -15,7 +15,7 @@ Add dependencies via `uv add`, not `pip install`.
 
 ```bash
 just lint          # ruff check + format check
-just type-check    # ty check src/
+just type-check    # zuban check src/
 just dev-test      # pytest (fast, local dev)
 just test          # tox (full isolation, matches CI)
 just docs          # build Sphinx HTML docs
@@ -39,7 +39,7 @@ Auto-fix: `uv run --group lint ruff check --fix && uv run --group lint ruff form
   bare `except:`. Validate at system boundaries (user input, external APIs).
   Trust internal code.
 
-### Style (enforced by ruff + ty)
+### Style (enforced by ruff + zuban)
 
 - **Line length:** 80 characters.
 - **Type annotations:** Required on all public API. Avoid `Any` unless

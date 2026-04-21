@@ -6,9 +6,9 @@ setup:
 lint:
     uv run --group lint ruff check && uv run --group lint ruff format --check
 
-# Run ty type checker
+# Run zuban type checker (native mode, not mypy-compatible)
 type-check:
-    uv run --group lint ty check src/
+    uv run --group lint zuban check src/
 
 # Run tests via tox (full isolation, builds package as sdist)
 test *args:

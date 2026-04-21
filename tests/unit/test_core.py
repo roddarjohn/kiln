@@ -25,7 +25,7 @@ def test_generated_file_is_frozen():
     assert f.path == "foo.py"
     assert f.content == "# hi"
     with pytest.raises(AttributeError):
-        f.path = "bar.py"  # type: ignore[misc]
+        f.path = "bar.py"
 
 
 # -------------------------------------------------------------------

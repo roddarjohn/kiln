@@ -73,7 +73,7 @@ docs = [
   "sphinx-autodoc-typehints>=3.0.1",
   "sphinx-copybutton>=0.5.2",
 ]
-lint = ["ruff>=0.15.5", "ty>=0.0.20"]
+lint = ["ruff>=0.15.5", "types-jsonnet>=0.22.0.20260408", "zuban>=0.7.0"]
 
 [tool.ruff]
 line-length = 80
@@ -128,8 +128,9 @@ ignore = [
   "S607",    # partial paths (uv, ruff) are intentional
 ]
 
-[tool.ty.analysis]
-allowed-unresolved-imports = ["_jsonnet"]
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
 
 [tool.coverage.run]
 source = ["kiln", "foundry"]

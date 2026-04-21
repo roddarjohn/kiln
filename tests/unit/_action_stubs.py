@@ -66,7 +66,7 @@ async def collection_action_no_body(
 async def action_no_return(
     obj: StubModel,
     db: AsyncSession,
-) -> dict:  # type: ignore[type-arg]
+) -> dict:
     """Action with non-BaseModel return — should fail."""
     return {}
 

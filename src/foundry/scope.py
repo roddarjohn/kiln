@@ -95,7 +95,7 @@ def _list_item_type(
     origin = getattr(annotation, "__origin__", None)
     if origin is not list:
         return None
-    args = getattr(annotation, "__args__", ())
+    args: tuple[type, ...] = getattr(annotation, "__args__", ())
     if not args:
         return None
     return args[0]
