@@ -1,7 +1,16 @@
 """Renderers for output types.
 
-Each renderer turns a build output into a code string using
-Jinja2 templates.  The :data:`registry` is the default
-:class:`~foundry.render.RenderRegistry` pre-loaded with
-all FastAPI renderers.
+:data:`registry` is the process-wide
+:class:`~foundry.render.RenderRegistry` every framework-specific
+renderer module registers into.  Importing a framework module
+(e.g. :mod:`kiln.renderers.fastapi`) or an op module installs
+its renderers as a side effect -- alembic-style self-registration.
 """
+
+from __future__ import annotations
+
+from foundry.render import RenderRegistry
+
+registry = RenderRegistry()
+
+__all__ = ["registry"]

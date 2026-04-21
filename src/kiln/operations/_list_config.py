@@ -2,7 +2,7 @@
 
 These are the three optional sub-configs that turn a plain list
 endpoint into a filterable / orderable / paginated one.  The
-:class:`~kiln.operations.crud.List` operation reads them from its
+:class:`~kiln.operations.list.List` operation reads them from its
 ``Options`` model and translates them into
 :class:`~foundry.outputs.SchemaClass` and
 :class:`~foundry.outputs.RouteHandler` output.

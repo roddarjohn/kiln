@@ -79,6 +79,26 @@ def test_operation_meta_frozen():
         meta.name = "list"
 
 
+def test_operation_after_children_default_false():
+    @operation("get", scope="resource")
+    class Get:
+        def build(self, _ctx, _options):
+            return []
+
+    meta = get_operation_meta(Get)
+    assert meta.after_children is False
+
+
+def test_operation_after_children_flag():
+    @operation("router", scope="project", after_children=True)
+    class Router:
+        def build(self, _ctx, _options):
+            return []
+
+    meta = get_operation_meta(Router)
+    assert meta.after_children is True
+
+
 # -------------------------------------------------------------------
 # Topological sort
 # -------------------------------------------------------------------

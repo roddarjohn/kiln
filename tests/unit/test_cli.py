@@ -52,8 +52,14 @@ def test_generate_writes_app_files(tmp_path: Path):
                 {
                     "model": "myapp.models.Post",
                     "operations": [
-                        "get",
-                        "list",
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                        {
+                            "name": "list",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
                         {
                             "name": "create",
                             "fields": [{"name": "title", "type": "str"}],
@@ -125,12 +131,16 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
 
 
 def test_generate_project_mode_writes_all_apps(tmp_path: Path):
+    field = [{"name": "title", "type": "str"}]
     blog_app = {
         "module": "blog",
         "resources": [
             {
                 "model": "blog.models.Article",
-                "operations": ["get", "list"],
+                "operations": [
+                    {"name": "get", "fields": field},
+                    {"name": "list", "fields": field},
+                ],
             }
         ],
     }
@@ -139,7 +149,10 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
         "resources": [
             {
                 "model": "inventory.models.Product",
-                "operations": ["get", "list"],
+                "operations": [
+                    {"name": "get", "fields": field},
+                    {"name": "list", "fields": field},
+                ],
             }
         ],
     }

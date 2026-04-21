@@ -262,12 +262,11 @@ The built-ins are registered in kiln's own ``pyproject.toml``:
 
    [project.entry-points."kiln.operations"]
    scaffold       = "kiln.operations.scaffold:Scaffold"
-   utils          = "kiln.operations.infra:Utils"
-   get            = "kiln.operations.crud:Get"
-   list           = "kiln.operations.crud:List"
-   create         = "kiln.operations.crud:Create"
-   update         = "kiln.operations.crud:Update"
-   delete         = "kiln.operations.crud:Delete"
+   get            = "kiln.operations.get:Get"
+   list           = "kiln.operations.list:List"
+   create         = "kiln.operations.create:Create"
+   update         = "kiln.operations.update:Update"
+   delete         = "kiln.operations.delete:Delete"
    action         = "kiln.operations.action:Action"
    auth           = "kiln.operations.auth:Auth"
    router         = "kiln.operations.routing:Router"
@@ -299,12 +298,16 @@ Source layout
        ├── cli.py              # `kiln` CLI
        ├── config/             # Pydantic config schema + loader
        ├── operations/         # built-in @operation classes
-       │   ├── crud.py
+       │   ├── get.py          # one file per op: @operation class +
+       │   ├── list.py         #   RouteHandler subclass + FastAPI
+       │   ├── create.py       #   renderer registration
+       │   ├── update.py
+       │   ├── delete.py
        │   ├── action.py
        │   ├── auth.py
        │   ├── scaffold.py
-       │   ├── infra.py
        │   ├── routing.py
+       │   ├── _shared.py      # helpers shared by the per-op modules
        │   ├── _introspect.py  # action-fn introspection
        │   └── _list_config.py # FilterConfig, OrderConfig, PaginateConfig
        ├── renderers/          # @renders implementations

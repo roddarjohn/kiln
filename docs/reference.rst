@@ -111,15 +111,13 @@ protocol.
      - project
      - Emits ``db/*_session.py`` and (if ``auth`` is configured)
        ``auth/dependencies.py`` + ``auth/router.py``.
-   * - ``utils``
-     - :mod:`kiln.operations.infra`
-     - app
-     - Emits ``utils.py`` with ``get_object_from_query_or_404`` /
-       ``assert_rowcount`` helpers.
    * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
-     - :mod:`kiln.operations.crud`
+     - :mod:`kiln.operations.get`, :mod:`~kiln.operations.list`,
+       :mod:`~kiln.operations.create`, :mod:`~kiln.operations.update`,
+       :mod:`~kiln.operations.delete`
      - resource
-     - The five CRUD endpoints.
+     - The five CRUD endpoints.  Each op lives in its own module
+       alongside the FastAPI renderer for its output.
    * - ``action``
      - :mod:`kiln.operations.action`
      - resource
@@ -171,9 +169,6 @@ snake-cased model name.
      - Yes
    * - ``auth/router.py``
      - ``scaffold``
-     - Yes
-   * - ``{module}/utils.py``
-     - ``utils``
      - Yes
    * - ``{module}/schemas/{name}.py``
      - ``get`` / ``list`` / ``create`` / ``update``

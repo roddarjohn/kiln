@@ -82,11 +82,14 @@ def introspect_action_fn(
 
     for param_name in sig.parameters:
         hint = hints.get(param_name)
+
         if hint is None or _is_async_session(hint):
             continue
+
         if hint is model_cls:
             is_object_action = True
             model_param_name = param_name
+
         elif _is_pydantic_model(hint):
             if request_class is not None:
                 msg = (
@@ -95,6 +98,7 @@ def introspect_action_fn(
                     f"request body is allowed."
                 )
                 raise ValueError(msg)
+
             request_class = hint.__name__
             request_module = hint.__module__
 
@@ -115,24 +119,24 @@ def introspect_action_fn(
 
 def _import_callable(dotted: str) -> Callable[..., object]:
     """Import a name from a dotted path."""
-    mod_path, _, attr = dotted.rpartition(".")
-    if not mod_path:
+    module_path, _, attr = dotted.rpartition(".")
+    if not module_path:
         msg = f"'{dotted}' is not a valid dotted path."
         raise ValueError(msg)
     try:
-        mod = importlib.import_module(mod_path)
+        module = importlib.import_module(module_path)
     except ModuleNotFoundError as exc:
         msg = (
-            f"Cannot import module '{mod_path}' for "
+            f"Cannot import module '{module_path}' for "
             f"'{dotted}'. Ensure the consumer code is "
             f"on sys.path."
         )
         raise ValueError(msg) from exc
-    obj = getattr(mod, attr, None)
-    if obj is None:
-        msg = f"'{attr}' not found in module '{mod_path}'."
+    attribute = getattr(module, attr, None)
+    if attribute is None:
+        msg = f"'{attr}' not found in module '{module_path}'."
         raise ValueError(msg)
-    return obj
+    return attribute
 
 
 def _resolve_hints(

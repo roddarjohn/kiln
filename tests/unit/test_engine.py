@@ -389,6 +389,80 @@ def test_find_op_options_no_operations():
 # -------------------------------------------------------------------
 
 
+def test_engine_after_children_sees_child_output():
+    """after_children=True defers a project op until child scopes run."""
+    call_order: list[str] = []
+
+    @operation("child_op", scope="resource")
+    class ChildOp:
+        def build(self, ctx, _options):
+            call_order.append(f"child:{ctx.instance.name}")
+            return [
+                RouteHandler(
+                    method="GET",
+                    path="/",
+                    function_name=f"handler_{ctx.instance.name}",
+                )
+            ]
+
+    @operation("aggregator", scope="project", after_children=True)
+    class Aggregator:
+        def build(self, ctx, _options):
+            call_order.append("aggregator")
+            handlers = ctx.store.get_by_type(RouteHandler)
+            names = sorted(h.function_name for h in handlers)
+            return [
+                StaticFile(
+                    path="routes.py",
+                    template="routes.j2",
+                    context={"handlers": names},
+                )
+            ]
+
+    config = ProjectConfig(
+        resources=[
+            ResourceConfig(name="user"),
+            ResourceConfig(name="post"),
+        ]
+    )
+    engine = Engine(operations=[Aggregator, ChildOp])
+    store = engine.build(config)
+
+    # Aggregator ran after every resource, not before them.
+    assert call_order[-1] == "aggregator"
+    assert {"child:user", "child:post"}.issubset(call_order[:-1])
+
+    agg_items = store.get("project", "project", "aggregator")
+    assert len(agg_items) == 1
+    assert agg_items[0].context["handlers"] == ["handler_post", "handler_user"]
+
+
+def test_engine_after_children_at_any_scope():
+    """``after_children=True`` runs at each instance after its children.
+
+    For a leaf scope (no children) it still runs, after the
+    instance's pre-phase ops.
+    """
+    call_order: list[str] = []
+
+    @operation("pre_resource", scope="resource")
+    class Pre:
+        def build(self, ctx, _options):
+            call_order.append(f"pre:{ctx.instance.name}")
+            return []
+
+    @operation("post_resource", scope="resource", after_children=True)
+    class Post:
+        def build(self, ctx, _options):
+            call_order.append(f"post:{ctx.instance.name}")
+            return []
+
+    config = ProjectConfig(resources=[ResourceConfig(name="x")])
+    engine = Engine(operations=[Pre, Post])
+    engine.build(config)
+    assert call_order == ["pre:x", "post:x"]
+
+
 def test_engine_filters_by_allowed_ops():
     """Only operations in the instance's list run."""
 

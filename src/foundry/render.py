@@ -5,25 +5,19 @@ to turn a build output into a :class:`Fragment` -- a path,
 import set, and shell-template spec.  The engine/assembler
 calls renderers after the build phase and then groups fragments
 by output path to produce final files.
-
-Renderers can carry tags (e.g. ``tags={"framework": "fastapi"}``)
-that act as a *profile selector*.  The registry holds an
-``active_tags`` dict; at dispatch time, only renderers whose
-tags are a subset of the active tags are considered.  Untagged
-renderers are universal.  This lets a single registry host
-multiple mutually-exclusive framework profiles (fastapi, flask,
-...) and select one per run.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from foundry.imports import ImportCollector
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import jinja2
 
 
@@ -83,50 +77,29 @@ _RendererFn = Callable[[Any, RenderCtx], "Fragment | list[Fragment]"]
 
 
 @dataclass
-class _RendererEntry:
-    """One registered renderer with its profile tags."""
-
-    fn: _RendererFn
-    tags: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
 class RenderRegistry:
-    """Maps output types to renderer functions, filtered by tags.
-
-    Renderers register with optional ``tags``; the registry has
-    a matching ``active_tags`` dict.  A renderer matches iff all
-    of its tag constraints are satisfied by ``active_tags``.
-    Untagged renderers always match.
+    """Maps output types to renderer functions.
 
     Example::
 
-        registry = RenderRegistry(active_tags={"framework": "fastapi"})
+        registry = RenderRegistry()
 
-        @registry.renders(RouteHandler, tags={"framework": "fastapi"})
+        @registry.renders(RouteHandler)
         def render_route(handler, ctx):
             return Fragment(...)
 
     """
 
-    active_tags: dict[str, str] = field(default_factory=dict)
-    _entries: dict[type, list[_RendererEntry]] = field(
-        default_factory=dict,
-    )
+    _entries: dict[type, _RendererFn] = field(default_factory=dict)
 
     def renders(
         self,
         output_type: type,
-        *,
-        tags: Mapping[str, str] | None = None,
     ) -> Callable[[_RendererFn], _RendererFn]:
         """Register a renderer for *output_type*.
 
         Args:
             output_type: The output class this renderer handles.
-            tags: Optional profile tags; the renderer only fires
-                when every ``(key, value)`` in ``tags`` matches
-                the registry's ``active_tags``.
 
         Returns:
             The original function, unmodified.
@@ -134,10 +107,7 @@ class RenderRegistry:
         """
 
         def decorator(fn: _RendererFn) -> _RendererFn:
-            entries = self._entries.setdefault(output_type, [])
-            entries.append(
-                _RendererEntry(fn=fn, tags=dict(tags or {})),
-            )
+            self._entries[output_type] = fn
             return fn
 
         return decorator
@@ -166,30 +136,22 @@ class RenderRegistry:
             decides not to contribute.
 
         Raises:
-            LookupError: No renderer registered for the type
-                matches the active tags.
+            LookupError: No renderer registered for the type.
 
         """
         output_type = type(obj)
-        for entry in self._entries.get(output_type, []):
-            if self._matches(entry):
-                result = entry.fn(obj, ctx)
-                if isinstance(result, Fragment):
-                    return [result]
-                return list(result)
-        msg = (
-            f"No renderer for {output_type.__name__} "
-            f"matching active tags {self.active_tags!r}"
-        )
-        raise LookupError(msg)
+        fn = self._entries.get(output_type)
+        if fn is None:
+            msg = f"No renderer for {output_type.__name__}"
+            raise LookupError(msg)
+        result = fn(obj, ctx)
+        if isinstance(result, Fragment):
+            return [result]
+        return list(result)
 
     def has_renderer(self, output_type: type) -> bool:
         """Return whether any renderer is registered for *output_type*."""
         return output_type in self._entries
-
-    def _matches(self, entry: _RendererEntry) -> bool:
-        """Return ``True`` when *entry*'s tags match ``active_tags``."""
-        return all(self.active_tags.get(k) == v for k, v in entry.tags.items())
 
 
 @dataclass
@@ -263,8 +225,8 @@ class BuildStore:
 
         """
         result: list[object] = []
-        for (s, iid, _), items in self._items.items():
-            if s == scope and iid == instance_id:
+        for (stored_scope, stored_id, _), items in self._items.items():
+            if stored_scope == scope and stored_id == instance_id:
                 result.extend(items)
         return result
 
@@ -280,7 +242,9 @@ class BuildStore:
         """
         result: list[object] = []
         for items in self._items.values():
-            result.extend(obj for obj in items if isinstance(obj, output_type))
+            result.extend(
+                item for item in items if isinstance(item, output_type)
+            )
         return result
 
     def all_items(self) -> list[object]:
@@ -298,5 +262,5 @@ class BuildStore:
         Used by the assembler to walk the store and dispatch
         each item to the correct renderer with scope-aware context.
         """
-        for (scope, iid, op_name), items in self._items.items():
-            yield scope, iid, op_name, items
+        for (scope, instance_id, op_name), items in self._items.items():
+            yield scope, instance_id, op_name, items

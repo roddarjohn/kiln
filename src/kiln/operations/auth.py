@@ -26,9 +26,12 @@ from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
+    from kiln.config.schema import ResourceConfig
 
 
 @operation(
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
 class Auth:
     """Augment CRUD/action handlers and tests with auth."""
 
-    def when(self, ctx: BuildContext) -> bool:
+    def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
         """Apply only when auth is configured and the resource opts in.
 
         Args:
@@ -53,13 +56,14 @@ class Auth:
         """
         if getattr(ctx.config, "auth", None) is None:
             return False
-        return bool(getattr(ctx.instance, "require_auth", True))
+
+        return ctx.instance.require_auth
 
     def build(
         self,
-        ctx: BuildContext,
+        ctx: BuildContext[ResourceConfig],
         _options: BaseModel,
-    ) -> list[object]:
+    ) -> Iterable[object]:
         """Mutate earlier handlers/tests to require auth.
 
         Args:
@@ -67,7 +71,8 @@ class Auth:
             _options: Unused.
 
         Returns:
-            Empty list -- this operation only mutates.
+            Empty iterable -- this operation only mutates earlier
+            output and emits no new objects.
 
         """
         auth_mod = prefix_import(
@@ -79,11 +84,10 @@ class Auth:
         import_pair = (auth_mod, "get_current_user")
 
         items = ctx.store.get_by_scope(ctx.scope.name, ctx.instance_id)
-        for obj in items:
-            if isinstance(obj, RouteHandler):
-                obj.extra_deps.append(dep_line)
-                obj.extra_imports.append(import_pair)
-            elif isinstance(obj, TestCase):
-                obj.requires_auth = True
-
-        return []
+        for item in items:
+            if isinstance(item, RouteHandler):
+                item.extra_deps.append(dep_line)
+                item.extra_imports.append(import_pair)
+            elif isinstance(item, TestCase):
+                item.requires_auth = True
+        return ()

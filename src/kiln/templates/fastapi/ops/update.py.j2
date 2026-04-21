@@ -1,31 +1,17 @@
-@router.patch("/{{ '{' }}{{ pk_name }}{{ '}' }}"{% if response_schema %}, response_model={{ response_schema }}{% endif %})
+@router.patch("/{{ '{' }}{{ pk_name }}{{ '}' }}")
 async def update_{{ model_lower }}(
     {{ pk_name }}: {{ pk_py_type }},
-{% if has_schema %}
     body: {{ model_name }}UpdateRequest,
-{% endif %}
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% for dep in extra_deps|default([]) %}
     {{ dep }}
 {% endfor %}
-) -> {% if response_schema %}{{ response_schema }}{% else %}None{% endif %}:
+) -> None:
     """Update a {{ model_name }}."""
-{% if response_schema %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-        .values({% if has_schema %}**body.model_dump(exclude_unset=True){% endif %})
-        .returning({{ model_name }})
+        .values(**body.model_dump(exclude_unset=True))
     )
     assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()
-    return to_{{ model_lower }}_resource(result.scalars().one())
-{% else %}
-    result = await db.execute(
-        update({{ model_name }})
-        .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-        .values({% if has_schema %}**body.model_dump(exclude_unset=True){% endif %})
-    )
-    assert_rowcount(result, detail="{{ model_name }} not found")
-    await db.commit()
-{% endif %}

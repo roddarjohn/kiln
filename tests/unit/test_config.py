@@ -239,7 +239,15 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     {
       module: "blog",
       resources: [
-        resource.read_only("blog.models.Article"),
+        {
+          model: "blog.models.Article",
+          operations: [
+            resource.action(
+              name="publish",
+              fn="blog.actions.publish",
+            ),
+          ],
+        },
       ],
     }
     """
@@ -249,4 +257,10 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     assert cfg.module == "blog"
     assert len(cfg.resources) == 1
     assert cfg.resources[0].model == "blog.models.Article"
-    assert cfg.resources[0].operations == ["get", "list"]
+    operations = cfg.resources[0].operations
+    assert operations is not None
+    assert len(operations) == 1
+    op = operations[0]
+    assert not isinstance(op, str)
+    assert op.name == "publish"
+    assert op.options == {"fn": "blog.actions.publish"}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -10,9 +11,20 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
 from kiln.operations._introspect import introspect_action_fn
+from kiln.renderers import registry
+from kiln.renderers.fastapi import build_handler_fragment
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from foundry.engine import BuildContext
+    from foundry.render import Fragment, RenderCtx
+    from kiln.config.schema import ResourceConfig
+
+
+@dataclass
+class ActionRoute(RouteHandler):
+    """Route handler emitted by the :class:`Action` operation."""
 
 
 @operation("action", scope="resource")
@@ -26,44 +38,39 @@ class Action:
 
     def build(
         self,
-        ctx: BuildContext,
-        options: BaseModel,
-    ) -> list[object]:
+        ctx: BuildContext[ResourceConfig],
+        options: Options,
+    ) -> Iterable[object]:
         """Produce output for a custom action endpoint.
 
         Args:
             ctx: Build context with resource config.
             options: Parsed Action.Options with ``fn`` path.
 
-        Returns:
-            List of objects (handler + test case).
+        Yields:
+            The route handler and a test case.
 
         """
-        resource = ctx.instance
-        fn_dotted = getattr(options, "fn", "")
         action_name = Name(ctx.instance_id)
+        info = introspect_action_fn(options.fn, ctx.instance.model)
 
-        info = introspect_action_fn(fn_dotted, resource.model)
-
-        # Determine path
-        pk_name = resource.pk
         if info.is_object_action:
-            path = f"/{{{pk_name}}}/{action_name.slug}"
+            path = f"/{{{ctx.instance.pk}}}/{action_name.slug}"
+
         else:
             path = f"/{action_name.slug}"
 
-        handler = RouteHandler(
+        yield ActionRoute(
             method="POST",
             path=path,
             function_name=f"{action_name.raw}_action",
-            op_name="action",
             response_model=info.response_class,
             return_type=info.response_class,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
         )
 
-        test = TestCase(
+        yield TestCase(
             op_name="action",
             method="post",
             path=path,
@@ -74,4 +81,18 @@ class Action:
             action_name=action_name.raw,
         )
 
-        return [handler, test]
+
+@registry.renders(ActionRoute)
+def _render(handler: ActionRoute, ctx: RenderCtx) -> Fragment:
+    return build_handler_fragment(
+        handler,
+        ctx,
+        body_template="fastapi/ops/action.py.j2",
+        body_extra={
+            "function_name": handler.function_name,
+            "method": handler.method.lower(),
+            "path": handler.path,
+            "response_class": handler.response_model,
+            "request_class": handler.request_schema,
+        },
+    )

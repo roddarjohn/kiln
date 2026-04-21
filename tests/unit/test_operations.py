@@ -1,4 +1,4 @@
-"""Tests for kiln.operations — scaffold, infra, routing, crud, action."""
+"""Tests for kiln.operations — scaffold, routing, crud, action."""
 
 from __future__ import annotations
 
@@ -27,18 +27,14 @@ from kiln.config.schema import (
     KilnConfig,
     ResourceConfig,
 )
-from kiln.operations.crud import (
-    Create,
-    Delete,
-    Get,
-    List,
-    Update,
-    _field_dicts,
-    _resolve_resource_info,
-)
-from kiln.operations.infra import Utils
+from kiln.operations._shared import _field_dicts
+from kiln.operations.create import Create
+from kiln.operations.delete import Delete
+from kiln.operations.get import Get
+from kiln.operations.list import List
 from kiln.operations.routing import ProjectRouter, Router
-from kiln.operations.scaffold import Scaffold
+from kiln.operations.scaffold import AuthScaffold, Scaffold
+from kiln.operations.update import Update
 
 # -------------------------------------------------------------------
 # Helpers
@@ -113,7 +109,7 @@ class TestScaffold:
     def test_default_db_session(self):
         """No databases → default session.py."""
         ctx = _project_ctx()
-        result = Scaffold().build(ctx, _Empty())
+        result = list(Scaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
         assert "db/__init__.py" in paths
         assert "db/session.py" in paths
@@ -127,7 +123,7 @@ class TestScaffold:
             ]
         )
         ctx = _project_ctx(config)
-        result = Scaffold().build(ctx, _Empty())
+        result = list(Scaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
         assert "db/primary_session.py" in paths
         assert "db/analytics_session.py" in paths
@@ -136,7 +132,7 @@ class TestScaffold:
     def test_db_session_context(self):
         """Default session has expected context values."""
         ctx = _project_ctx()
-        result = Scaffold().build(ctx, _Empty())
+        result = list(Scaffold().build(ctx, _Empty()))
         session = next(f for f in result if f.path == "db/session.py")
         assert session.context["url_env"] == "DATABASE_URL"
         assert session.context["get_db_fn"] == "get_db"
@@ -148,10 +144,46 @@ class TestScaffold:
             databases=[DatabaseConfig(key="main", echo=True)]
         )
         ctx = _project_ctx(config)
-        result = Scaffold().build(ctx, _Empty())
+        result = list(Scaffold().build(ctx, _Empty()))
         session = next(f for f in result if f.path == "db/main_session.py")
         assert session.context["get_db_fn"] == "get_main_db"
         assert session.context["echo"] is True
+
+    def test_no_auth_files_from_scaffold(self):
+        """Scaffold never emits auth files -- that's AuthScaffold's job."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                verify_credentials_fn="myapp.auth.verify",
+            )
+        )
+        ctx = _project_ctx(config)
+        result = list(Scaffold().build(ctx, _Empty()))
+        paths = [f.path for f in result]
+        assert not any(p.startswith("auth/") for p in paths)
+
+
+# -------------------------------------------------------------------
+# AuthScaffold
+# -------------------------------------------------------------------
+
+
+class TestAuthScaffold:
+    """Tests for AuthScaffold operation."""
+
+    def test_when_false_without_auth(self):
+        """when() returns False when no auth is configured."""
+        ctx = _project_ctx()
+        assert AuthScaffold().when(ctx) is False
+
+    def test_when_true_with_auth(self):
+        """when() returns True when auth is configured."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                verify_credentials_fn="myapp.auth.verify",
+            )
+        )
+        ctx = _project_ctx(config)
+        assert AuthScaffold().when(ctx) is True
 
     def test_auth_files(self):
         """Auth config produces auth directory files."""
@@ -161,7 +193,7 @@ class TestScaffold:
             )
         )
         ctx = _project_ctx(config)
-        result = Scaffold().build(ctx, _Empty())
+        result = list(AuthScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
         assert "auth/__init__.py" in paths
         assert "auth/dependencies.py" in paths
@@ -175,7 +207,7 @@ class TestScaffold:
             )
         )
         ctx = _project_ctx(config)
-        result = Scaffold().build(ctx, _Empty())
+        result = list(AuthScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
         assert "auth/dependencies.py" in paths
         assert "auth/router.py" not in paths
@@ -188,33 +220,10 @@ class TestScaffold:
             )
         )
         ctx = _project_ctx(config)
-        result = Scaffold().build(ctx, _Empty())
+        result = list(AuthScaffold().build(ctx, _Empty()))
         deps = next(f for f in result if f.path == "auth/dependencies.py")
         assert deps.context["gcu_module"] == "myapp.auth.custom"
         assert deps.context["gcu_name"] == "get_user"
-
-    def test_no_auth(self):
-        """No auth config → no auth files."""
-        ctx = _project_ctx()
-        result = Scaffold().build(ctx, _Empty())
-        paths = [f.path for f in result]
-        assert not any(p.startswith("auth/") for p in paths)
-
-
-# -------------------------------------------------------------------
-# Utils
-# -------------------------------------------------------------------
-
-
-class TestUtils:
-    """Tests for Utils operation."""
-
-    def test_produces_utils_file(self):
-        ctx = _project_ctx()
-        result = Utils().build(ctx, _Empty())
-        assert len(result) == 1
-        assert result[0].path == "utils.py"
-        assert result[0].template == "fastapi/utils.py.j2"
 
 
 # -------------------------------------------------------------------
@@ -225,27 +234,63 @@ class TestUtils:
 class TestRouter:
     """Tests for Router operation."""
 
-    def test_mounts_resources(self):
-        """Produces RouterMount per resource."""
+    @staticmethod
+    def _res(name: str) -> ResourceConfig:
+        """A ResourceConfig whose instance_id will be *name* lowercase."""
+        return ResourceConfig(model=f"pkg.models.{name.capitalize()}")
 
-        class Cfg(BaseModel):
-            module: str = "blog"
-            resources: list[ResourceConfig] = []
+    @staticmethod
+    def _ctx(
+        module: str,
+        resources: list[ResourceConfig],
+        store: BuildStore,
+    ) -> BuildContext:
+        """Context for Router running at the app scope.
 
-        config = Cfg(
-            resources=[
-                ResourceConfig(model="blog.models.Post"),
-                ResourceConfig(model="blog.models.Comment"),
-            ]
+        The Router now runs once per :class:`AppRef`, so the
+        scope instance is an AppRef wrapping an inner KilnConfig
+        carrying the module and resources for this app.
+        """
+        app_ref = AppRef(
+            config=KilnConfig(module=module, resources=resources),
+            prefix="",
         )
-        ctx = BuildContext(
-            config=config,
-            scope=PROJECT,
-            instance=config,
-            instance_id="project",
-            store=BuildStore(),
+        project = KilnConfig(module="project", apps=[app_ref])
+        return BuildContext(
+            config=project,
+            scope=APP_SCOPE,
+            instance=app_ref,
+            instance_id=module,
+            store=store,
         )
-        result = Router().build(ctx, _Empty())
+
+    @staticmethod
+    def _add_handler(
+        store: BuildStore,
+        app: str,
+        base_instance_id: str,
+    ) -> None:
+        """Store a RouteHandler under the app-compounded resource id."""
+        store.add(
+            "resource",
+            f"{app}/{base_instance_id}",
+            "get",
+            RouteHandler(
+                method="GET",
+                path="/{id}",
+                function_name=f"get_{base_instance_id}",
+            ),
+        )
+
+    def test_mounts_resources_from_store(self):
+        """One RouterMount per resource with a RouteHandler in the store."""
+        store = BuildStore()
+        self._add_handler(store, "blog", "post")
+        self._add_handler(store, "blog", "comment")
+        resources = [self._res("Post"), self._res("Comment")]
+        ctx = self._ctx("blog", resources, store)
+
+        result = list(Router().build(ctx, _Empty()))
         mounts = [r for r in result if isinstance(r, RouterMount)]
         statics = [r for r in result if isinstance(r, StaticFile)]
 
@@ -259,45 +304,98 @@ class TestRouter:
 
     def test_router_static_context(self):
         """Static file context has correct route entries."""
+        store = BuildStore()
+        self._add_handler(store, "api", "user")
+        ctx = self._ctx("api", [self._res("User")], store)
 
-        class Cfg(BaseModel):
-            module: str = "api"
-            resources: list[ResourceConfig] = []
-
-        config = Cfg(
-            resources=[ResourceConfig(model="api.models.User")],
-        )
-        ctx = BuildContext(
-            config=config,
-            scope=PROJECT,
-            instance=config,
-            instance_id="project",
-            store=BuildStore(),
-        )
-        result = Router().build(ctx, _Empty())
+        result = list(Router().build(ctx, _Empty()))
         static = next(r for r in result if isinstance(r, StaticFile))
         routes = static.context["routes"]
         assert len(routes) == 1
         assert routes[0]["module_name"] == "user"
         assert routes[0]["alias"] == "user_router"
 
-    def test_no_resources_returns_empty(self):
-        """No resources means no router output."""
-
-        class Cfg(BaseModel):
-            module: str = "app"
-            resources: list[ResourceConfig] = []
-
-        config = Cfg()
-        ctx = BuildContext(
-            config=config,
-            scope=PROJECT,
-            instance=config,
-            instance_id="project",
-            store=BuildStore(),
+    def test_deduplicates_iid_across_ops(self):
+        """One resource with multiple route-emitting ops mounts once."""
+        store = BuildStore()
+        store.add(
+            "resource",
+            "api/user",
+            "get",
+            RouteHandler(method="GET", path="/{id}", function_name="get_user"),
         )
-        result = Router().build(ctx, _Empty())
+        store.add(
+            "resource",
+            "api/user",
+            "list",
+            RouteHandler(method="GET", path="/", function_name="list_user"),
+        )
+        ctx = self._ctx("api", [self._res("User")], store)
+
+        result = list(Router().build(ctx, _Empty()))
+        mounts = [r for r in result if isinstance(r, RouterMount)]
+        assert len(mounts) == 1
+        assert mounts[0].alias == "user_router"
+
+    def test_skips_resources_without_handlers(self):
+        """A resource with no RouteHandler entries is not mounted."""
+        store = BuildStore()
+        store.add(
+            "resource",
+            "api/silent",
+            "some_op",
+            StaticFile(path="silent.py", template="x.j2"),
+        )
+        self._add_handler(store, "api", "loud")
+        ctx = self._ctx("api", [self._res("Silent"), self._res("Loud")], store)
+
+        result = list(Router().build(ctx, _Empty()))
+        mounts = [r for r in result if isinstance(r, RouterMount)]
+        aliases = [m.alias for m in mounts]
+        assert aliases == ["loud_router"]
+
+    def test_ignores_non_resource_scope(self):
+        """RouteHandlers outside resource scope are not mounted."""
+        store = BuildStore()
+        store.add(
+            "project",
+            "project",
+            "whatever",
+            RouteHandler(method="GET", path="/", function_name="root"),
+        )
+        ctx = self._ctx("api", [self._res("User")], store)
+
+        result = list(Router().build(ctx, _Empty()))
         assert result == []
+
+    def test_no_handlers_returns_empty(self):
+        """Empty store → no output."""
+        ctx = self._ctx("app", [self._res("User")], BuildStore())
+        result = list(Router().build(ctx, _Empty()))
+        assert result == []
+
+    def test_per_app_invocation_emits_its_own_router(self):
+        """Each app-scope invocation emits only its own app's router."""
+        store = BuildStore()
+        self._add_handler(store, "blog", "post")
+        self._add_handler(store, "shop", "product")
+
+        blog_ctx = self._ctx("blog", [self._res("Post")], store)
+        shop_ctx = self._ctx("shop", [self._res("Product")], store)
+
+        blog_statics = [
+            r
+            for r in Router().build(blog_ctx, _Empty())
+            if isinstance(r, StaticFile)
+        ]
+        shop_statics = [
+            r
+            for r in Router().build(shop_ctx, _Empty())
+            if isinstance(r, StaticFile)
+        ]
+
+        assert [s.path for s in blog_statics] == ["blog/routes/__init__.py"]
+        assert [s.path for s in shop_statics] == ["shop/routes/__init__.py"]
 
 
 # -------------------------------------------------------------------
@@ -311,7 +409,7 @@ class TestProjectRouter:
     def test_no_apps_returns_empty(self):
         config = MinimalConfig()
         ctx = _project_ctx(config)
-        result = ProjectRouter().build(ctx, _Empty())
+        result = list(ProjectRouter().build(ctx, _Empty()))
         assert result == []
 
     def test_with_apps(self):
@@ -320,7 +418,7 @@ class TestProjectRouter:
             apps=[AppRef(config=app_config, prefix="/blog")],
         )
         ctx = _project_ctx(config)
-        result = ProjectRouter().build(ctx, _Empty())
+        result = list(ProjectRouter().build(ctx, _Empty()))
         assert len(result) == 1
         sf = result[0]
         assert sf.path == "routes/__init__.py"
@@ -338,7 +436,7 @@ class TestProjectRouter:
             apps=[AppRef(config=app_config, prefix="/blog")],
         )
         ctx = _project_ctx(config)
-        result = ProjectRouter().build(ctx, _Empty())
+        result = list(ProjectRouter().build(ctx, _Empty()))
         sf = result[0]
         assert sf.context["has_auth"] is True
         assert sf.context["auth_module"] == "_generated.auth"
@@ -362,28 +460,6 @@ class TestCrudHelpers:
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
 
-    def test_resolve_resource_info(self):
-        resource = ResourceConfig(
-            model="blog.models.Article",
-            pk="article_id",
-            pk_type="int",
-        )
-        ctx = _resource_ctx(resource)
-        model, _mod, pk, pk_type, prefix = _resolve_resource_info(ctx)
-        assert model.pascal == "Article"
-        assert pk == "article_id"
-        assert pk_type == "int"
-        assert prefix == "/articles"
-
-    def test_resolve_resource_info_custom_prefix(self):
-        resource = ResourceConfig(
-            model="app.models.User",
-            route_prefix="/people",
-        )
-        ctx = _resource_ctx(resource)
-        _, _, _, _, prefix = _resolve_resource_info(ctx)
-        assert prefix == "/people"
-
 
 # -------------------------------------------------------------------
 # Get
@@ -396,7 +472,7 @@ _FIELDS = [
 
 
 class _FieldsOpts(BaseModel):
-    fields: list[FieldSpec] | None = None
+    fields: list[FieldSpec]
 
 
 # -------------------------------------------------------------------
@@ -407,26 +483,11 @@ class _FieldsOpts(BaseModel):
 class TestGet:
     """Tests for Get operation."""
 
-    def test_get_without_fields(self):
-        """No fields config → no schema, untyped handler."""
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
-        result = Get().build(ctx, _FieldsOpts())
-
-        assert not any(isinstance(r, SchemaClass) for r in result)
-        assert not any(isinstance(r, SerializerFn) for r in result)
-
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        assert handlers[0].response_model is None
-        assert handlers[0].return_type == "object"
-        assert handlers[0].serializer_fn is None
-
-    def test_get_with_fields(self):
+    def test_get_emits_schema_and_handler(self):
         """Get emits its own ``{Model}Resource`` schema + serializer."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = Get().build(ctx, _FieldsOpts(fields=_FIELDS))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
@@ -445,7 +506,7 @@ class TestGet:
     def test_get_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = Get().build(ctx, _FieldsOpts())
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
 
         tests = [r for r in result if isinstance(r, TestCase)]
         assert len(tests) == 1
@@ -464,7 +525,7 @@ class TestGet:
             pk_type="int",
         )
         ctx = _resource_ctx(resource)
-        result = Get().build(ctx, _FieldsOpts())
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/{user_id}"
         assert handler.params[0].name == "user_id"
@@ -479,26 +540,11 @@ class TestGet:
 class TestList:
     """Tests for List operation."""
 
-    def test_list_without_fields(self):
-        """No fields config → no schema, untyped list response."""
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
-        result = List().build(ctx, _FieldsOpts())
-
-        assert not any(isinstance(r, SchemaClass) for r in result)
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        assert handlers[0].method == "GET"
-        assert handlers[0].path == "/"
-        assert handlers[0].function_name == "list_users"
-        assert handlers[0].response_model == "list"
-        assert handlers[0].serializer_fn is None
-
-    def test_list_with_fields_distinct_from_get(self):
+    def test_list_emits_schema_and_handler(self):
         """List emits its own ``{Model}ListItem`` schema + serializer."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = List().build(ctx, _FieldsOpts(fields=_FIELDS))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
@@ -510,6 +556,9 @@ class TestList:
         assert sers[0].schema_name == "UserListItem"
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.method == "GET"
+        assert handler.path == "/"
+        assert handler.function_name == "list_users"
         assert handler.response_model == "list[UserListItem]"
         assert handler.return_type == "list[UserListItem]"
         assert handler.serializer_fn == "to_user_list_item"
@@ -517,7 +566,7 @@ class TestList:
     def test_list_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = List().build(ctx, _FieldsOpts())
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].op_name == "list"
         assert tests[0].is_list_response is True
@@ -531,11 +580,11 @@ class TestList:
 class TestCreate:
     """Tests for Create operation."""
 
-    def test_create_with_fields(self):
+    def test_create_emits_schema_and_handler(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
         opts = _FieldsOpts(fields=_FIELDS)
-        result = Create().build(ctx, opts)
+        result = list(Create().build(ctx, opts))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
@@ -544,20 +593,13 @@ class TestCreate:
         handlers = [r for r in result if isinstance(r, RouteHandler)]
         assert handlers[0].method == "POST"
         assert handlers[0].status_code == 201
-
-    def test_create_no_fields(self):
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
-        result = Create().build(ctx, _FieldsOpts())
-
-        schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 0
+        assert handlers[0].request_schema == "UserCreateRequest"
 
     def test_create_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
         opts = _FieldsOpts(fields=_FIELDS)
-        result = Create().build(ctx, opts)
+        result = list(Create().build(ctx, opts))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].status_success == 201
         assert tests[0].status_invalid == 422
@@ -577,7 +619,7 @@ class TestUpdate:
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
         opts = _FieldsOpts(fields=_FIELDS)
-        result = Update().build(ctx, opts)
+        result = list(Update().build(ctx, opts))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
@@ -597,7 +639,7 @@ class TestUpdate:
         )
         ctx = _resource_ctx(resource)
         opts = _FieldsOpts(fields=_FIELDS)
-        result = Update().build(ctx, opts)
+        result = list(Update().build(ctx, opts))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].op_name == "update"
         assert tests[0].path == "/{user_id}"
@@ -616,7 +658,7 @@ class TestDelete:
     def test_delete_basic(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = Delete().build(ctx, _Empty())
+        result = list(Delete().build(ctx, _Empty()))
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
         assert len(handlers) == 1
@@ -627,7 +669,7 @@ class TestDelete:
     def test_delete_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _resource_ctx(resource)
-        result = Delete().build(ctx, _Empty())
+        result = list(Delete().build(ctx, _Empty()))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].status_success == 204
         assert tests[0].status_not_found == 404
@@ -639,7 +681,7 @@ class TestDelete:
             pk_type="str",
         )
         ctx = _resource_ctx(resource)
-        result = Delete().build(ctx, _Empty())
+        result = list(Delete().build(ctx, _Empty()))
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/{item_id}"
         assert handler.params[0].name == "item_id"
@@ -681,7 +723,7 @@ class TestAction:
             "kiln.operations.action.introspect_action_fn",
             return_value=_Info(),
         ):
-            result = Action().build(ctx, opts)
+            result = list(Action().build(ctx, opts))
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/{id}/publish"
@@ -718,7 +760,7 @@ class TestAction:
             "kiln.operations.action.introspect_action_fn",
             return_value=_Info(),
         ):
-            result = Action().build(ctx, opts)
+            result = list(Action().build(ctx, opts))
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/bulk-import"
