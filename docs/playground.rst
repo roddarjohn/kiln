@@ -26,12 +26,12 @@ Structure
    ├── db/
    │   └── base.py           # shared PGCraftBase
    ├── alembic/              # Alembic migration env
-   ├── _generated/           # written by kiln generate (git-ignored)
+   ├── _generated/           # written by foundry generate (git-ignored)
    ├── main.py               # FastAPI entry point
    └── justfile              # convenience recipes
 
 ``_generated/`` is the output directory.  Everything inside it is
-overwritten on every ``kiln generate`` run and should not be edited
+overwritten on every ``foundry generate`` run and should not be edited
 by hand.
 
 The ``blog/`` and ``inventory/`` directories contain hand-written code
@@ -74,7 +74,7 @@ All recipes are run from the ``playground/`` directory.
      - Description
    * - ``just generate``
      - ``just g``
-     - Run ``kiln generate`` against ``examples/project.jsonnet``.
+     - Run ``foundry generate`` against ``examples/project.jsonnet``.
    * - ``just serve``
      - ``just s``
      - Start uvicorn with hot-reload.

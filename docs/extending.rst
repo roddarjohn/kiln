@@ -99,7 +99,7 @@ Add your operation to your package's ``pyproject.toml``:
    [project.entry-points."foundry.operations"]
    bulk_create = "my_pkg.ops:BulkCreate"
 
-``kiln generate`` discovers all installed operations at startup, so
+``foundry generate`` discovers all installed operations at startup, so
 as long as your package is ``pip install``\ ed alongside kiln the
 operation is available.
 
@@ -305,18 +305,23 @@ that introduces a new type is also responsible for extending the
 assembler (or shipping its own) so the renderer output ends up in
 the right file.
 
-Building on ``foundry`` directly
------------------------------------
+Shipping a new target
+---------------------
 
-If you are generating code for a target that has nothing to do with
-FastAPI (a Go CLI, a Terraform module, a gRPC service), skip the
-``kiln`` package entirely and use ``foundry``:
+If you are generating code for something that has nothing to do with
+FastAPI (a Go CLI, a Terraform module, a gRPC service), you can ship
+your own plugin that registers as a ``foundry`` target.  Install it
+alongside ``foundry`` and the ``foundry`` CLI will discover and
+dispatch to it the same way it does for kiln.
+
+Step 1 -- write the generator
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
    from foundry.engine import Engine
-   from foundry.render import RenderCtx, RenderRegistry
    from foundry.env import create_jinja_env
+   from foundry.render import RenderCtx, RenderRegistry
 
    def generate_my_thing(config):
        engine = Engine(operations=[...])
@@ -334,7 +339,38 @@ FastAPI (a Go CLI, a Terraform module, a gRPC service), skip the
            files.append(GeneratedFile(path=..., content=content))
        return files
 
-You need:
+Step 2 -- register a :class:`~foundry.target.Target`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   # my_pkg/target.py
+   from pathlib import Path
+
+   from foundry.target import Target
+   from my_pkg.config import load_my_config
+   from my_pkg.generate import generate_my_thing
+
+   target = Target(
+       name="mytarget",
+       load_config=load_my_config,
+       generate=generate_my_thing,
+       default_out=lambda cfg: Path(cfg.out_dir or "."),
+   )
+
+Step 3 -- expose it via the entry-point group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: toml
+
+   [project.entry-points."foundry.targets"]
+   mytarget = "my_pkg.target:target"
+
+Install your package and ``foundry generate --target mytarget --config
+...`` works.  Raise subclasses of :class:`foundry.errors.CLIError` for
+user-facing mistakes; anything else will propagate with a traceback.
+
+You still need, as with kiln:
 
 * A Pydantic config schema for your target.
 * Your own operations.

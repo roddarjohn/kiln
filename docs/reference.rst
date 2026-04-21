@@ -198,6 +198,17 @@ Every file is overwritten on every generation run.
 foundry API
 -------------
 
+Targets
+^^^^^^^
+
+.. autoclass:: foundry.target.Target
+   :members:
+
+.. autofunction:: foundry.target.discover_targets
+
+.. autoclass:: foundry.errors.CLIError
+   :members:
+
 Engine
 ^^^^^^
 

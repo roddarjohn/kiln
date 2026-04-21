@@ -1,18 +1,20 @@
-"""User-facing error hierarchy for the kiln CLI.
+"""User-facing error hierarchy for kiln.
 
 Any exception that inherits from :class:`KilnError` is caught at
-the CLI entry point (:func:`kiln.cli.cli_main`) and rendered as
-``{prefix}: {message}`` with exit code 1.  Anything else --
-``AttributeError``, ``TypeError`` from a programming mistake, and
-so on -- propagates with a traceback, because that signals a bug
-in kiln rather than bad input from the user.
+the foundry CLI entry point (:func:`foundry.cli.cli_main`) and
+rendered as ``{prefix}: {message}`` with exit code 1.  Anything
+else -- ``AttributeError``, ``TypeError`` from a programming
+mistake, and so on -- propagates with a traceback, because that
+signals a bug in kiln rather than bad input from the user.
 """
 
 from __future__ import annotations
 
+from foundry.errors import CLIError
 
-class KilnError(Exception):
-    """Base class for errors that are the user's to fix.
+
+class KilnError(CLIError):
+    """Base class for kiln-specific user errors.
 
     Subclasses set :attr:`prefix` to control how the error is
     labelled when rendered at the CLI boundary.

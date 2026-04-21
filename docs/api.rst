@@ -4,10 +4,16 @@ API reference
 Most of the public API is covered in :doc:`reference`.  The symbols
 below round out the surface for tool authors and contributors.
 
-kiln CLI
---------
+foundry CLI
+-----------
 
-.. automodule:: kiln.cli
+.. automodule:: foundry.cli
+   :members:
+
+kiln target
+-----------
+
+.. automodule:: kiln.target
    :members:
 
 kiln.config.loader

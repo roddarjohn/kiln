@@ -1,4 +1,4 @@
-"""Tests for the CLI entry point."""
+"""Tests for the foundry CLI entry point, backed by the kiln target."""
 
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from foundry import GeneratedFile, write_files
-from kiln.cli import app, cli_main
+from foundry.cli import app, cli_main
 from kiln.errors import ConfigError
 
 runner = CliRunner()
@@ -16,7 +16,7 @@ runner = CliRunner()
 def test_help():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "autogenerating" in result.output
+    assert "code-generation" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def test_cli_main_renders_config_error(
     bad.write_text("version: 1")
     monkeypatch.setattr(
         "sys.argv",
-        ["kiln", "generate", "--config", str(bad), "--out", str(tmp_path)],
+        ["foundry", "generate", "--config", str(bad), "--out", str(tmp_path)],
     )
     with pytest.raises(SystemExit) as excinfo:
         cli_main()

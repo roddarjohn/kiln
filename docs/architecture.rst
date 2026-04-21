@@ -9,15 +9,18 @@ kiln is split into two packages that serve very different audiences:
 
 ``foundry`` -- a generic, framework-agnostic code-generation engine.
    Provides the build pipeline, scope discovery, operation protocol,
-   build store, render registry, and typed output primitives.  Nothing
-   in ``foundry`` knows about FastAPI, Pydantic schemas, routes, or
-   any other concrete target.
+   build store, render registry, typed output primitives, and the
+   ``foundry`` CLI.  Nothing in ``foundry`` knows about FastAPI,
+   Pydantic schemas, routes, or any other concrete target; the CLI
+   dispatches to a plugin-provided :class:`~foundry.target.Target`
+   discovered via the ``foundry.targets`` entry-point group.
 
-``kiln`` -- a concrete FastAPI / SQLAlchemy generator built on top of
-``foundry``.
+``kiln`` -- a concrete FastAPI / SQLAlchemy generator registered as a
+``foundry`` target.
    Defines the config schema, ships a set of built-in operations (CRUD,
-   actions, scaffolding, routing), a set of renderers backed by Jinja2
-   templates, and a CLI (``kiln generate``).
+   actions, scaffolding, routing), and a set of renderers backed by
+   Jinja2 templates.  Registers itself as the ``kiln`` target so
+   ``foundry generate`` can load and run it.
 
 Keeping the two apart means you can:
 
@@ -30,7 +33,7 @@ Keeping the two apart means you can:
 The build pipeline
 ------------------
 
-Every ``kiln generate`` invocation flows through the same four steps:
+Every ``foundry generate`` invocation flows through the same four steps:
 
 .. code-block:: text
 
@@ -277,8 +280,24 @@ register operations; kiln's built-ins live in kiln's own
    project_router = "kiln.operations.routing:ProjectRouter"
 
 Third-party packages register their own operations under the same
-group.  ``kiln generate`` discovers all installed operations at
+group.  ``foundry generate`` discovers all installed operations at
 startup.
+
+Targets register under a second entry-point group,
+``foundry.targets``.  A :class:`~foundry.target.Target` bundles the
+three things the CLI needs -- a config loader, a ``generate``
+callable, and an output-directory policy -- so the ``foundry`` CLI
+can dispatch to it without knowing anything framework-specific.
+kiln's own registration:
+
+.. code-block:: toml
+
+   [project.entry-points."foundry.targets"]
+   kiln = "kiln.target:target"
+
+When exactly one target is installed, ``foundry generate`` picks it
+automatically; with multiple, the user selects by name via
+``--target``.
 
 Source layout
 -------------
@@ -286,7 +305,10 @@ Source layout
 .. code-block:: text
 
    src/
-   ├── foundry/              # generic engine -- target-agnostic
+   ├── foundry/              # generic engine + CLI -- target-agnostic
+   │   ├── cli.py              # `foundry` CLI (generate/clean)
+   │   ├── target.py           # Target dataclass + discover_targets
+   │   ├── errors.py           # CLIError
    │   ├── engine.py           # Engine, BuildContext
    │   ├── operation.py        # @operation decorator, OperationMeta
    │   ├── scope.py            # Scope, discover_scopes
@@ -298,8 +320,8 @@ Source layout
    │   ├── spec.py             # GeneratedFile
    │   └── output.py           # write_files
    │
-   └── kiln/                   # FastAPI generator on top of foundry
-       ├── cli.py              # `kiln` CLI
+   └── kiln/                   # FastAPI target registered with foundry
+       ├── target.py           # kiln's Target registration
        ├── config/             # Pydantic config schema + loader
        ├── operations/         # built-in @operation classes
        │   ├── get.py          # one file per op: @operation class +

@@ -20,6 +20,7 @@ layers a concrete FastAPI / SQLAlchemy generator on top of it.
 
 from foundry.engine import BuildContext, Engine
 from foundry.env import create_jinja_env, render_snippet
+from foundry.errors import CLIError
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import, split_dotted_class
 from foundry.operation import (
@@ -45,11 +46,13 @@ from foundry.outputs import (
 from foundry.render import BuildStore, RenderCtx, RenderRegistry
 from foundry.scope import PROJECT, Scope, discover_scopes
 from foundry.spec import FileSpec, GeneratedFile, wire_exports
+from foundry.target import Target, discover_targets
 
 __all__ = [
     "PROJECT",
     "BuildContext",
     "BuildStore",
+    "CLIError",
     "EmptyOptions",
     "Engine",
     "EnumClass",
@@ -68,10 +71,12 @@ __all__ = [
     "Scope",
     "SerializerFn",
     "StaticFile",
+    "Target",
     "TestCase",
     "create_jinja_env",
     "discover_operations",
     "discover_scopes",
+    "discover_targets",
     "get_operation_meta",
     "operation",
     "prefix_import",
