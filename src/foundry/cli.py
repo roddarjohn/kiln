@@ -3,8 +3,8 @@
 The CLI is target-agnostic: every piece of framework-specific
 behavior comes from a :class:`~foundry.target.Target` discovered
 via the ``foundry.targets`` entry-point group.  The foundry CLI
-itself only knows how to load a config, dispatch to the target's
-generator, and write files to disk.
+loads the config, runs the generic pipeline against the target's
+registry/assembler/env, and writes files to disk.
 """
 
 from __future__ import annotations
@@ -12,19 +12,15 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
+from foundry.config import load_config
 from foundry.errors import CLIError
 from foundry.output import write_files
-from foundry.target import discover_targets
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
-
-    from foundry.target import Target
-
+from foundry.pipeline import generate
+from foundry.target import Target, discover_targets
 
 app = typer.Typer(
     help=(
@@ -43,15 +39,11 @@ ConfigOption = Annotated[
     ),
 ]
 OutOption = Annotated[
-    Path | None,
+    Path,
     typer.Option(
         "--out",
         "-o",
-        help=(
-            "Output root directory.  Defaults to the target's "
-            "own default (e.g. kiln's ``package_prefix``) or the "
-            "current directory when no default is set."
-        ),
+        help="Output root directory.  Defaults to the current directory.",
     ),
 ]
 TargetOption = Annotated[
@@ -91,6 +83,7 @@ def _resolve_target(name: str | None) -> Target:
             "that provides one."
         )
         raise CLIError(msg)
+
     if name is None:
         if len(targets) > 1:
             names = ", ".join(t.name for t in targets)
@@ -98,31 +91,30 @@ def _resolve_target(name: str | None) -> Target:
                 f"Multiple targets installed ({names}); pick one with --target"
             )
             raise CLIError(msg)
+
         return targets[0]
+
     for target in targets:
         if target.name == name:
             return target
+
     names = ", ".join(t.name for t in targets)
     msg = f"No target named {name!r} (installed: {names})"
     raise CLIError(msg)
 
 
-def _effective_out(
-    target: Target,
-    cfg: BaseModel,
-    out: Path | None,
-) -> Path:
-    """Resolve the effective output directory.
+def _stdlibs() -> dict[str, Path]:
+    """Collect jsonnet stdlib prefixes from every installed target.
 
-    ``--out`` wins when supplied, otherwise the target's
-    ``default_out`` policy is consulted, otherwise the current
-    directory is used.
+    Every target's stdlib is available to every config, so an
+    installation with kiln + another target lets configs import
+    from both under their respective prefixes.
     """
-    if out is not None:
-        return out
-    if target.default_out is not None:
-        return target.default_out(cfg) or Path()
-    return Path()
+    return {
+        t.name: t.jsonnet_stdlib_dir
+        for t in discover_targets()
+        if t.jsonnet_stdlib_dir is not None
+    }
 
 
 @app.callback()
@@ -133,31 +125,31 @@ def main() -> None:
 @app.command("clean")
 def clean_cmd(
     config: ConfigOption,
-    out: OutOption = None,
+    out: OutOption = Path(),
     target_name: TargetOption = None,
 ) -> None:
-    """Delete the output directory for a config.
+    """Delete the output directory.
 
-    Resolves the output directory the same way :func:`generate_cmd`
-    does (``--out`` wins, else the target's default) and removes
-    it.  The current working directory is never deleted.
+    Removes *out* and its contents.  The current working directory
+    is never deleted.  ``--config`` is parsed so the CLI surfaces
+    config errors consistently, but its contents do not influence
+    what is removed.
     """
     target = _resolve_target(target_name)
-    cfg = target.load_config(config)
-    effective_out = _effective_out(target, cfg, out)
+    load_config(config, target.schema, _stdlibs())
 
-    if effective_out == Path() or not effective_out.exists():
-        typer.echo(f"Nothing to clean at {effective_out}.")
+    if out == Path() or not out.exists():
+        typer.echo(f"Nothing to clean at {out}.")
         return
 
-    shutil.rmtree(effective_out)
-    typer.echo(f"Cleaned {effective_out}.")
+    shutil.rmtree(out)
+    typer.echo(f"Cleaned {out}.")
 
 
 @app.command("generate")
 def generate_cmd(
     config: ConfigOption,
-    out: OutOption = None,
+    out: OutOption = Path(),
     target_name: TargetOption = None,
     clean: Annotated[  # noqa: FBT002
         bool,
@@ -175,10 +167,9 @@ def generate_cmd(
         clean_cmd(config=config, out=out, target_name=target_name)
 
     target = _resolve_target(target_name)
-    cfg = target.load_config(config)
-    effective_out = _effective_out(target, cfg, out)
-    files = target.generate(cfg)
-    written = write_files(files, effective_out)
+    cfg = load_config(config, target.schema, _stdlibs())
+    files = generate(cfg, target)
+    written = write_files(files, out)
 
     typer.echo(f"Generated {written} file(s).")
 
@@ -193,6 +184,7 @@ def cli_main() -> None:
     """
     try:
         app()
+
     except CLIError as exc:
         typer.echo(f"{exc.prefix}: {exc}", err=True)
         sys.exit(1)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from foundry.config import FoundryConfig
 
 FieldType = Literal[
     "uuid",
@@ -74,6 +76,20 @@ class DatabaseConfig(BaseModel):
     pool_recycle: int = -1
     pool_pre_ping: bool = True
     default: bool = False
+
+    @property
+    def session_module(self) -> str:
+        """Dotted module path of the scaffolded session file.
+
+        Matches what :class:`DbScaffold` emits at
+        ``db/{key}_session.py``.
+        """
+        return f"db.{self.key}_session"
+
+    @property
+    def get_db_fn(self) -> str:
+        """Name of the FastAPI dependency exposed by the session module."""
+        return f"get_{self.key}_db"
 
 
 class FieldSpec(BaseModel):
@@ -196,7 +212,7 @@ class App(BaseModel):
         return self.config.module
 
 
-class ProjectConfig(BaseModel):
+class ProjectConfig(FoundryConfig):
     """Top-level kiln configuration.
 
     A project is a collection of apps plus shared infrastructure
@@ -206,6 +222,12 @@ class ProjectConfig(BaseModel):
     wrapped into a single implicit app with ``prefix=""`` by
     :meth:`_wrap_shorthand`, so the scope tree
     (``project → app → resource``) is uniform across configs.
+
+    Inherits :attr:`~foundry.config.FoundryConfig.package_prefix`
+    from foundry and overrides its default to ``"_generated"`` so
+    generated code lives at ``_generated/{module}/`` and is
+    imported as ``_generated.{module}.routes.article``.  Set it to
+    ``""`` to disable the prefix.
     """
 
     version: str = "1"
@@ -214,14 +236,9 @@ class ProjectConfig(BaseModel):
     each renderer is tagged with the framework it implements, and
     only those matching this value are used."""
     package_prefix: str = "_generated"
-    """Directory prefix prepended to all generated file paths and Python
-    import paths.  Defaults to ``"_generated"`` so generated code lives
-    at ``_generated/{module}/`` and is imported as
-    ``_generated.{module}.routes.article``.  Set to ``""`` to disable.
-    """
     auth: AuthConfig | None = None
-    databases: list[DatabaseConfig] = []
-    apps: list[App] = []
+    databases: list[DatabaseConfig] = Field(..., min_length=1)
+    apps: list[App] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -243,3 +260,31 @@ class ProjectConfig(BaseModel):
         app_data = {k: data.pop(k) for k in list(data.keys()) if k in app_keys}
         data["apps"] = [{"config": app_data, "prefix": ""}]
         return data
+
+    def resolve_database(self, db_key: str | None) -> DatabaseConfig:
+        """Return the :class:`DatabaseConfig` selected by *db_key*.
+
+        When *db_key* is ``None``, returns the database marked
+        ``default=True``.
+
+        Raises:
+            ValueError: If *db_key* does not match any configured
+                database, or if no database has ``default=True`` and
+                *db_key* is ``None``.
+
+        """
+        if db_key is None:
+            defaults = [d for d in self.databases if d.default]
+            if not defaults:
+                msg = (
+                    "No database has default=True. "
+                    "Set default: true on one database "
+                    "or specify db_key."
+                )
+                raise ValueError(msg)
+            return defaults[0]
+        matches = [d for d in self.databases if d.key == db_key]
+        if not matches:
+            msg = f"No database with key '{db_key}' found in databases config."
+            raise ValueError(msg)
+        return matches[0]

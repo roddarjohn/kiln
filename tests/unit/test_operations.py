@@ -107,14 +107,6 @@ class _Empty(BaseModel):
 class TestScaffold:
     """Tests for Scaffold operation."""
 
-    def test_default_db_session(self):
-        """No databases → default session.py."""
-        ctx = _project_ctx()
-        result = list(Scaffold().build(ctx, _Empty()))
-        paths = [f.path for f in result]
-        assert "db/__init__.py" in paths
-        assert "db/session.py" in paths
-
     def test_named_databases(self):
         """Named databases produce per-key session files."""
         config = MinimalConfig(
@@ -129,15 +121,6 @@ class TestScaffold:
         assert "db/primary_session.py" in paths
         assert "db/analytics_session.py" in paths
         assert "db/session.py" not in paths
-
-    def test_db_session_context(self):
-        """Default session has expected context values."""
-        ctx = _project_ctx()
-        result = list(Scaffold().build(ctx, _Empty()))
-        session = next(f for f in result if f.path == "db/session.py")
-        assert session.context["url_env"] == "DATABASE_URL"
-        assert session.context["get_db_fn"] == "get_db"
-        assert session.context["pool_pre_ping"] is True
 
     def test_named_db_context(self):
         """Named db session has correct get_db_fn."""
@@ -256,7 +239,10 @@ class TestRouter:
             config=AppConfig(module=module, resources=resources),
             prefix="",
         )
-        project = ProjectConfig(apps=[app])
+        project = ProjectConfig(
+            apps=[app],
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
         return BuildContext(
             config=project,
             scope=APP_SCOPE,

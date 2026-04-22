@@ -1,13 +1,10 @@
-"""User-facing error base class for the foundry CLI.
+"""User-facing error hierarchy for the foundry CLI.
 
 Exceptions that inherit from :class:`CLIError` are caught at the
 CLI entry point (:func:`foundry.cli.cli_main`) and rendered as
 ``{prefix}: {message}`` with exit code 1.  Anything else
 propagates with a traceback, because it signals a bug rather than
 bad user input.
-
-Targets define their own subclasses with target-specific
-``prefix`` labels (e.g. kiln's :class:`~kiln.errors.ConfigError`).
 """
 
 from __future__ import annotations
@@ -21,3 +18,15 @@ class CLIError(Exception):
     """
 
     prefix: str = "Error"
+
+
+class ConfigError(CLIError):
+    """Raised when a config file can't be loaded or is invalid."""
+
+    prefix = "Error loading config"
+
+
+class GenerationError(CLIError):
+    """Raised when file generation fails due to bad config semantics."""
+
+    prefix = "Error"

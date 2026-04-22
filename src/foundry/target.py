@@ -1,16 +1,19 @@
 """Target plugin protocol and discovery.
 
 A *target* is the glue between foundry's generic engine and a
-concrete framework (FastAPI + SQLAlchemy in kiln's case).  Each
-target packages the three things the foundry CLI needs:
+concrete framework (FastAPI + SQLAlchemy in kiln's case).  A
+target is pure data:
 
-* a config loader (path → validated pydantic model),
-* a ``generate`` callable (config → list of files),
-* a default-output-directory policy.
+* the pydantic schema its config files validate against,
+* the directory of Jinja templates its renderers reference,
+* and an optional directory of jsonnet ``.libsonnet`` files
+  configs can import under the ``<name>/...`` prefix.
 
-Targets are discovered at CLI startup via the ``foundry.targets``
-entry-point group.  The CLI auto-selects the only installed
-target, or routes by ``--target`` when multiple are present.
+Everything else -- loading, engine, registry, assembler, and
+output -- lives in foundry.  Targets are discovered at CLI
+startup via the ``foundry.targets`` entry-point group.  The CLI
+auto-selects the only installed target, or routes by
+``--target`` when multiple are present.
 """
 
 from __future__ import annotations
@@ -20,12 +23,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from pydantic import BaseModel
-
-    from foundry.spec import GeneratedFile
+    from foundry.config import FoundryConfig
 
 
 ENTRY_POINT_GROUP = "foundry.targets"
@@ -37,25 +37,25 @@ class Target:
 
     Attributes:
         name: Short identifier, used for ``--target`` dispatch
-            when multiple targets are installed.
-        load_config: Parse and validate a config file from a
-            :class:`~pathlib.Path`.  Should raise
-            :class:`~foundry.errors.CLIError` (or a subclass) on
-            bad input so the CLI renders it cleanly.
-        generate: Turn a validated config model into a flat list
-            of :class:`~foundry.spec.GeneratedFile` objects.
-        default_out: Compute the default output directory from
-            the validated config.  Return ``None`` when the config
-            does not imply a default and the CLI should fall back
-            to the current directory.  ``None`` for the field
-            itself means the target has no default policy at all.
+            when multiple targets are installed and as the jsonnet
+            stdlib import prefix.
+        schema: :class:`~foundry.config.FoundryConfig` subclass the
+            target's config files validate against.  Foundry's
+            loader instantiates this.
+        template_dir: Directory of Jinja templates the target's
+            renderers reference.  Foundry builds the Jinja
+            environment rooted here.
+        jsonnet_stdlib_dir: Optional directory of jsonnet
+            ``.libsonnet`` files exposed to configs as
+            ``<name>/...`` imports.  ``None`` when the target
+            ships no stdlib.
 
     """
 
     name: str
-    load_config: Callable[[Path], BaseModel]
-    generate: Callable[[BaseModel], list[GeneratedFile]]
-    default_out: Callable[[BaseModel], Path | None] | None = None
+    schema: type[FoundryConfig]
+    template_dir: Path
+    jsonnet_stdlib_dir: Path | None = None
 
 
 def discover_targets() -> list[Target]:

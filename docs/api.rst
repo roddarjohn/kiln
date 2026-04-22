@@ -16,32 +16,41 @@ kiln target
 .. automodule:: kiln.target
    :members:
 
-kiln.config.loader
-------------------
+foundry.config
+--------------
 
-.. automodule:: kiln.config.loader
+.. automodule:: foundry.config
    :members:
 
-kiln.renderers.generate
------------------------
+foundry.jsonnet
+---------------
 
-.. automodule:: kiln.renderers.generate
+.. automodule:: foundry.jsonnet
    :members:
 
-kiln.renderers.assembler
-------------------------
+foundry.pipeline
+----------------
 
-.. automodule:: kiln.renderers.assembler
+.. automodule:: foundry.pipeline
    :members:
 
-kiln.renderers.fastapi
-----------------------
+foundry.assembler
+-----------------
 
-.. automodule:: kiln.renderers.fastapi
+.. automodule:: foundry.assembler
+   :members:
+
+foundry.render
+--------------
+
+.. automodule:: foundry.render
    :members:
 
 kiln.operations
 ---------------
+
+.. automodule:: kiln.operations._render
+   :members:
 
 .. automodule:: kiln.operations.get
    :members:

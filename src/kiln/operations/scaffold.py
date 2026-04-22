@@ -40,10 +40,8 @@ class Scaffold:
             _options: Unused (no options).
 
         Yields:
-            :class:`StaticFile` objects for the ``db/`` package
-            and one session module per configured database (or a
-            single default ``db/session.py`` when none are
-            configured).
+            :class:`StaticFile` objects for the ``db/`` package and
+            one session module per configured database.
 
         """
         config = ctx.instance
@@ -54,38 +52,20 @@ class Scaffold:
             context={},
         )
 
-        if config.databases:
-            for db in config.databases:
-                yield StaticFile(
-                    path=f"db/{db.key}_session.py",
-                    template="init/db_session.py.j2",
-                    context={
-                        "key": db.key,
-                        "url_env": db.url_env,
-                        "echo": db.echo,
-                        "pool_size": db.pool_size,
-                        "max_overflow": db.max_overflow,
-                        "pool_timeout": db.pool_timeout,
-                        "pool_recycle": db.pool_recycle,
-                        "pool_pre_ping": db.pool_pre_ping,
-                        "get_db_fn": f"get_{db.key}_db",
-                    },
-                )
-
-        else:
+        for db in config.databases:
             yield StaticFile(
-                path="db/session.py",
+                path=f"db/{db.key}_session.py",
                 template="init/db_session.py.j2",
                 context={
-                    "key": None,
-                    "url_env": "DATABASE_URL",
-                    "echo": False,
-                    "pool_size": 5,
-                    "max_overflow": 10,
-                    "pool_timeout": 30,
-                    "pool_recycle": -1,
-                    "pool_pre_ping": True,
-                    "get_db_fn": "get_db",
+                    "key": db.key,
+                    "url_env": db.url_env,
+                    "echo": db.echo,
+                    "pool_size": db.pool_size,
+                    "max_overflow": db.max_overflow,
+                    "pool_timeout": db.pool_timeout,
+                    "pool_recycle": db.pool_recycle,
+                    "pool_pre_ping": db.pool_pre_ping,
+                    "get_db_fn": f"get_{db.key}_db",
                 },
             )
 

@@ -152,6 +152,7 @@ class Engine:
         """
         for own_iid, inst_obj in _resolve_instances(scope, parent_instance):
             full_iid = f"{parent_iid}/{own_iid}" if parent_iid else own_iid
+            state.store.register_instance(scope.name, full_iid, inst_obj)
             ctx = BuildContext(
                 config=state.config,
                 scope=scope,

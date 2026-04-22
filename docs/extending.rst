@@ -231,38 +231,38 @@ the route file's top-of-file import block automatically.
 Swapping a renderer
 -------------------
 
-Every output type has a default renderer in
-``kiln.renderers.fastapi``.  You can override or supplement these
-without changing the operation that produces the output.
+Every output type has a default renderer.  Op-specific
+``RouteHandler`` subclasses register their renderers at the bottom of
+each ``kiln.operations.<op>`` module; the shared cross-cutting
+renderers (``SchemaClass``, ``EnumClass``, ``SerializerFn``,
+``StaticFile``, ``TestCase``) live in ``kiln.operations._render``.
+You can override or supplement any of these without changing the
+operation that produces the output.
 
-Register an additional renderer with a ``when`` predicate.  The
-registry tries registrations in order and uses the first whose
-predicate matches:
+Register an additional renderer with a ``when`` predicate against the
+module-level :data:`foundry.render.registry`.  The registry tries
+registrations in order and uses the first whose predicate matches:
 
 .. code-block:: python
 
    from foundry.outputs import RouteHandler
-   from foundry.render import RenderRegistry
+   from foundry.render import registry
 
-   def register_my_renderers(registry: RenderRegistry) -> None:
+   @registry.renders(
+       RouteHandler,
+       when=lambda cfg: getattr(cfg, "use_async_retry", False),
+   )
+   def render_retry_handler(handler, ctx):
+       # custom Jinja template that wraps the body in a retry loop
+       return ctx.env.get_template(
+           "my_pkg/retry_handler.j2",
+       ).render(h=handler)
 
-       @registry.renders(
-           RouteHandler,
-           when=lambda cfg: getattr(cfg, "use_async_retry", False),
-       )
-       def render_retry_handler(handler, ctx):
-           # custom Jinja template that wraps the body in a retry loop
-           return ctx.env.get_template(
-               "my_pkg/retry_handler.j2",
-           ).render(h=handler)
-
-Register the predicate-guarded renderer *first* (before the default
-unguarded one) if you want it to win when the flag is on.
-
-To plug new renderers in, write your own equivalent of
-:func:`kiln.renderers.fastapi.create_registry` and wire it into your
-own ``generate()`` entry point.  There is no entry-point group for
-renderers because there can only be one registry per generation run.
+Import the module where this decorator runs from one of your
+operations (or from the package's ``__init__``) so it registers when
+foundry discovers operations via the ``foundry.operations``
+entry-point group.  Register the predicate-guarded renderer *before*
+the default unguarded one if you want it to win when the flag is on.
 
 Adding a new output type
 ------------------------
@@ -440,6 +440,6 @@ Run your operations through the engine directly -- no CLI needed:
        assert any(h.path == "/bulk" for h in handlers)
 
 For full end-to-end coverage, load a fixture config via
-:func:`kiln.config.loader.load` and pass it through
-:func:`kiln.renderers.generate.generate` to get back the full list of
+:func:`foundry.config.load_config` and pass it through
+:func:`foundry.pipeline.generate` to get back the full list of
 :class:`~foundry.spec.GeneratedFile` objects.

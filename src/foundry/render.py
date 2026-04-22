@@ -154,21 +154,39 @@ class RenderRegistry:
         return output_type in self._entries
 
 
+#: Process-wide render registry.
+#:
+#: Targets' renderer modules register into this singleton at
+#: import time.  Because foundry discovers operations via the
+#: ``foundry.operations`` entry-point group and loading an
+#: operation transitively imports its renderer module, no
+#: separate renderer-discovery step is needed — by the time the
+#: pipeline's assembler runs, every renderer is registered.
+registry = RenderRegistry()
+
+
 @dataclass
 class BuildStore:
     """Accumulator for objects produced during the build phase.
 
     Objects are keyed by ``(scope_name, instance_id, op_name)``
     so the engine and later operations can query earlier output.
+    The store also retains a map from ``(scope, instance_id)`` to
+    the scope instance object that produced the entries, so the
+    assembler can attach scope-specific context to ``RenderCtx``
+    without target-specific lookups.
 
     Attributes:
         _items: Internal storage mapping keys to object lists.
+        _instances: Map from ``(scope, instance_id)`` to the scope
+            instance object (populated by the engine).
 
     """
 
     _items: dict[tuple[str, str, str], list[object]] = field(
         default_factory=dict
     )
+    _instances: dict[tuple[str, str], object] = field(default_factory=dict)
 
     def add(
         self,
@@ -188,6 +206,30 @@ class BuildStore:
         """
         key = (scope, instance_id, op_name)
         self._items.setdefault(key, []).extend(objects)
+
+    def register_instance(
+        self,
+        scope: str,
+        instance_id: str,
+        instance: object,
+    ) -> None:
+        """Remember the scope instance object for a ``(scope, iid)``.
+
+        Called by the engine before operations run at each scope
+        instance.  The assembler looks instances up via
+        :meth:`get_instance` and exposes them on ``RenderCtx`` so
+        renderers can read the config object that produced each
+        build entry.
+        """
+        self._instances[scope, instance_id] = instance
+
+    def get_instance(
+        self,
+        scope: str,
+        instance_id: str,
+    ) -> object | None:
+        """Return the instance registered for ``(scope, iid)``, if any."""
+        return self._instances.get((scope, instance_id))
 
     def get(
         self,

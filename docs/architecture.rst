@@ -61,8 +61,8 @@ Every ``foundry generate`` invocation flows through the same four steps:
                                   ▼
                              write_files
 
-1. **Load** the config file.  ``kiln.config.loader.load`` parses JSON
-   or Jsonnet and validates it against :class:`~kiln.config.schema.ProjectConfig`.
+1. **Load** the config file.  :func:`foundry.config.load_config` parses
+   JSON or Jsonnet and validates it against :class:`~kiln.config.schema.ProjectConfig`.
 
 2. **Build** runs every registered operation.
    :class:`~foundry.engine.Engine` walks the config tree scope by
@@ -73,9 +73,9 @@ Every ``foundry generate`` invocation flows through the same four steps:
    also inspect and mutate output produced by earlier operations --
    see :doc:`extending` for an example.
 
-3. **Assemble** turns the build store into real files.  The FastAPI
-   assembler (``kiln.renderers.assembler``) groups outputs by target
-   file, resolves imports, and renders each outer file template
+3. **Assemble** turns the build store into real files.  The generic
+   assembler (:mod:`foundry.assembler`) groups outputs by target file,
+   resolves imports, and renders each outer file template
    (``route.py.j2``, ``schema_outer.py.j2``) around the collected
    snippets.
 
@@ -233,13 +233,20 @@ The ``when`` parameter selects between competing renderers:
    def render_grpc_route(handler, ctx):
        ...  # called instead when config.grpc is truthy
 
-The FastAPI renderers live in ``kiln.renderers.fastapi`` and are
-registered via :func:`~kiln.renderers.fastapi.create_registry`.
+Kiln's built-in renderers are colocated with their operations:
+op-specific :class:`RouteHandler` subclasses register at the bottom
+of each op module (``kiln.operations.get``, ``kiln.operations.list``,
+…), and the shared cross-cutting renderers plus fragment-builder
+helpers live in ``kiln.operations._render``.  All registrations run
+at module import time and populate the module-level
+:data:`foundry.render.registry` singleton; loading operations via
+the ``foundry.operations`` entry-point group is therefore enough to
+populate the registry.
 
 Assembler
 ---------
 
-The assembler (``kiln.renderers.assembler``) is the last step.  It:
+The assembler (:mod:`foundry.assembler`) is the last step.  It:
 
 1. Walks the build store grouping outputs by target output file
    (e.g. all ``RouteHandler`` objects for one resource go to
@@ -253,8 +260,9 @@ The assembler (``kiln.renderers.assembler``) is the last step.  It:
 5. Produces a :class:`~foundry.spec.GeneratedFile` for each output
    file.
 
-The assembler is entirely specific to the FastAPI generator.  A
-different target would ship its own assembler.
+The assembler is target-agnostic: it relies only on typed output
+objects and the render registry, so any target sharing foundry's
+output vocabulary can reuse it.
 
 Discovery via entry points
 --------------------------
@@ -284,11 +292,11 @@ group.  ``foundry generate`` discovers all installed operations at
 startup.
 
 Targets register under a second entry-point group,
-``foundry.targets``.  A :class:`~foundry.target.Target` bundles the
-three things the CLI needs -- a config loader, a ``generate``
-callable, and an output-directory policy -- so the ``foundry`` CLI
-can dispatch to it without knowing anything framework-specific.
-kiln's own registration:
+``foundry.targets``.  A :class:`~foundry.target.Target` is a frozen
+dataclass carrying four fields -- ``name``, the pydantic ``schema``,
+a ``template_dir``, and an optional ``jsonnet_stdlib_dir`` -- which
+is everything foundry needs to load config, build the Jinja
+environment, and assemble output.  kiln's own registration:
 
 .. code-block:: toml
 
@@ -308,11 +316,15 @@ Source layout
    ├── foundry/              # generic engine + CLI -- target-agnostic
    │   ├── cli.py              # `foundry` CLI (generate/clean)
    │   ├── target.py           # Target dataclass + discover_targets
-   │   ├── errors.py           # CLIError
+   │   ├── errors.py           # CLIError, ConfigError, GenerationError
+   │   ├── config.py           # load_config (json/jsonnet + validation)
+   │   ├── pipeline.py         # generate(config, target)
+   │   ├── assembler.py        # generic assemble(store, registry, ctx)
    │   ├── engine.py           # Engine, BuildContext
    │   ├── operation.py        # @operation decorator, OperationMeta
    │   ├── scope.py            # Scope, discover_scopes
-   │   ├── render.py           # @renders, RenderRegistry, BuildStore
+   │   ├── render.py           # RenderRegistry, module-level registry,
+   │   │                       #   BuildStore (with instance tracking)
    │   ├── outputs.py          # RouteHandler, SchemaClass, StaticFile, ...
    │   ├── naming.py           # Name helper (PascalCase, snake_case, …)
    │   ├── imports.py          # ImportCollector
@@ -321,8 +333,8 @@ Source layout
    │   └── output.py           # write_files
    │
    └── kiln/                   # FastAPI target registered with foundry
-       ├── target.py           # kiln's Target registration
-       ├── config/             # Pydantic config schema + loader
+       ├── target.py           # Target instance (data only)
+       ├── config/             # Pydantic config schema
        ├── operations/         # built-in @operation classes
        │   ├── get.py          # one file per op: @operation class +
        │   ├── list.py         #   RouteHandler subclass + FastAPI
@@ -333,16 +345,12 @@ Source layout
        │   ├── auth.py
        │   ├── scaffold.py
        │   ├── routing.py
+       │   ├── _render.py     # cross-cutting @renders + fragment helpers
        │   ├── _shared.py      # helpers shared by the per-op modules
        │   ├── _introspect.py  # action-fn introspection
        │   └── _list_config.py # FilterConfig, OrderConfig, PaginateConfig
-       ├── renderers/          # @renders implementations
-       │   ├── fastapi.py      # renderer registration
-       │   ├── assembler.py    # grouping, imports, outer templates
-       │   └── generate.py     # orchestrates engine + assembler
+       ├── jsonnet/            # jsonnet stdlib exposed as `kiln/...`
        ├── templates/          # Jinja2 templates
        │   ├── fastapi/        # ops/, schema_parts/, outer templates
        │   └── init/           # auth + db session templates
-       └── generators/
-           ├── _env.py         # shared Jinja2 env
-           └── _helpers.py     # PYTHON_TYPES, resolve_db_session, …
+       └── _helpers.py         # PYTHON_TYPES type annotation map

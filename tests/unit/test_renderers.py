@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from foundry.assembler import assemble
+from foundry.env import create_jinja_env
 from foundry.outputs import (
     EnumClass,
     Field,
@@ -16,11 +18,9 @@ from foundry.outputs import (
     TestCase,
 )
 from foundry.render import BuildStore, RenderCtx
+from foundry.render import registry as shared_registry
 from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
-from kiln.generators._env import env as jinja_env
-from kiln.renderers import registry as shared_registry
-from kiln.renderers.assembler import assemble
-from kiln.renderers.fastapi import (
+from kiln.operations._render import (
     _render_handler_string,
     _response_schema_name,
     _status_suffix,
@@ -29,6 +29,9 @@ from kiln.renderers.fastapi import (
     render_schema_class,
     render_serializer,
 )
+from kiln.target import target as kiln_target
+
+jinja_env = create_jinja_env(kiln_target.template_dir)
 
 # -------------------------------------------------------------------
 # Helpers
@@ -168,7 +171,7 @@ def test_render_schema_class_string():
             Field(name="name", py_type="str"),
         ],
     )
-    result = render_schema_class(schema)
+    result = render_schema_class(schema, jinja_env)
     assert "class UserResource(BaseModel):" in result
     assert "id: int" in result
     assert "name: str" in result
@@ -244,7 +247,7 @@ def test_render_serializer_string():
         schema_name="UserResource",
         fields=[Field(name="id", py_type="int")],
     )
-    result = render_serializer(ser)
+    result = render_serializer(ser, jinja_env)
     assert "to_user_resource" in result
 
 
@@ -336,6 +339,7 @@ def _rctx(
         {
             "module": "myapp",
             "resources": [resource.model_dump()],
+            "databases": [{"key": "primary", "default": True}],
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }
     )
@@ -564,7 +568,11 @@ def test_action_route_dispatches_via_registry(registry):
     env = MagicMock()
     env.get_template.return_value = tmpl
     config = ProjectConfig.model_validate(
-        {"module": "myapp", "resources": [_resource().model_dump()]}
+        {
+            "module": "myapp",
+            "resources": [_resource().model_dump()],
+            "databases": [{"key": "primary", "default": True}],
+        }
     )
     rctx = RenderCtx(
         env=env,

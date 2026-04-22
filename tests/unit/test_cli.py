@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from foundry import GeneratedFile, write_files
 from foundry.cli import app, cli_main
-from kiln.errors import ConfigError
+from foundry.errors import ConfigError
 
 runner = CliRunner()
 
@@ -67,6 +67,7 @@ def test_generate_writes_app_files(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
             "resources": [
                 {
                     "model": "myapp.models.Post",
@@ -133,6 +134,7 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
                 "type": "jwt",
                 "verify_credentials_fn": "myapp.auth.verify",
             },
+            "databases": [{"key": "primary", "default": True}],
             "resources": [],
         },
     )
@@ -211,7 +213,14 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
 
 
 def test_clean_removes_out_dir(tmp_path: Path):
-    cfg = _write_json_config(tmp_path, {"module": "myapp", "resources": []})
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
     out = tmp_path / "out"
     out.mkdir()
     (out / "stale.py").write_text("old")
@@ -224,7 +233,14 @@ def test_clean_removes_out_dir(tmp_path: Path):
 
 
 def test_clean_noop_when_out_missing(tmp_path: Path):
-    cfg = _write_json_config(tmp_path, {"module": "myapp", "resources": []})
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
     missing = tmp_path / "never_existed"
     result = runner.invoke(
         app, ["clean", "--config", str(cfg), "--out", str(missing)]
@@ -247,6 +263,7 @@ def test_generate_clean_flag_removes_stale(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
             "resources": [
                 {
                     "model": "myapp.models.Post",

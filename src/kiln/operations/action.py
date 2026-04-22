@@ -10,9 +10,9 @@ from pydantic import BaseModel
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
+from foundry.render import registry
 from kiln.operations._introspect import introspect_action_fn
-from kiln.renderers import registry
-from kiln.renderers.fastapi import build_handler_fragment
+from kiln.operations._render import build_handler_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

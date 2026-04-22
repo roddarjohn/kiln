@@ -35,4 +35,5 @@ def write_files(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f.content)
         written += 1
+
     return written
