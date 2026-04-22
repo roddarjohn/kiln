@@ -771,6 +771,7 @@ class TestAction:
             is_object_action: bool = True
             response_class: str | None = "PostResult"
             request_class: str | None = "PostRequest"
+            model_param_name: str | None = "post"
 
         op_config = OperationConfig(
             name="publish",
@@ -806,6 +807,7 @@ class TestAction:
             is_object_action: bool = False
             response_class: str | None = None
             request_class: str | None = None
+            model_param_name: str | None = None
 
         op_config = OperationConfig(
             name="bulk_import",
