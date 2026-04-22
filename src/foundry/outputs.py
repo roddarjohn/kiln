@@ -91,6 +91,11 @@ class RouteHandler:
 
     Produced by CRUD and action operations.  The assembler
     collects all handlers for a resource into one route file.
+
+    The renderer builds the handler's body via :attr:`body_template`
+    rendered with :attr:`body_context`; ops that carry the body
+    inline set :attr:`body_lines` instead and leave
+    :attr:`body_template` ``None``.
     """
 
     method: str
@@ -104,6 +109,8 @@ class RouteHandler:
     status_code: int | None = None
     return_type: str | None = None
     body_lines: list[str] = field(default_factory=list)
+    body_template: str | None = None
+    body_context: dict[str, object] = field(default_factory=dict)
     decorators: list[str] = field(default_factory=list)
     doc: str | None = None
     extra_deps: list[str] = field(default_factory=list)

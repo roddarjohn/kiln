@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -10,7 +9,6 @@ from pydantic import BaseModel
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
-from foundry.render import registry
 from kiln.config.schema import FieldSpec  # noqa: TC001
 from kiln.operations._list_config import (  # noqa: TC001
     FilterConfig,
@@ -21,19 +19,12 @@ from kiln.operations._shared import (
     _construct_response_schema,
     _construct_serializer,
 )
-from kiln.operations.renderers import build_handler_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from foundry.render import Fragment, RenderCtx
     from kiln.config.schema import OperationConfig, ResourceConfig
-
-
-@dataclass
-class ListRoute(RouteHandler):
-    """Route handler emitted by the :class:`List` operation."""
 
 
 @operation("list", scope="operation", dispatch_on="name", requires=["get"])
@@ -76,7 +67,7 @@ class List:
         yield schema
         yield serializer
 
-        yield ListRoute(
+        yield RouteHandler(
             method="GET",
             path="/",
             function_name=f"list_{model.lower}s",
@@ -84,6 +75,18 @@ class List:
             serializer_fn=serializer.function_name,
             return_type=f"list[{schema.name}]",
             doc=f"List all {model.pascal} records.",
+            body_template="fastapi/ops/list.py.j2",
+            body_context={
+                "http_method": "get",
+                "route_path": "/",
+                "response_model": f"list[{schema.name}]",
+                "return_type": f"list[{schema.name}]",
+                "serializer_fn": serializer.function_name,
+                "extra_params": [],
+                "query_modifiers": [],
+                "result_expression": None,
+            },
+            extra_imports=[("sqlalchemy", "select")],
         )
 
         yield TestCase(
@@ -93,23 +96,3 @@ class List:
             status_success=200,
             is_list_response=True,
         )
-
-
-@registry.renders(ListRoute)
-def _render(handler: ListRoute, ctx: RenderCtx) -> Iterator[Fragment]:
-    return build_handler_fragment(
-        handler,
-        ctx,
-        body_template="fastapi/ops/list.py.j2",
-        body_extra={
-            "http_method": "get",
-            "route_path": "/",
-            "response_model": handler.response_model,
-            "return_type": handler.return_type,
-            "serializer_fn": handler.serializer_fn,
-            "extra_params": [],
-            "query_modifiers": [],
-            "result_expression": None,
-        },
-        extra_imports=[("sqlalchemy", "select")],
-    )

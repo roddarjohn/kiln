@@ -2,27 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
-from foundry.render import registry
 from kiln._helpers import PYTHON_TYPES
-from kiln.operations.renderers import build_handler_fragment, utils_imports
+from kiln.operations.renderers import utils_imports
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from foundry.render import Fragment, RenderCtx
     from kiln.config.schema import OperationConfig, ResourceConfig
-
-
-@dataclass
-class DeleteRoute(RouteHandler):
-    """Route handler emitted by the :class:`Delete` operation."""
 
 
 @operation(
@@ -55,7 +47,7 @@ class Delete:
         )
         _, model = Name.from_dotted(resource.model)
 
-        yield DeleteRoute(
+        yield RouteHandler(
             method="DELETE",
             path=f"/{{{resource.pk}}}",
             function_name=f"delete_{model.lower}",
@@ -67,6 +59,8 @@ class Delete:
             ],
             status_code=204,
             doc=f"Delete a {model.pascal} by {resource.pk}.",
+            body_template="fastapi/ops/delete.py.j2",
+            extra_imports=[("sqlalchemy", "delete"), *utils_imports()],
         )
 
         yield TestCase(
@@ -76,14 +70,3 @@ class Delete:
             status_success=204,
             status_not_found=404,
         )
-
-
-@registry.renders(DeleteRoute)
-def _render(handler: DeleteRoute, ctx: RenderCtx) -> Iterator[Fragment]:
-    return build_handler_fragment(
-        handler,
-        ctx,
-        body_template="fastapi/ops/delete.py.j2",
-        body_extra={},
-        extra_imports=[("sqlalchemy", "delete"), *utils_imports()],
-    )

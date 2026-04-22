@@ -38,7 +38,7 @@ from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterator
 
     import jinja2
 
@@ -171,17 +171,86 @@ def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Iterator[Fragment]:
 
 
 @registry.renders(RouteHandler)
-def _generic_handler_fragment(
+def _handler_fragment(
     handler: RouteHandler, ctx: RenderCtx
 ) -> Iterator[Fragment]:
-    """Fallback renderer for plain RouteHandler instances.
+    """Render every route handler, op-specific or hand-written.
 
-    Op-specific subclasses (:class:`GetRoute`, :class:`ListRoute`,
-    ...) register their own renderers that build a body from an
-    op template.  Handlers that reach this function have
-    ``body_lines`` already populated and are rendered as-is.
+    Each op's ``build()`` stamps :attr:`RouteHandler.body_template`
+    and :attr:`RouteHandler.body_context` on the handler so this
+    single renderer covers every op.  Handlers with
+    ``body_template=None`` fall back to the inline
+    :attr:`~RouteHandler.body_lines` (rendered by
+    :func:`_render_handler_string`).
     """
-    yield from build_handler_fragment(handler, ctx)
+    info = _resource_info(ctx)
+    path = f"{info.app}/routes/{info.model.lower}.py"
+
+    imports = ImportCollector()
+    imports.add_from("__future__", "annotations")
+    imports.add_from("typing", "Annotated")
+    imports.add_from("fastapi", "APIRouter", "Depends")
+    imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
+    imports.add_from(info.model_module, info.model.pascal)
+    _add_pk_type_imports(imports, info.pk_py_type)
+
+    session_mod = prefix_import(info.package_prefix, info.session_module)
+    imports.add_from(session_mod, info.get_db_fn)
+
+    if handler.status_code in (201, 204):
+        imports.add_from("starlette", "status")
+
+    schema_mod = prefix_import(
+        info.package_prefix, info.app, "schemas", info.model.lower
+    )
+    if handler.request_schema:
+        imports.add_from(schema_mod, handler.request_schema)
+
+    response_schema = _response_schema_name(handler)
+    if response_schema:
+        imports.add_from(schema_mod, response_schema)
+    if handler.serializer_fn:
+        serializer_mod = prefix_import(
+            info.package_prefix, info.app, "serializers", info.model.lower
+        )
+        imports.add_from(serializer_mod, handler.serializer_fn)
+
+    for module, name in handler.extra_imports:
+        imports.add_from(module, name)
+
+    yield FileFragment(
+        path=path,
+        template="fastapi/route.py.j2",
+        context={
+            "model_name": info.model.pascal,
+            "model_lower": info.model.lower,
+            "route_prefix": info.route_prefix,
+        },
+    )
+    if handler.body_template is None:
+        yield SnippetFragment(
+            path=path,
+            slot="route_handlers",
+            value=_render_handler_string(handler),
+            imports=imports,
+        )
+    else:
+        yield SnippetFragment(
+            path=path,
+            slot="route_handlers",
+            template=handler.body_template,
+            context={
+                "model_name": info.model.pascal,
+                "model_lower": info.model.lower,
+                "pk_name": info.pk_name,
+                "pk_py_type": info.pk_py_type,
+                "get_db_fn": info.get_db_fn,
+                "route_prefix": info.route_prefix,
+                "extra_deps": handler.extra_deps,
+                **handler.body_context,
+            },
+            imports=imports,
+        )
 
 
 @registry.renders(SerializerFn)
@@ -298,7 +367,7 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> FileFragment:
 
 
 # -------------------------------------------------------------------
-# Shared fragment builder -- called by per-op renderers.
+# Shared helpers used by operation build() methods.
 # -------------------------------------------------------------------
 
 
@@ -313,110 +382,6 @@ def utils_imports() -> list[tuple[str, str]]:
         ("ingot", "get_object_from_query_or_404"),
         ("ingot", "assert_rowcount"),
     ]
-
-
-def build_handler_fragment(
-    handler: RouteHandler,
-    ctx: RenderCtx,
-    *,
-    body_template: str | None = None,
-    body_extra: dict[str, object] | None = None,
-    extra_imports: Iterable[tuple[str, str]] = (),
-) -> Iterator[Fragment]:
-    """Yield the file + handler snippet for one route.
-
-    Op-specific imports (sqlalchemy verbs, generated utils, ...)
-    are the renderer's concern, not the shared builder's.  Each
-    op renderer passes them via ``extra_imports``.
-
-    Args:
-        handler: The handler to render.
-        ctx: Current render context.
-        body_template: Path to the op-specific body template.
-            ``None`` falls back to :func:`_render_handler_string`,
-            which emits the handler's own ``body_lines`` verbatim
-            as a pre-rendered string.
-        body_extra: Extra template variables merged on top of
-            the shared handler context.
-        extra_imports: ``(module, name)`` pairs the op renderer
-            needs on top of the handler-derived imports.
-
-    Yields:
-        A :class:`FileFragment` declaring ``<app>/routes/
-        <model>.py`` followed by a :class:`SnippetFragment`
-        contributing the handler into the ``route_handlers`` slot.
-
-    """
-    info = _resource_info(ctx)
-    path = f"{info.app}/routes/{info.model.lower}.py"
-
-    imports = ImportCollector()
-    imports.add_from("__future__", "annotations")
-    imports.add_from("typing", "Annotated")
-    imports.add_from("fastapi", "APIRouter", "Depends")
-    imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
-    imports.add_from(info.model_module, info.model.pascal)
-    _add_pk_type_imports(imports, info.pk_py_type)
-
-    session_mod = prefix_import(info.package_prefix, info.session_module)
-    imports.add_from(session_mod, info.get_db_fn)
-
-    if handler.status_code in (201, 204):
-        imports.add_from("starlette", "status")
-
-    schema_mod = prefix_import(
-        info.package_prefix, info.app, "schemas", info.model.lower
-    )
-    if handler.request_schema:
-        imports.add_from(schema_mod, handler.request_schema)
-
-    response_schema = _response_schema_name(handler)
-    if response_schema:
-        imports.add_from(schema_mod, response_schema)
-    if handler.serializer_fn:
-        serializer_mod = prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
-        )
-        imports.add_from(serializer_mod, handler.serializer_fn)
-
-    for module, name in handler.extra_imports:
-        imports.add_from(module, name)
-    for module, name in extra_imports:
-        imports.add_from(module, name)
-
-    yield FileFragment(
-        path=path,
-        template="fastapi/route.py.j2",
-        context={
-            "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
-            "route_prefix": info.route_prefix,
-        },
-    )
-    if body_template is None:
-        yield SnippetFragment(
-            path=path,
-            slot="route_handlers",
-            value=_render_handler_string(handler),
-            imports=imports,
-        )
-    else:
-        yield SnippetFragment(
-            path=path,
-            slot="route_handlers",
-            template=body_template,
-            context={
-                "model_name": info.model.pascal,
-                "model_lower": info.model.lower,
-                "pk_name": info.pk_name,
-                "pk_py_type": info.pk_py_type,
-                "get_db_fn": info.get_db_fn,
-                "route_prefix": info.route_prefix,
-                "extra_deps": handler.extra_deps,
-                **(body_extra or {}),
-            },
-            imports=imports,
-        )
 
 
 # -------------------------------------------------------------------

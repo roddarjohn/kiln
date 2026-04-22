@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -10,21 +9,13 @@ from pydantic import BaseModel
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
-from foundry.render import registry
 from kiln.operations._introspect import introspect_action_fn
-from kiln.operations.renderers import build_handler_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from foundry.render import Fragment, RenderCtx
     from kiln.config.schema import OperationConfig, ResourceConfig
-
-
-@dataclass
-class ActionRoute(RouteHandler):
-    """Route handler emitted by the :class:`Action` operation."""
 
 
 @operation("action", scope="operation")
@@ -73,14 +64,23 @@ class Action:
         else:
             path = f"/{action_name.slug}"
 
-        yield ActionRoute(
+        function_name = f"{action_name.raw}_action"
+        yield RouteHandler(
             method="POST",
             path=path,
-            function_name=f"{action_name.raw}_action",
+            function_name=function_name,
             response_model=info.response_class,
             return_type=info.response_class,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
+            body_template="fastapi/ops/action.py.j2",
+            body_context={
+                "function_name": function_name,
+                "method": "post",
+                "path": path,
+                "response_class": info.response_class,
+                "request_class": info.request_class,
+            },
         )
 
         yield TestCase(
@@ -93,19 +93,3 @@ class Action:
             request_schema=info.request_class,
             action_name=action_name.raw,
         )
-
-
-@registry.renders(ActionRoute)
-def _render(handler: ActionRoute, ctx: RenderCtx) -> Iterator[Fragment]:
-    return build_handler_fragment(
-        handler,
-        ctx,
-        body_template="fastapi/ops/action.py.j2",
-        body_extra={
-            "function_name": handler.function_name,
-            "method": handler.method.lower(),
-            "path": handler.path,
-            "response_class": handler.response_model,
-            "request_class": handler.request_schema,
-        },
-    )

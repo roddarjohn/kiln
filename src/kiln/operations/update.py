@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
@@ -14,22 +13,15 @@ from foundry.outputs import (
     SchemaClass,
     TestCase,
 )
-from foundry.render import registry
 from kiln._helpers import PYTHON_TYPES
 from kiln.operations._shared import FieldsOptions, _field_dicts
-from kiln.operations.renderers import build_handler_fragment, utils_imports
+from kiln.operations.renderers import utils_imports
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from foundry.render import Fragment, RenderCtx
     from kiln.config.schema import OperationConfig, ResourceConfig
-
-
-@dataclass
-class UpdateRoute(RouteHandler):
-    """Route handler emitted by the :class:`Update` operation."""
 
 
 @operation(
@@ -75,7 +67,7 @@ class Update:
             doc=f"Request body for updating a {model.pascal}.",
         )
 
-        yield UpdateRoute(
+        yield RouteHandler(
             method="PATCH",
             path=f"/{{{resource.pk}}}",
             function_name=f"update_{model.lower}",
@@ -87,6 +79,8 @@ class Update:
             ],
             doc=f"Update a {model.pascal} by {resource.pk}.",
             request_schema=request_schema,
+            body_template="fastapi/ops/update.py.j2",
+            extra_imports=[("sqlalchemy", "update"), *utils_imports()],
         )
 
         yield TestCase(
@@ -99,14 +93,3 @@ class Update:
             has_request_body=True,
             request_schema=request_schema,
         )
-
-
-@registry.renders(UpdateRoute)
-def _render(handler: UpdateRoute, ctx: RenderCtx) -> Iterator[Fragment]:
-    return build_handler_fragment(
-        handler,
-        ctx,
-        body_template="fastapi/ops/update.py.j2",
-        body_extra={},
-        extra_imports=[("sqlalchemy", "update"), *utils_imports()],
-    )
