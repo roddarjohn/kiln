@@ -257,16 +257,19 @@ def _handler_context(
     ``{% extends %}`` the default and override the ``body`` block
     only, so they share the same context shape.
     """
-    db_param = {
-        "name": "db",
-        "annotation": f"Annotated[AsyncSession, Depends({info.get_db_fn})]",
-        "default": None,
-    }
     params: list[dict[str, object]] = [
         {"name": p.name, "annotation": p.annotation, "default": p.default}
         for p in handler.params
     ]
-    params.append(db_param)
+    params.append(
+        {
+            "name": "db",
+            "annotation": (
+                f"Annotated[AsyncSession, Depends({info.get_db_fn})]"
+            ),
+            "default": None,
+        }
+    )
 
     return {
         "decorators": handler.decorators,
