@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from foundry.assembler import assemble
-from foundry.env import create_jinja_env
+from foundry.env import create_jinja_env, render_template
 from foundry.imports import ImportCollector
 from foundry.outputs import (
     EnumClass,
@@ -23,7 +23,6 @@ from foundry.scope import discover_scopes
 from foundry.store import BuildStore
 from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
 from kiln.operations.renderers import (
-    _render_handler_string,
     _response_schema_name,
     _status_suffix,
     render_enum_class,
@@ -68,8 +67,34 @@ def test_status_suffix_unknown():
 
 
 # -------------------------------------------------------------------
-# RouteHandler string rendering
+# RouteHandler default-template rendering
+#
+# Render the ``handler_default.py.j2`` template directly, keeping
+# the focused edge-case coverage the old ``_render_handler_string``
+# tests gave us once that helper got replaced by a jinja template.
 # -------------------------------------------------------------------
+
+
+def _render_fallback(handler: RouteHandler) -> str:
+    """Render a RouteHandler via the default fallback template."""
+    return render_template(
+        jinja_env,
+        "fastapi/handler_default.py.j2",
+        decorators=handler.decorators,
+        method=handler.method.lower(),
+        path=handler.path,
+        response_model=handler.response_model,
+        status_suffix=_status_suffix(handler.status_code),
+        status_code=handler.status_code,
+        function_name=handler.function_name,
+        params=[
+            {"name": p.name, "annotation": p.annotation, "default": p.default}
+            for p in handler.params
+        ],
+        return_type=handler.return_type or "object",
+        doc=handler.doc,
+        body_lines=handler.body_lines,
+    ).strip()
 
 
 def test_render_handler_basic():
@@ -84,7 +109,7 @@ def test_render_handler_basic():
         return_type="Item",
         doc="Get an item by ID.",
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert '@router.get("/items/{id}")' in result
     assert "async def get_item(" in result
     assert "id: int," in result
@@ -101,7 +126,7 @@ def test_render_handler_with_status():
         status_code=201,
         body_lines=["pass"],
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert "status_code=status.HTTP_201_CREATED" in result
 
 
@@ -113,7 +138,7 @@ def test_render_handler_with_response_model():
         response_model="list[Item]",
         body_lines=["pass"],
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert "response_model=list[Item]" in result
 
 
@@ -125,7 +150,7 @@ def test_render_handler_with_decorators():
         decorators=["@cache(ttl=60)"],
         body_lines=["pass"],
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert result.startswith("@cache(ttl=60)\n")
 
 
@@ -135,7 +160,7 @@ def test_render_handler_empty_body():
         path="/",
         function_name="noop",
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert "    pass" in result
 
 
@@ -153,7 +178,7 @@ def test_render_handler_default_param():
         ],
         body_lines=["pass"],
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert '    q: str = "",' in result
 
 
@@ -626,12 +651,12 @@ def test_render_handler_string_numeric_status_code():
         status_code=418,
         body_lines=["pass"],
     )
-    result = _render_handler_string(handler)
+    result = _render_fallback(handler)
     assert "status_code=418" in result
 
 
 def test_render_handler_body_unknown_op_falls_through(registry):
-    """Plain RouteHandler falls back to _render_handler_string."""
+    """Handlers with body_template=None route through handler_default.py.j2."""
     handler = RouteHandler(
         method="GET",
         path="/",
@@ -640,7 +665,6 @@ def test_render_handler_body_unknown_op_falls_through(registry):
     )
     fragments = registry.render(handler, _rctx(_resource()))
     [snippet] = _snippets(fragments, "myapp/routes/post.py", "route_handlers")
-    # body_template=None path: snippet.value is the pre-rendered string.
-    assert snippet.template is None
-    assert "async def custom(" in snippet.value
-    assert "return None" in snippet.value
+    assert snippet.template == "fastapi/handler_default.py.j2"
+    assert snippet.context["function_name"] == "custom"
+    assert snippet.context["body_lines"] == ["return None"]
