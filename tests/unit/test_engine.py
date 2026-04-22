@@ -11,11 +11,9 @@ from foundry.engine import (
     _find_op_options,
     _instance_id,
     _resolve_options,
-    _scope_instances,
 )
 from foundry.operation import EmptyOptions
 from foundry.outputs import RouteHandler, StaticFile
-from foundry.scope import PROJECT, Scope
 
 # -------------------------------------------------------------------
 # Test config models
@@ -89,49 +87,6 @@ class AppRouter:
                 template="router.j2",
             )
         ]
-
-
-# -------------------------------------------------------------------
-# _scope_instances
-# -------------------------------------------------------------------
-
-
-def test_scope_instances_project():
-    config = ProjectConfig()
-    result = _scope_instances(config, PROJECT)
-    assert len(result) == 1
-    assert result[0] == ("project", config)
-
-
-def test_scope_instances_named_items():
-    config = ProjectConfig(
-        resources=[
-            ResourceConfig(name="user"),
-            ResourceConfig(name="post"),
-        ]
-    )
-    scope = Scope(
-        name="resource",
-        config_key="resources",
-        parent=PROJECT,
-    )
-    result = _scope_instances(config, scope)
-    assert len(result) == 2
-    assert result[0][0] == "user"
-    assert result[1][0] == "post"
-
-
-def test_scope_instances_fallback_id():
-    class Item(BaseModel):
-        value: int
-
-    class Cfg(BaseModel):
-        items: list[Item] = []
-
-    config = Cfg(items=[Item(value=1)])
-    scope = Scope(name="item", config_key="items", parent=PROJECT)
-    result = _scope_instances(config, scope)
-    assert result[0][0] == "item_0"
 
 
 # -------------------------------------------------------------------

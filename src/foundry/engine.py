@@ -18,7 +18,8 @@ to framework-specific assemblers in the ``kiln`` package.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -117,7 +118,7 @@ class Engine:
             package_prefix=self.package_prefix,
         )
 
-        self._visit(PROJECT, config, state)
+        self._visit(PROJECT, config, state, PurePosixPath())
 
         return state.store
 
@@ -126,7 +127,7 @@ class Engine:
         scope: Scope,
         parent_instance: object,
         state: _WalkState,
-        parent_iid: str = "",
+        parent_instance_id: PurePosixPath,
     ) -> None:
         """Recursively walk *scope* and its descendants.
 
@@ -145,28 +146,34 @@ class Engine:
                 project config itself).
             state: Shared walk state — config, store, op groups,
                 and the child-scope index.
-            parent_iid: The compounded instance ID of the
-                enclosing scope, or ``""`` when the parent is the
-                project root (no prefixing).
+            parent_instance_id: The compounded instance ID path
+                of the enclosing scope, or an empty path when the
+                parent is the project root (no prefixing).
 
         """
-        for own_iid, inst_obj in _resolve_instances(scope, parent_instance):
-            full_iid = f"{parent_iid}/{own_iid}" if parent_iid else own_iid
-            state.store.register_instance(scope.name, full_iid, inst_obj)
+        for own_id, inst_obj in _resolve_instances(scope, parent_instance):
+            instance_path = parent_instance_id / own_id
+            instance_id = str(instance_path)
+            state.store.register_instance(scope.name, instance_id, inst_obj)
             ctx = BuildContext(
                 config=state.config,
                 scope=scope,
                 instance=inst_obj,
-                instance_id=full_iid,
+                instance_id=instance_id,
                 store=state.store,
                 package_prefix=state.package_prefix,
             )
             ops = state.ops.get(scope.name, [])
             _run_ops(ops, ctx, after_children=False)
-            next_parent = "" if scope is PROJECT else full_iid
+            next_parent = PurePosixPath() if scope is PROJECT else instance_path
             for child in state.scopes:
                 if child.parent is scope:
-                    self._visit(child, inst_obj, state, parent_iid=next_parent)
+                    self._visit(
+                        child,
+                        inst_obj,
+                        state,
+                        parent_instance_id=next_parent,
+                    )
             _run_ops(ops, ctx, after_children=True)
 
 
@@ -197,12 +204,14 @@ def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
 
     for operation_cls in operations:
         meta = get_operation_meta(operation_cls)
+
         if meta.scope not in names:
             msg = (
                 f"Operation '{meta.name}' targets "
                 f"scope '{meta.scope}' which was not "
                 f"discovered from the config"
             )
+
             raise ValueError(msg)
 
 
@@ -296,53 +305,18 @@ def _resolve_instances(
         List of ``(id, object)`` tuples.
 
     """
-    if scope is PROJECT or scope.parent is None:
+    if scope is PROJECT:
         return [("project", parent_instance)]
 
-    path = scope.resolve_path or (scope.config_key,)
-    items = _walk_path(parent_instance, path)
-    if not isinstance(items, list):
-        return []
-    result: list[tuple[str, object]] = []
-    for index, item in enumerate(items):
-        instance_id = _instance_id(item, scope.name, index)
-        result.append((instance_id, item))
-    return result
+    for attr in scope.resolve_path:
+        parent_instance = getattr(parent_instance, attr)
 
+    items = cast("list[object]", parent_instance)
 
-def _walk_path(obj: object, path: tuple[str, ...]) -> object:
-    """Follow dotted attribute *path* from *obj*.
-
-    Args:
-        obj: Starting object.
-        path: Sequence of attribute names to walk.
-
-    Returns:
-        The attribute at the end of the path, or an empty list
-        if any step is missing.
-
-    """
-    cur = obj
-    for attr in path:
-        cur = getattr(cur, attr, None)
-        if cur is None:
-            return []
-    return cur
-
-
-# Back-compat shim for tests that imported the old helper.
-def _scope_instances(
-    config: BaseModel,
-    scope: Scope,
-) -> list[tuple[str, object]]:
-    """Resolve scope instances from the top-level config.
-
-    Only valid for direct children of the project scope (or the
-    project scope itself).  Preserved so existing tests that
-    exercise the helper keep working; production code goes
-    through :func:`_resolve_instances` via the recursive walk.
-    """
-    return _resolve_instances(scope, config)
+    return [
+        (_instance_id(item, scope.name, index), item)
+        for index, item in enumerate(items)
+    ]
 
 
 def _instance_id(

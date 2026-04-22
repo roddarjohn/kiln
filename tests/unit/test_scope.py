@@ -106,8 +106,13 @@ def test_empty_model():
 
 
 def test_scope_frozen():
-    s = Scope(name="test", config_key="tests")
+    s = Scope(name="test", config_key="tests", parent=PROJECT)
     assert s.name == "test"
+
+
+def test_non_project_scope_requires_parent():
+    with pytest.raises(ValueError, match="no parent"):
+        Scope(name="resource", config_key="resources")
 
 
 def test_explicit_scope_name_override():

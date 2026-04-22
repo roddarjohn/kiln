@@ -30,7 +30,6 @@ foundry generate --config app.jsonnet
 
 Full documentation is available at
 [roddarjohn.github.io/kiln](https://roddarjohn.github.io/kiln/).
-
 - [Usage](https://roddarjohn.github.io/kiln/usage.html)
 - [API reference](https://roddarjohn.github.io/kiln/api.html)
 - [Development guide](https://roddarjohn.github.io/kiln/development.html)

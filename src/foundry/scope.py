@@ -81,6 +81,15 @@ class Scope:
     parent: Scope | None = None
     resolve_path: tuple[str, ...] = field(default=())
 
+    def __post_init__(self) -> None:
+        """Enforce that only the root ``"project"`` scope is parentless."""
+        if self.parent is None and self.name != "project":
+            msg = (
+                f"Scope {self.name!r} has no parent; only the root "
+                f"'project' scope may be parentless"
+            )
+            raise ValueError(msg)
+
 
 # The root scope — always present.
 PROJECT = Scope(name="project", config_key="")
