@@ -201,6 +201,7 @@ class BuildStore:
     _items: dict[tuple[str, str], list[object]] = field(default_factory=dict)
     _instances: dict[str, object] = field(default_factory=dict)
     _children: dict[str, list[str]] = field(default_factory=dict)
+    _parent_of: dict[str, str] = field(default_factory=dict)
 
     def add(
         self,
@@ -243,6 +244,7 @@ class BuildStore:
         """
         self._instances[instance_id] = instance
         if parent is not None:
+            self._parent_of[instance_id] = parent
             siblings = self._children.setdefault(parent, [])
             if instance_id not in siblings:
                 siblings.append(instance_id)
@@ -250,6 +252,35 @@ class BuildStore:
     def scope_of(self, instance_id: str) -> Scope:
         """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
         return self.scope_tree.scope_for(instance_id)
+
+    def ancestor_of(
+        self,
+        instance_id: str,
+        scope_name: str,
+    ) -> object | None:
+        """Return the enclosing instance at *scope_name*, if any.
+
+        Walks ``_parent_of`` edges from *instance_id* toward the
+        root and returns the first instance whose scope name
+        matches.  Used by descendant ops that need data from a
+        higher scope (e.g. an operation-scope op reading its
+        enclosing resource's ``model``).
+
+        Args:
+            instance_id: Id whose ancestor to find.
+            scope_name: Scope name of the wanted ancestor.
+
+        Returns:
+            The ancestor instance, or ``None`` if no ancestor at
+            that scope is registered.
+
+        """
+        current = self._parent_of.get(instance_id)
+        while current is not None:
+            if self.scope_of(current).name == scope_name:
+                return self._instances.get(current)
+            current = self._parent_of.get(current)
+        return None
 
     def children(
         self,
@@ -335,6 +366,27 @@ class BuildStore:
         for (stored_id, _), items in self._items.items():
             if stored_id == instance_id:
                 result.extend(items)
+        return result
+
+    def outputs_under(
+        self,
+        ancestor_id: str,
+        output_type: type,
+    ) -> list[object]:
+        """Return every *output_type* output at or below *ancestor_id*.
+
+        Walks the store by path prefix, so output produced at any
+        depth under *ancestor_id* surfaces — useful for ops that
+        aggregate or mutate outputs from deeper scopes (e.g. auth
+        adding dependencies to every handler under a resource).
+        """
+        prefix = f"{ancestor_id}."
+        result: list[object] = []
+        for (stored_id, _), items in self._items.items():
+            if stored_id == ancestor_id or stored_id.startswith(prefix):
+                result.extend(
+                    item for item in items if isinstance(item, output_type)
+                )
         return result
 
     def get_by_type(self, output_type: type) -> list[object]:

@@ -88,7 +88,7 @@ def test_generate_writes_app_files(tmp_path: Path):
                             "name": "update",
                             "fields": [{"name": "title", "type": "str"}],
                         },
-                        "delete",
+                        {"name": "delete"},
                     ],
                 }
             ],

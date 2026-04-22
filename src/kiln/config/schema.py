@@ -109,12 +109,19 @@ class OperationConfig(BaseModel):
     ``Options`` model (see
     :func:`foundry.operation.operation`).
 
+    Each ``OperationConfig`` is a scope instance of the
+    ``"operation"`` scope: the engine descends into
+    :attr:`ResourceConfig.operations` and visits each entry
+    independently.  Every ``@operation`` class with
+    ``dispatch_on="name"`` matches at most one entry per
+    resource — the one whose :attr:`name` equals the op's own.
+
     Examples::
 
-        # String shorthand (expanded to OperationConfig by the pipeline)
-        "get"
+        # Built-in operation
+        {"name": "get"}
 
-        # With explicit fields
+        # With extra options (go into ``options`` via model_extra)
         {"name": "create", "fields": [...]}
 
         # Action operation
@@ -144,11 +151,9 @@ class ResourceConfig(BaseModel):
     (table, mapped view, etc.) defined by the consumer, e.g.
     ``"myapp.models.Article"``.
 
-    ``operations`` lists the operations to run for this resource.
-    Each entry is either a string (built-in operation name resolved
-    via entry points) or an :class:`OperationConfig` object.  When
-    ``None``, operations are inherited from the parent
-    :class:`AppConfig`.
+    ``operations`` is a scoped list of :class:`OperationConfig`
+    entries — each entry becomes an ``"operation"`` scope instance
+    that the engine visits independently.
 
     ``require_auth`` sets the default authentication requirement for
     all operations.  Individual operations can override this via
@@ -172,9 +177,11 @@ class ResourceConfig(BaseModel):
     """Default authentication requirement for all operations on this
     resource.  Individual operations can override via their own
     ``require_auth`` field."""
-    operations: list[str | OperationConfig] | None = None
-    """Ordered list of operations to run.  ``None`` inherits from
-    the parent :class:`AppConfig`."""
+    operations: Annotated[list[OperationConfig], Scoped(name="operation")] = (
+        Field(default_factory=list)
+    )
+    """Ordered list of operations to run — each becomes a scope
+    instance of ``"operation"`` that the engine visits in turn."""
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
@@ -184,14 +191,10 @@ class AppConfig(BaseModel):
     """One app within a project: a module of related resources.
 
     An app owns its own Python package (``module``) and a list of
-    resources.  ``operations`` is the default operation set inherited
-    by resources that don't declare their own.
+    resources.
     """
 
     module: str = "app"
-    operations: list[str | OperationConfig] | None = None
-    """Default operations for all resources in this app.  Resources
-    can override with their own ``operations`` list."""
     resources: Annotated[list[ResourceConfig], Scoped(name="resource")] = Field(
         default_factory=list
     )
@@ -248,7 +251,7 @@ class ProjectConfig(FoundryConfig):
         """
         if not isinstance(data, dict) or "apps" in data:
             return data
-        app_keys = ("module", "resources", "operations")
+        app_keys = ("module", "resources")
         if not any(k in data for k in app_keys):
             return data
         app_data = {k: data.pop(k) for k in list(data.keys()) if k in app_keys}

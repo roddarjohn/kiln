@@ -45,6 +45,13 @@ class OperationMeta:
             objects produced at the resource/app scopes
             via the build store.  Ignored outside the
             project scope (the engine raises if set).
+        dispatch_on: Attribute name on ``ctx.instance`` whose
+            value must equal :attr:`name` for this op to run.
+            Engine skips the op silently when the attribute is
+            absent or mismatched.  Use it at scopes where the
+            instance is a discriminated union — every registered
+            op at the scope shares the scope walk and each
+            dispatches to its own entry by name.
 
     """
 
@@ -52,6 +59,7 @@ class OperationMeta:
     scope: str
     requires: tuple[str, ...] = ()
     after_children: bool = False
+    dispatch_on: str | None = None
 
 
 # -------------------------------------------------------------------
@@ -148,12 +156,13 @@ DEFAULT_REGISTRY = OperationRegistry()
 # -------------------------------------------------------------------
 
 
-def operation(
+def operation(  # noqa: PLR0913
     name: str,
     *,
     scope: str,
     requires: list[str] | None = None,
     after_children: bool = False,
+    dispatch_on: str | None = None,
     registry: OperationRegistry = DEFAULT_REGISTRY,
 ) -> Any:  # noqa: ANN401
     """Decorate a class as a kiln operation.
@@ -190,6 +199,13 @@ def operation(
             executed so ``build`` can walk child output in the
             store.  The engine rejects this flag at any other
             scope.
+        dispatch_on: Attribute name on the scope instance to
+            compare against *name*.  When set, the engine skips
+            the op unless ``getattr(ctx.instance, dispatch_on)
+            == name``.  Designed for scopes whose instance is a
+            discriminated-union config (e.g. ``OperationConfig``
+            entries under a resource), where multiple ops share
+            one scope and each matches a single entry.
         registry: Registry to register into.  Defaults to the
             process-wide :data:`DEFAULT_REGISTRY`; tests may
             pass an isolated registry to keep their ops out of
@@ -215,6 +231,7 @@ def operation(
         scope=scope,
         requires=reqs,
         after_children=after_children,
+        dispatch_on=dispatch_on,
     )
 
     def decorator(cls: type) -> type:

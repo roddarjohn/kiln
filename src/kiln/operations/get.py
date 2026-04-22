@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -34,7 +34,7 @@ class GetRoute(RouteHandler):
     """Route handler emitted by the :class:`Get` operation."""
 
 
-@operation("get", scope="resource")
+@operation("get", scope="operation", dispatch_on="name")
 class Get:
     """GET /{pk} -- retrieve a single resource."""
 
@@ -42,13 +42,13 @@ class Get:
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for GET /{pk}.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"get"`` operation entry.
             options: Parsed :class:`FieldsOptions`.
 
         Yields:
@@ -56,7 +56,14 @@ class Get:
             route handler, and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(
+                ctx.instance_id,
+                "resource",
+            ),
+        )
+        _, model = Name.from_dotted(resource.model)
 
         schema = _construct_response_schema(
             model, options.fields, suffix="Resource"
@@ -68,24 +75,24 @@ class Get:
 
         yield GetRoute(
             method="GET",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             function_name=f"get_{model.lower}",
             params=[
                 RouteParam(
-                    name=ctx.instance.pk,
-                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                    name=resource.pk,
+                    annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
             response_model=schema.name,
             serializer_fn=serializer.function_name,
             return_type=schema.name,
-            doc=f"Get a {model.pascal} by {ctx.instance.pk}.",
+            doc=f"Get a {model.pascal} by {resource.pk}.",
         )
 
         yield TestCase(
             op_name="get",
             method="get",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             status_success=200,
             status_not_found=404,
             response_schema=schema.name,

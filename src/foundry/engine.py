@@ -175,9 +175,9 @@ def _visit(
     _run_ops(ops, ctx, after_children=False)
 
     for child_scope in state.scope_tree.children_of(scope):
-        for own_id, child_config in _resolve_instances(
-            child_scope,
-            scope_config,
+        for own_id, child_config in _configs_for_scope(
+            scope=child_scope,
+            parent_config=scope_config,
         ):
             _visit(
                 child_scope,
@@ -211,6 +211,13 @@ def _run_ops(
     for meta, op_cls in ops:
         if meta.after_children != after_children:
             continue
+        # dispatch_on: fire only on the instance whose discriminator
+        # matches this op's name (e.g. OperationConfig.name == "get").
+        if (
+            meta.dispatch_on is not None
+            and getattr(ctx.instance, meta.dispatch_on, None) != meta.name
+        ):
+            continue
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
         has_when = callable(when_method)
@@ -229,7 +236,8 @@ def _run_ops(
         )
 
 
-def _resolve_instances(
+def _configs_for_scope(
+    *,
     scope: Scope,
     parent_config: BaseModel,
 ) -> list[tuple[str, BaseModel]]:
@@ -254,6 +262,7 @@ def _resolve_instances(
     attr_value: object = parent_config
     for attr in scope.resolve_path:
         attr_value = getattr(attr_value, attr)
+
     scope_configs = cast("list[BaseModel]", attr_value)
 
     return [

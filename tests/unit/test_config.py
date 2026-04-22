@@ -33,7 +33,6 @@ def test_app_config_defaults():
     cfg = AppConfig()
     assert cfg.module == "app"
     assert cfg.resources == []
-    assert cfg.operations is None
 
 
 def test_project_config_shorthand_wraps_single_app():
@@ -42,7 +41,6 @@ def test_project_config_shorthand_wraps_single_app():
             "module": "myapp",
             "databases": [{"key": "primary", "default": True}],
             "resources": [{"model": "myapp.models.Post"}],
-            "operations": ["get", "list"],
         }
     )
     assert len(cfg.apps) == 1
@@ -50,7 +48,6 @@ def test_project_config_shorthand_wraps_single_app():
     assert app.prefix == ""
     assert app.config.module == "myapp"
     assert app.config.resources[0].model == "myapp.models.Post"
-    assert app.config.operations == ["get", "list"]
 
 
 def test_project_config_apps_mode_untouched():
@@ -134,24 +131,14 @@ def test_resource_config_defaults():
     assert r.route_prefix is None
     assert r.db_key is None
     assert r.require_auth is True
-    assert r.operations is None
-
-
-def test_resource_config_with_string_operations():
-    r = ResourceConfig(
-        model="myapp.models.User",
-        operations=["get", "list"],
-    )
-    assert len(r.operations) == 2
-    assert r.operations[0] == "get"
-    assert r.operations[1] == "list"
+    assert r.operations == []
 
 
 def test_resource_config_with_operation_configs():
     r = ResourceConfig(
         model="myapp.models.User",
         operations=[
-            "get",
+            {"name": "get"},
             {
                 "name": "list",
                 "fields": [
@@ -162,7 +149,7 @@ def test_resource_config_with_operation_configs():
         ],
     )
     assert len(r.operations) == 2
-    assert r.operations[0] == "get"
+    assert r.operations[0].name == "get"
     assert isinstance(r.operations[1], OperationConfig)
     assert r.operations[1].name == "list"
     assert r.operations[1].options["fields"][0]["name"] == "id"
@@ -226,13 +213,6 @@ def test_operation_config_options_excludes_known_fields():
     assert "fields" in oc.options
 
 
-def test_app_config_with_operations():
-    cfg = AppConfig(
-        operations=["get", "list", "create"],
-    )
-    assert len(cfg.operations) == 3
-
-
 def test_field_spec():
     f = FieldSpec(name="title", type="str")
     assert f.name == "title"
@@ -265,7 +245,7 @@ def test_load_json(tmp_path: Path):
         "resources": [
             {
                 "model": "myapp.models.Widget",
-                "operations": ["get", "list"],
+                "operations": [{"name": "get"}, {"name": "list"}],
             }
         ],
     }
@@ -312,7 +292,7 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
 
 def test_load_validation_error(tmp_path: Path):
     # model is required in ResourceConfig
-    data = {"resources": [{"operations": ["get"]}]}
+    data = {"resources": [{"operations": [{"name": "get"}]}]}
     cfg_file = tmp_path / "bad.json"
     cfg_file.write_text(json.dumps(data))
 
