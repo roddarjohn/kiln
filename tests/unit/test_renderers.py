@@ -589,20 +589,8 @@ def test_response_schema_name_plain():
     assert _response_schema_name(handler) == "PostResource"
 
 
-def test_action_route_dispatches_via_registry(registry):
-    """ActionRoute instances hit the action renderer (via type dispatch).
-
-    The jinja env is mocked because ``fastapi/ops/action.py.j2``
-    expects an ``action.*`` namespace that the body builder does not
-    supply; that is a pre-existing template/handler mismatch.  This
-    test stays focused on renderer dispatch + Fragment shape.
-    """
-    from kiln.operations.action import ActionRoute
-
-    tmpl = MagicMock()
-    tmpl.render.return_value = "def publish_action(): ..."
-    env = MagicMock()
-    env.get_template.return_value = tmpl
+def test_handler_with_body_template_propagates_context(registry):
+    """RouteHandler.body_template propagates to the route_handlers snippet."""
     resource = _resource()
     config = ProjectConfig.model_validate(
         {
@@ -612,19 +600,27 @@ def test_action_route_dispatches_via_registry(registry):
         }
     )
     rctx = RenderCtx(
-        env=env,
+        env=MagicMock(),
         config=config,
         package_prefix="_generated",
         store=_store_with_resource(resource, config),
         instance_id=_OP_ID,
     )
 
-    handler = ActionRoute(
+    handler = RouteHandler(
         method="POST",
         path="/publish",
         function_name="publish_action",
         response_model="PostResource",
         request_schema="PostPublishRequest",
+        body_template="fastapi/ops/action.py.j2",
+        body_context={
+            "function_name": "publish_action",
+            "method": "post",
+            "path": "/publish",
+            "response_class": "PostResource",
+            "request_class": "PostPublishRequest",
+        },
     )
     fragments = registry.render(handler, rctx)
     path = "myapp/routes/post.py"
