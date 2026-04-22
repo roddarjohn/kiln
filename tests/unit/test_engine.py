@@ -1,9 +1,11 @@
 """Tests for the build engine."""
 
-import pytest
-from pydantic import BaseModel
+from typing import Annotated
 
-from foundry import Engine, operation
+import pytest
+from pydantic import BaseModel, Field
+
+from foundry import Engine, Scoped, operation
 from foundry.engine import (
     _allowed_ops,
     _find_op_options,
@@ -26,13 +28,17 @@ class ResourceConfig(BaseModel):
 
 class AppConfig(BaseModel):
     name: str
-    resources: list[ResourceConfig] = []
+    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
+        default_factory=list,
+    )
 
 
 class ProjectConfig(BaseModel):
     module: str = "myapp"
-    apps: list[AppConfig] = []
-    resources: list[ResourceConfig] = []
+    apps: Annotated[list[AppConfig], Scoped()] = Field(default_factory=list)
+    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
+        default_factory=list,
+    )
 
 
 # -------------------------------------------------------------------
@@ -468,10 +474,12 @@ def test_engine_filters_by_allowed_ops():
 
     class FilterResource(BaseModel):
         name: str
-        operations: list[str] = []
+        operations: list[str] = Field(default_factory=list)
 
     class FilterConfig(BaseModel):
-        resources: list[FilterResource] = []
+        resources: Annotated[list[FilterResource], Scoped()] = Field(
+            default_factory=list,
+        )
 
     config = FilterConfig(
         resources=[

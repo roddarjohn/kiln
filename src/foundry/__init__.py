@@ -46,7 +46,7 @@ from foundry.outputs import (
 )
 from foundry.pipeline import generate
 from foundry.render import BuildStore, RenderCtx, RenderRegistry
-from foundry.scope import PROJECT, Scope, discover_scopes
+from foundry.scope import PROJECT, Scope, Scoped, discover_scopes
 from foundry.spec import FileSpec, GeneratedFile, wire_exports
 from foundry.target import Target, discover_targets
 
@@ -74,6 +74,7 @@ __all__ = [
     "RouterMount",
     "SchemaClass",
     "Scope",
+    "Scoped",
     "SerializerFn",
     "StaticFile",
     "Target",

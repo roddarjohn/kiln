@@ -1,8 +1,11 @@
 """Tests for scope discovery."""
 
-from pydantic import BaseModel
+from typing import Annotated
 
-from foundry import PROJECT, Scope, discover_scopes
+import pytest
+from pydantic import BaseModel, Field
+
+from foundry import PROJECT, Scope, Scoped, discover_scopes
 
 
 class ItemConfig(BaseModel):
@@ -10,14 +13,15 @@ class ItemConfig(BaseModel):
 
 
 class SubConfig(BaseModel):
-    items: list[ItemConfig] = []
+    items: Annotated[list[ItemConfig], Scoped()] = Field(default_factory=list)
 
 
 class TopConfig(BaseModel):
     module: str = "app"
-    things: list[SubConfig] = []
-    items: list[ItemConfig] = []
-    tags: list[str] = []
+    things: Annotated[list[SubConfig], Scoped()] = Field(default_factory=list)
+    items: Annotated[list[ItemConfig], Scoped()] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    notes: list[ItemConfig] = Field(default_factory=list)
 
 
 def test_project_scope_always_first():
@@ -27,7 +31,7 @@ def test_project_scope_always_first():
     assert scopes[0].config_key == ""
 
 
-def test_discovers_list_of_basemodel_fields():
+def test_discovers_scoped_fields():
     scopes = discover_scopes(TopConfig)
     names = [s.name for s in scopes]
     assert "thing" in names
@@ -38,6 +42,13 @@ def test_skips_list_of_non_basemodel():
     scopes = discover_scopes(TopConfig)
     names = [s.name for s in scopes]
     assert "tag" not in names
+
+
+def test_skips_unscoped_list_of_basemodel():
+    """list[BaseModel] fields without Scoped() are plain data, not scopes."""
+    scopes = discover_scopes(TopConfig)
+    names = [s.name for s in scopes]
+    assert "note" not in names
 
 
 def test_scope_config_key():
@@ -93,6 +104,32 @@ def test_scope_frozen():
     assert s.name == "test"
 
 
+def test_explicit_scope_name_override():
+    class Inner(BaseModel):
+        name: str
+
+    class Outer(BaseModel):
+        nodes: Annotated[list[Inner], Scoped(name="stage")] = Field(
+            default_factory=list,
+        )
+
+    scopes = discover_scopes(Outer)
+    names = [s.name for s in scopes]
+    assert "stage" in names
+    assert "node" not in names
+
+
+def test_scoped_on_non_list_raises():
+    class Inner(BaseModel):
+        name: str
+
+    class Bad(BaseModel):
+        thing: Annotated[Inner, Scoped()] = Field(default_factory=Inner)
+
+    with pytest.raises(TypeError, match="Scoped"):
+        discover_scopes(Bad)
+
+
 def test_singularize_resources():
     from foundry.scope import _singularize
 
@@ -103,16 +140,18 @@ def test_singularize_resources():
 
 
 def test_descends_through_non_list_basemodel_fields():
-    """Non-list BaseModel fields are traversed, their inner lists surfaced."""
+    """Non-list BaseModel fields: their inner scoped lists surface."""
 
     class Widget(BaseModel):
         name: str
 
     class Middle(BaseModel):
-        widgets: list[Widget] = []
+        widgets: Annotated[list[Widget], Scoped()] = Field(
+            default_factory=list,
+        )
 
     class Root(BaseModel):
-        middle: Middle = Middle()
+        middle: Middle = Field(default_factory=Middle)
 
     scopes = discover_scopes(Root)
     names = [s.name for s in scopes]
@@ -126,14 +165,14 @@ def test_descends_through_non_list_basemodel_fields():
 def test_cycle_detection_terminates():
     """Recursive Pydantic models don't send discovery into a loop.
 
-    A self-referential ``list[Node]`` field produces one scope
+    A self-referential ``Scoped()`` list field produces one scope
     at the top level and one nested scope under it; recursion
     stops there — no infinite chain.
     """
 
     class Node(BaseModel):
         name: str = ""
-        kids: list["Node"] = []
+        kids: Annotated[list["Node"], Scoped()] = Field(default_factory=list)
 
     Node.model_rebuild()
     scopes = discover_scopes(Node)

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from foundry.config import FoundryConfig
+from foundry.scope import Scoped
 
 FieldType = Literal[
     "uuid",
@@ -191,7 +192,9 @@ class AppConfig(BaseModel):
     operations: list[str | OperationConfig] | None = None
     """Default operations for all resources in this app.  Resources
     can override with their own ``operations`` list."""
-    resources: list[ResourceConfig] = []
+    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
+        default_factory=list,
+    )
 
 
 class App(BaseModel):
@@ -238,7 +241,7 @@ class ProjectConfig(FoundryConfig):
     package_prefix: str = "_generated"
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = Field(..., min_length=1)
-    apps: list[App] = Field(default_factory=list)
+    apps: Annotated[list[App], Scoped()] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
