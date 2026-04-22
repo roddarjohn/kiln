@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-#: Entry-point group under which targets may register import
+#: Entry-point group under which packages register import
 #: formatters.  Each entry point's *name* is the language
 #: identifier (e.g. ``"python"``, ``"rust"``); the value resolves
-#: to a ``Callable[[ImportCollector], str]``.  Built-in
-#: formatters register at module load time and are overridden by
-#: any entry-point with the same name.
+#: to a ``Callable[[ImportCollector], str]``.  Foundry declares
+#: its own Python formatter in this group; third-party packages
+#: add or override formatters by declaring their own entries.
 _ENTRY_POINT_GROUP = "foundry.import_formatters"
 
 
@@ -174,11 +174,12 @@ def format_imports(collector: ImportCollector, language: str) -> str:
 
 
 def _register_entry_point_formatters() -> None:
-    """Load ``foundry.import_formatters`` entry points.
+    """Load every ``foundry.import_formatters`` entry point.
 
-    Loaded after built-ins so third-party plugins can override
-    the Python formatter (or any other built-in) by declaring an
-    entry point with the same language name.
+    Includes foundry's own Python formatter (declared in
+    foundry's ``pyproject.toml``) and any third-party formatters
+    installed alongside.  Entries with the same language name
+    override one another in discovery order.
     """
     entry_points = importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP)
     for entry_point in entry_points:
@@ -188,10 +189,8 @@ def _register_entry_point_formatters() -> None:
         )
 
 
-# Built-ins register eagerly; entry points run after so that
-# plugins declaring "python" (or any other name) override the
-# ones foundry ships with.
-from foundry._python_imports import format_python  # noqa: E402
-
-register_formatter(language="python", formatter=format_python)
+# Every formatter — including foundry's own Python one — is
+# registered via the ``foundry.import_formatters`` entry-point
+# group declared in ``pyproject.toml``.  See
+# :data:`_ENTRY_POINT_GROUP`.
 _register_entry_point_formatters()
