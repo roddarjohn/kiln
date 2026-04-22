@@ -368,11 +368,11 @@ class BuildStore:
                 result.extend(items)
         return result
 
-    def outputs_under(
+    def outputs_under[T](
         self,
         ancestor_id: str,
-        output_type: type,
-    ) -> list[object]:
+        output_type: type[T],
+    ) -> list[T]:
         """Return every *output_type* output at or below *ancestor_id*.
 
         Walks the store by path prefix, so output produced at any
@@ -381,7 +381,7 @@ class BuildStore:
         adding dependencies to every handler under a resource).
         """
         prefix = f"{ancestor_id}."
-        result: list[object] = []
+        result: list[T] = []
         for (stored_id, _), items in self._items.items():
             if stored_id == ancestor_id or stored_id.startswith(prefix):
                 result.extend(
