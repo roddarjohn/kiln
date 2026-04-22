@@ -237,50 +237,60 @@ def _handler_fragment(
             "route_prefix": info.route_prefix,
         },
     )
-    if handler.body_template is None:
-        yield SnippetFragment(
-            path=path,
-            slot="route_handlers",
-            template="fastapi/handler_default.py.j2",
-            context={
-                "decorators": handler.decorators,
-                "method": handler.method.lower(),
-                "path": handler.path,
-                "response_model": handler.response_model,
-                "status_suffix": _status_suffix(handler.status_code),
-                "status_code": handler.status_code,
-                "function_name": handler.function_name,
-                "params": [
-                    {
-                        "name": p.name,
-                        "annotation": p.annotation,
-                        "default": p.default,
-                    }
-                    for p in handler.params
-                ],
-                "return_type": handler.return_type or "object",
-                "doc": handler.doc,
-                "body_lines": handler.body_lines,
-            },
-            imports=imports,
-        )
-    else:
-        yield SnippetFragment(
-            path=path,
-            slot="route_handlers",
-            template=handler.body_template,
-            context={
-                "model_name": info.model.pascal,
-                "model_lower": info.model.lower,
-                "pk_name": info.pk_name,
-                "pk_py_type": info.pk_py_type,
-                "get_db_fn": info.get_db_fn,
-                "route_prefix": info.route_prefix,
-                "extra_deps": handler.extra_deps,
-                **handler.body_context,
-            },
-            imports=imports,
-        )
+    yield SnippetFragment(
+        path=path,
+        slot="route_handlers",
+        template=handler.body_template or "fastapi/handler_default.py.j2",
+        context=_handler_context(handler=handler, info=info),
+        imports=imports,
+    )
+
+
+def _handler_context(
+    handler: RouteHandler,
+    info: _ResourceInfo,
+) -> dict[str, object]:
+    """Build the unified render context used by every handler template.
+
+    The default handler template defines the wrapper (decorator,
+    signature, docstring, body block).  Op-specific templates
+    ``{% extends %}`` the default and override the ``body`` block
+    only, so they share the same context shape.
+    """
+    db_param = {
+        "name": "db",
+        "annotation": f"Annotated[AsyncSession, Depends({info.get_db_fn})]",
+        "default": None,
+    }
+    params: list[dict[str, object]] = [
+        {"name": p.name, "annotation": p.annotation, "default": p.default}
+        for p in handler.params
+    ]
+    params.append(db_param)
+
+    return {
+        "decorators": handler.decorators,
+        "method": handler.method.lower(),
+        "path": handler.path,
+        "response_model": handler.response_model,
+        "status_suffix": _status_suffix(handler.status_code),
+        "status_code": handler.status_code,
+        "function_name": handler.function_name,
+        "params": params,
+        "extra_deps": handler.extra_deps,
+        "return_type": handler.return_type or "None",
+        "doc": handler.doc,
+        "body_lines": handler.body_lines,
+        # Resource-derived context every op body may reference.
+        "model_name": info.model.pascal,
+        "model_lower": info.model.lower,
+        "pk_name": info.pk_name,
+        "pk_py_type": info.pk_py_type,
+        "get_db_fn": info.get_db_fn,
+        "route_prefix": info.route_prefix,
+        # Op-specific extras (e.g. serializer_fn, query_modifiers).
+        **handler.body_context,
+    }
 
 
 @registry.renders(SerializerFn)

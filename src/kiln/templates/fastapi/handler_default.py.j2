@@ -6,10 +6,17 @@ async def {{ function_name }}(
 {% for param in params %}
     {{ param.name }}: {{ param.annotation }}{% if param.default is not none %} = {{ param.default }}{% endif %},
 {% endfor %}
+{% for dep in extra_deps|default([]) %}
+    {{ dep }}
+{% endfor %}
+{% for param in extra_params|default([]) %}
+    {{ param }}
+{% endfor %}
 ) -> {{ return_type }}:
 {% if doc %}
     """{{ doc }}"""
 {% endif %}
+{% block body %}
 {% if body_lines %}
 {% for line in body_lines %}
     {{ line }}
@@ -17,3 +24,4 @@ async def {{ function_name }}(
 {% else %}
     pass
 {% endif %}
+{% endblock %}

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, SchemaClass, TestCase
+from foundry.outputs import RouteHandler, RouteParam, SchemaClass, TestCase
 from kiln.operations._shared import FieldsOptions, _field_dicts
 
 if TYPE_CHECKING:
@@ -60,6 +60,7 @@ class Create:
             method="POST",
             path="/",
             function_name=f"create_{model.lower}",
+            params=[RouteParam(name="body", annotation=request_schema)],
             status_code=201,
             doc=f"Create a new {model.pascal}.",
             request_schema=request_schema,
