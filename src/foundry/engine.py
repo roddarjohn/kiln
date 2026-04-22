@@ -256,10 +256,12 @@ def _group_and_sort(
         name: topological_sort(ops) if ops else []
         for name, ops in pre_by_scope.items()
     }
+
     post_ops = {
         name: topological_sort(ops) if ops else []
         for name, ops in post_by_scope.items()
     }
+
     return pre_ops, post_ops
 
 
