@@ -35,7 +35,7 @@ def create_jinja_env(
     """
     return jinja2.Environment(
         loader=jinja2.FileSystemLoader(
-            [str(d) for d in template_dirs],
+            [str(template_dir) for template_dir in template_dirs],
         ),
         trim_blocks=True,
         lstrip_blocks=True,

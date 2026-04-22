@@ -61,11 +61,12 @@ def test_operation_decorator_preserves_custom_options():
     assert issubclass(Create.Options, BaseModel)
 
 
-def test_get_operation_meta_returns_none_for_plain_class():
+def test_get_operation_meta_raises_for_plain_class():
     class Plain:
         pass
 
-    assert get_operation_meta(Plain) is None
+    with pytest.raises(ValueError, match="no @operation"):
+        get_operation_meta(Plain)
 
 
 # -------------------------------------------------------------------

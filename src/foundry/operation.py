@@ -152,11 +152,20 @@ def operation(
     return decorator
 
 
-def get_operation_meta(
-    cls: type,
-) -> OperationMeta | None:
-    """Return the :class:`OperationMeta` for *cls*, or ``None``."""
-    return getattr(cls, _OPERATION_META_ATTR, None)
+def get_operation_meta(cls: type) -> OperationMeta:
+    """Return the :class:`OperationMeta` for *cls*.
+
+    Raises :class:`ValueError` if *cls* was not decorated with
+    :func:`operation` — so callers can trust the result is a real
+    meta and don't have to thread ``None`` through the engine.
+    """
+    meta = getattr(cls, _OPERATION_META_ATTR, None)
+
+    if meta is None:
+        msg = f"{cls} has no @operation metadata"
+        raise ValueError(msg)
+
+    return meta
 
 
 def discover_operations() -> list[type]:
@@ -207,9 +216,6 @@ def topological_sort(
 
     for cls in operations:
         meta = get_operation_meta(cls)
-        if meta is None:
-            msg = f"{cls} has no @operation metadata"
-            raise ValueError(msg)
         meta_map[meta.name] = meta
         cls_map[meta.name] = cls
 
@@ -227,6 +233,7 @@ def topological_sort(
 
     try:
         sorter.prepare()
+
     except CycleError as exc:
         msg = "Cycle detected in operation dependencies"
         raise ValueError(msg) from exc

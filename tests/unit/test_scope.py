@@ -13,13 +13,19 @@ class ItemConfig(BaseModel):
 
 
 class SubConfig(BaseModel):
-    items: Annotated[list[ItemConfig], Scoped()] = Field(default_factory=list)
+    items: Annotated[list[ItemConfig], Scoped(name="item")] = Field(
+        default_factory=list,
+    )
 
 
 class TopConfig(BaseModel):
     module: str = "app"
-    things: Annotated[list[SubConfig], Scoped()] = Field(default_factory=list)
-    items: Annotated[list[ItemConfig], Scoped()] = Field(default_factory=list)
+    things: Annotated[list[SubConfig], Scoped(name="thing")] = Field(
+        default_factory=list,
+    )
+    items: Annotated[list[ItemConfig], Scoped(name="item")] = Field(
+        default_factory=list,
+    )
     tags: list[str] = Field(default_factory=list)
     notes: list[ItemConfig] = Field(default_factory=list)
 
@@ -124,19 +130,12 @@ def test_scoped_on_non_list_raises():
         name: str
 
     class Bad(BaseModel):
-        thing: Annotated[Inner, Scoped()] = Field(default_factory=Inner)
+        thing: Annotated[Inner, Scoped(name="thing")] = Field(
+            default_factory=Inner,
+        )
 
     with pytest.raises(TypeError, match="Scoped"):
         discover_scopes(Bad)
-
-
-def test_singularize_resources():
-    from foundry.scope import _singularize
-
-    assert _singularize("resources") == "resource"
-    assert _singularize("apps") == "app"
-    assert _singularize("s") == "s"
-    assert _singularize("data") == "data"
 
 
 def test_descends_through_non_list_basemodel_fields():
@@ -146,7 +145,7 @@ def test_descends_through_non_list_basemodel_fields():
         name: str
 
     class Middle(BaseModel):
-        widgets: Annotated[list[Widget], Scoped()] = Field(
+        widgets: Annotated[list[Widget], Scoped(name="widget")] = Field(
             default_factory=list,
         )
 
@@ -172,7 +171,9 @@ def test_cycle_detection_terminates():
 
     class Node(BaseModel):
         name: str = ""
-        kids: Annotated[list["Node"], Scoped()] = Field(default_factory=list)
+        kids: Annotated[list["Node"], Scoped(name="kid")] = Field(
+            default_factory=list,
+        )
 
     Node.model_rebuild()
     scopes = discover_scopes(Node)

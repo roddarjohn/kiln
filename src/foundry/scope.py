@@ -6,7 +6,9 @@ config schema with the :class:`Scoped` ``Annotated``-metadata
 marker::
 
    class ProjectConfig(FoundryConfig):
-       apps: Annotated[list[App], Scoped()] = Field(default_factory=list)
+       apps: Annotated[list[App], Scoped(name="app")] = Field(
+           default_factory=list,
+       )
 
 Each such field becomes a scope, and every item in the list is one
 scope instance the engine iterates over.  Unannotated
@@ -31,6 +33,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic.fields import FieldInfo
 
 
@@ -44,14 +48,15 @@ class Scoped:
     produce scopes; unmarked lists are plain data.
 
     Attributes:
-        name: Optional scope-name override.  When ``None`` the
-            scope name is derived from the field name by stripping
-            a trailing ``s`` (``"apps"`` → ``"app"``).  Set
-            explicitly when that heuristic is wrong.
+        name: The scope's name, e.g. ``"app"`` or ``"resource"``.
+            Required — field names on configs are conventionally
+            plural (``apps``, ``resources``), but a scope refers
+            to one instance, so the name is spelled out
+            explicitly rather than derived by a heuristic.
 
     """
 
-    name: str | None = None
+    name: str
 
 
 @dataclass(frozen=True)
@@ -96,138 +101,101 @@ def discover_scopes(
     become scopes rooted at the enclosing level, with
     ``resolve_path`` reflecting the full attribute walk.
 
-    Cycles are detected via a visited-classes set so discovery
-    always terminates.
+    Each scoped item type is descended into at most once, so
+    discovery always terminates.  If the same type appears in
+    multiple scoped lists only the first occurrence is
+    descended — subsequent ones still produce their own scope
+    but no grandchildren.
 
     Args:
         config_cls: The Pydantic model class to inspect.
 
     Returns:
-        Flat list of all discovered scopes, project first, in
-        depth-first order of the config tree.
+        Flat list of all discovered scopes, project first,
+        followed by every discovered scope.
 
     """
-    scopes: list[Scope] = [PROJECT]
-    _discover(
-        config_cls,
-        parent=PROJECT,
-        path_prefix=(),
-        seen_lists=set(),
-        out=scopes,
-    )
-    return scopes
+    return [PROJECT, *_discover(config_cls, PROJECT, (), set())]
 
 
 def _discover(
     cls: type[BaseModel],
-    *,
     parent: Scope,
-    path_prefix: tuple[str, ...],
-    seen_lists: set[type[BaseModel]],
-    out: list[Scope],
-) -> None:
-    """Walk *cls*'s fields, appending :class:`Scoped`-marked ones to *out*.
+    prefix: tuple[str, ...],
+    seen: set[type[BaseModel]],
+) -> Iterator[Scope]:
+    """Walk *cls*'s fields and yield discovered scopes.
 
-    The same scope *name* may appear at multiple places in the
-    tree (e.g. ``resource`` may live directly under the project
-    *and* inside each ``app``).  That's intentional: operations
-    dispatch by scope name, so they run at every matching node.
+    Two descent modes live here:
 
-    Cycle detection tracks only classes reached via a
-    :class:`Scoped` list descent, because those are what can
-    nest unboundedly.  Non-list ``BaseModel`` fields (e.g.
-    ``App.config``) are traversed transparently so nested scoped
-    fields surface with a compound ``resolve_path``.
-
-    Args:
-        cls: The Pydantic model class to inspect.
-        parent: The scope whose instance hosts these fields.
-        path_prefix: Attribute path accumulated so far from the
-            parent scope instance to ``cls``.  Empty when
-            ``cls`` is itself the parent scope's instance type.
-        seen_lists: Item types already entered via a scoped list
-            descent; used to break cycles without blocking the
-            wrapper traversal above.
-        out: Output list; mutated in place.
-
+    - ``Scoped`` list fields yield a scope and recurse into the
+      item type with a fresh ``prefix`` and the new scope as
+      ``parent`` (gated by *seen* to break cycles).
+    - Wrapper (non-list ``BaseModel``) fields recurse transparently
+      with an extended ``prefix`` and the same ``parent``, so
+      scoped lists nested inside wrappers surface with a compound
+      ``resolve_path`` but without creating extra scope levels.
     """
     for name, info in cls.model_fields.items():
-        scoped = _scope_info(cls, name, info)
-        if scoped is not None:
-            marker, item_cls = scoped
+        marker = next(
+            (
+                potential_marker
+                for potential_marker in info.metadata
+                if isinstance(potential_marker, Scoped)
+            ),
+            None,
+        )
+
+        if marker:
+            # Scope boundary: emit the scope, then descend into the
+            # list's item type with a fresh prefix and the new scope
+            # as parent.  Gated by ``seen`` so recursive types
+            # terminate.
+            item_cls = _extract_base_model_from_scoped(cls, name, info)
             child = Scope(
-                name=marker.name or _singularize(name),
+                name=marker.name,
                 config_key=name,
                 parent=parent,
-                resolve_path=(*path_prefix, name),
-            )
-            out.append(child)
-            if item_cls not in seen_lists:
-                _discover(
-                    item_cls,
-                    parent=child,
-                    path_prefix=(),
-                    seen_lists=seen_lists | {item_cls},
-                    out=out,
-                )
-            continue
-
-        ann = info.annotation
-        if isinstance(ann, type) and issubclass(ann, BaseModel):
-            _discover(
-                ann,
-                parent=parent,
-                path_prefix=(*path_prefix, name),
-                seen_lists=seen_lists,
-                out=out,
+                resolve_path=(*prefix, name),
             )
 
+            yield child
 
-def _scope_info(
+            if item_cls not in seen:
+                seen |= {item_cls}
+                yield from _discover(item_cls, child, (), seen)
+
+        else:
+            # Organizational wrapper (non-list BaseModel): no scope
+            # here, but walk in with an extended prefix so scoped
+            # lists nested inside surface with the full attribute
+            # path in ``resolve_path``.
+            ann = info.annotation
+
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                yield from _discover(ann, parent, (*prefix, name), seen)
+
+
+def _extract_base_model_from_scoped(
     cls: type[BaseModel],
     name: str,
     info: FieldInfo,
-) -> tuple[Scoped, type[BaseModel]] | None:
-    """Return ``(marker, item_type)`` if *info* is a scoped list field.
+) -> type[BaseModel]:
+    """Return the item type ``T`` from a :class:`Scoped`-marked ``list[T]``.
 
-    Returns ``None`` when the field has no :class:`Scoped` marker.
-    Raises :class:`TypeError` when the marker is present but the
-    field's annotation is not ``list[BaseModel]`` — the marker
-    only makes sense on a list of models.
+    Raises :class:`TypeError` if the annotation is not
+    ``list[BaseModel]`` — the marker only makes sense there.
     """
-    marker = next(
-        (m for m in info.metadata if isinstance(m, Scoped)),
-        None,
+    annotation = info.annotation
+    if getattr(annotation, "__origin__", None) is list:
+        args: tuple[type, ...] = getattr(annotation, "__args__", ())
+        item = args[0] if args else None
+        if isinstance(item, type) and issubclass(item, BaseModel):
+            return item
+
+    msg = (
+        f"{cls.__name__}.{name} is annotated Scoped() but its "
+        f"type is not list[BaseModel]: {annotation!r}"
     )
-    if marker is None:
-        return None
-    item = _list_item_type(info.annotation)
-    if item is None or not (
-        isinstance(item, type) and issubclass(item, BaseModel)
-    ):
-        msg = (
-            f"{cls.__name__}.{name} is annotated Scoped() but its "
-            f"type is not list[BaseModel]: {info.annotation!r}"
-        )
-        raise TypeError(msg)
-    return marker, item
 
-
-def _singularize(name: str) -> str:
-    """Naive singularization: strip trailing 's'."""
-    if name.endswith("s") and len(name) > 1:
-        return name[:-1]
-    return name
-
-
-def _list_item_type(
-    annotation: object,
-) -> type | None:
-    """Extract ``T`` from ``list[T]``, or ``None``."""
-    origin = getattr(annotation, "__origin__", None)
-    if origin is not list:
-        return None
-    args: tuple[type, ...] = getattr(annotation, "__args__", ())
-    if not args:
-        return None
-    return args[0]
+    raise TypeError(msg)

@@ -110,6 +110,7 @@ class Engine:
         _validate_ops(self.operations, self.scopes)
 
         pre_ops, post_ops = _group_and_sort(self.operations, self.scopes)
+
         state = _WalkState(
             config=config,
             store=BuildStore(),
@@ -118,7 +119,9 @@ class Engine:
             children_of=_index_children(self.scopes),
             package_prefix=self.package_prefix,
         )
+
         self._visit(PROJECT, config, state)
+
         return state.store
 
     def _visit(
@@ -211,15 +214,10 @@ def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
             an unknown scope.
 
     """
-    names = {s.name for s in scopes}
+    names = {scope.name for scope in scopes}
 
-    for op_cls in operations:
-        meta = get_operation_meta(op_cls)
-
-        if meta is None:
-            msg = f"{op_cls} has no @operation metadata"
-            raise ValueError(msg)
-
+    for operation_cls in operations:
+        meta = get_operation_meta(operation_cls)
         if meta.scope not in names:
             msg = (
                 f"Operation '{meta.name}' targets "
@@ -248,10 +246,9 @@ def _group_and_sort(
     """
     pre_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
     post_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
+
     for op_cls in operations:
         meta = get_operation_meta(op_cls)
-        if meta is None:  # pragma: no cover - validated earlier
-            continue
         bucket = post_by_scope if meta.after_children else pre_by_scope
         bucket[meta.scope].append(op_cls)
 
@@ -282,8 +279,6 @@ def _run_ops(
     allowed = _allowed_ops(ctx.instance)
     for op_cls in ops:
         meta = get_operation_meta(op_cls)
-        if meta is None:  # pragma: no cover
-            continue
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
         has_when = callable(when_method)
@@ -435,10 +430,9 @@ def _resolve_options(
             return options_cls(**raw)
 
     # Check instance.operations for a matching entry with options.
-    if meta is not None:
-        raw = _find_op_options(instance, meta.name)
-        if raw:
-            return options_cls(**raw)
+    raw = _find_op_options(instance, meta.name)
+    if raw:
+        return options_cls(**raw)
 
     return options_cls()
 

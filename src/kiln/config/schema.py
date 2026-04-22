@@ -192,8 +192,8 @@ class AppConfig(BaseModel):
     operations: list[str | OperationConfig] | None = None
     """Default operations for all resources in this app.  Resources
     can override with their own ``operations`` list."""
-    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
-        default_factory=list,
+    resources: Annotated[list[ResourceConfig], Scoped(name="resource")] = Field(
+        default_factory=list
     )
 
 
@@ -241,7 +241,9 @@ class ProjectConfig(FoundryConfig):
     package_prefix: str = "_generated"
     auth: AuthConfig | None = None
     databases: list[DatabaseConfig] = Field(..., min_length=1)
-    apps: Annotated[list[App], Scoped()] = Field(default_factory=list)
+    apps: Annotated[list[App], Scoped(name="app")] = Field(
+        default_factory=list,
+    )
 
     @model_validator(mode="before")
     @classmethod

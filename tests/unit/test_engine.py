@@ -28,16 +28,18 @@ class ResourceConfig(BaseModel):
 
 class AppConfig(BaseModel):
     name: str
-    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
-        default_factory=list,
+    resources: Annotated[list[ResourceConfig], Scoped(name="resource")] = Field(
+        default_factory=list
     )
 
 
 class ProjectConfig(BaseModel):
     module: str = "myapp"
-    apps: Annotated[list[AppConfig], Scoped()] = Field(default_factory=list)
-    resources: Annotated[list[ResourceConfig], Scoped()] = Field(
+    apps: Annotated[list[AppConfig], Scoped(name="app")] = Field(
         default_factory=list,
+    )
+    resources: Annotated[list[ResourceConfig], Scoped(name="resource")] = Field(
+        default_factory=list
     )
 
 
@@ -477,8 +479,8 @@ def test_engine_filters_by_allowed_ops():
         operations: list[str] = Field(default_factory=list)
 
     class FilterConfig(BaseModel):
-        resources: Annotated[list[FilterResource], Scoped()] = Field(
-            default_factory=list,
+        resources: Annotated[list[FilterResource], Scoped(name="resource")] = (
+            Field(default_factory=list)
         )
 
     config = FilterConfig(
