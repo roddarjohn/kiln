@@ -109,14 +109,11 @@ class Engine:
 
         _validate_ops(self.operations, self.scopes)
 
-        pre_ops, post_ops = _group_and_sort(self.operations, self.scopes)
-
         state = _WalkState(
             config=config,
             store=BuildStore(),
-            pre_ops=pre_ops,
-            post_ops=post_ops,
-            children_of=_index_children(self.scopes),
+            ops=_sort_by_scope(self.operations, self.scopes),
+            scopes=self.scopes,
             package_prefix=self.package_prefix,
         )
 
@@ -164,11 +161,13 @@ class Engine:
                 store=state.store,
                 package_prefix=state.package_prefix,
             )
-            _run_ops(state.pre_ops.get(scope.name, []), ctx)
+            ops = state.ops.get(scope.name, [])
+            _run_ops(ops, ctx, after_children=False)
             next_parent = "" if scope is PROJECT else full_iid
-            for child in state.children_of.get(scope.name, []):
-                self._visit(child, inst_obj, state, parent_iid=next_parent)
-            _run_ops(state.post_ops.get(scope.name, []), ctx)
+            for child in state.scopes:
+                if child.parent is scope:
+                    self._visit(child, inst_obj, state, parent_iid=next_parent)
+            _run_ops(ops, ctx, after_children=True)
 
 
 @dataclass
@@ -177,29 +176,9 @@ class _WalkState:
 
     config: BaseModel
     store: BuildStore
-    pre_ops: dict[str, list[type]]
-    post_ops: dict[str, list[type]]
-    children_of: dict[str, list[Scope]]
+    ops: dict[str, list[type]]
+    scopes: list[Scope]
     package_prefix: str
-
-
-def _index_children(scopes: list[Scope]) -> dict[str, list[Scope]]:
-    """Group scopes by their parent's name.
-
-    Args:
-        scopes: All discovered scopes.
-
-    Returns:
-        Mapping from parent scope name to the list of its
-        direct child scopes, in discovery order.
-
-    """
-    out: dict[str, list[Scope]] = {}
-    for s in scopes:
-        if s.parent is None:
-            continue
-        out.setdefault(s.parent.name, []).append(s)
-    return out
 
 
 def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
@@ -227,58 +206,57 @@ def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
             raise ValueError(msg)
 
 
-def _group_and_sort(
+def _sort_by_scope(
     operations: list[type],
     scopes: list[Scope],
-) -> tuple[dict[str, list[type]], dict[str, list[type]]]:
+) -> dict[str, list[type]]:
     """Group operations by scope and topologically sort each group.
+
+    Phase (pre vs post) is encoded on the op's metadata via
+    ``after_children`` and split out at runtime in
+    :func:`_run_ops` — a single sorted list per scope is enough.
 
     Args:
         operations: All operation classes.
         scopes: Discovered scopes.
 
     Returns:
-        A tuple ``(pre_ops, post_ops)``.  Both are maps from
-        scope name to topo-sorted operation classes.  ``pre_ops``
-        covers operations with ``after_children=False``;
-        ``post_ops`` covers operations with ``after_children=True``.
+        Map from scope name to topo-sorted operation classes.
 
     """
-    pre_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
-    post_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
-
-    for op_cls in operations:
-        meta = get_operation_meta(op_cls)
-        bucket = post_by_scope if meta.after_children else pre_by_scope
-        bucket[meta.scope].append(op_cls)
-
-    pre_ops = {
-        name: topological_sort(ops) if ops else []
-        for name, ops in pre_by_scope.items()
+    return {
+        scope.name: topological_sort(
+            [
+                operation
+                for operation in operations
+                if get_operation_meta(operation).scope == scope.name
+            ]
+        )
+        for scope in scopes
     }
-
-    post_ops = {
-        name: topological_sort(ops) if ops else []
-        for name, ops in post_by_scope.items()
-    }
-
-    return pre_ops, post_ops
 
 
 def _run_ops(
     ops: list[type],
     ctx: BuildContext[Any],
+    *,
+    after_children: bool,
 ) -> None:
-    """Execute operations for one scope instance.
+    """Execute the matching phase of operations for one scope instance.
 
     Args:
-        ops: Sorted operation classes.
+        ops: Sorted operation classes for the scope (both phases).
         ctx: Build context for this scope instance.
+        after_children: When ``True``, run only post-phase ops
+            (``meta.after_children=True``); when ``False``, run
+            only pre-phase ops.
 
     """
     allowed = _allowed_ops(ctx.instance)
     for op_cls in ops:
         meta = get_operation_meta(op_cls)
+        if meta.after_children != after_children:
+            continue
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
         has_when = callable(when_method)
