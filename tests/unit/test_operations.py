@@ -233,7 +233,8 @@ class TestRouter:
 
         The Router runs once per :class:`App`, so the scope
         instance is an App wrapping an inner AppConfig carrying
-        the module and resources for this app.
+        the module and resources for this app.  Registers the
+        app on the store so descendants_of_type can walk under it.
         """
         app = App(
             config=AppConfig(module=module, resources=resources),
@@ -243,6 +244,7 @@ class TestRouter:
             apps=[app],
             databases=[DatabaseConfig(key="primary", default=True)],
         )
+        store.register_instance("app", module, app)
         return BuildContext(
             config=project,
             scope=APP_SCOPE,
@@ -252,30 +254,52 @@ class TestRouter:
         )
 
     @staticmethod
-    def _add_handler(
+    def _add_resource(
         store: BuildStore,
         app: str,
-        base_instance_id: str,
-    ) -> None:
-        """Store a RouteHandler under the app-compounded resource id."""
+        resource: ResourceConfig,
+    ) -> str:
+        """Register *resource* under *app* and return its instance id."""
+        slug = resource.model.rpartition(".")[-1].lower()
+        iid = f"{app}/{slug}"
+        store.register_instance(
+            "resource",
+            iid,
+            resource,
+            parent=("app", app),
+        )
+        return iid
+
+    @classmethod
+    def _add_handler(
+        cls,
+        store: BuildStore,
+        app: str,
+        resource: ResourceConfig,
+        op_name: str = "get",
+    ) -> str:
+        """Register *resource* under *app* and add a RouteHandler output."""
+        iid = cls._add_resource(store, app, resource)
+        slug = iid.rpartition("/")[-1]
         store.add(
             "resource",
-            f"{app}/{base_instance_id}",
-            "get",
+            iid,
+            op_name,
             RouteHandler(
                 method="GET",
                 path="/{id}",
-                function_name=f"get_{base_instance_id}",
+                function_name=f"{op_name}_{slug}",
             ),
         )
+        return iid
 
     def test_mounts_resources_from_store(self):
         """One RouterMount per resource with a RouteHandler in the store."""
         store = BuildStore()
-        self._add_handler(store, "blog", "post")
-        self._add_handler(store, "blog", "comment")
-        resources = [self._res("Post"), self._res("Comment")]
-        ctx = self._ctx("blog", resources, store)
+        post, comment = self._res("Post"), self._res("Comment")
+        ctx = self._ctx("blog", [post, comment], store)
+        self._add_handler(store, "blog", post)
+        self._add_handler(store, "blog", comment)
 
         result = list(Router().build(ctx, _Empty()))
         mounts = [r for r in result if isinstance(r, RouterMount)]
@@ -292,8 +316,9 @@ class TestRouter:
     def test_router_static_context(self):
         """Static file context has correct route entries."""
         store = BuildStore()
-        self._add_handler(store, "api", "user")
-        ctx = self._ctx("api", [self._res("User")], store)
+        user = self._res("User")
+        ctx = self._ctx("api", [user], store)
+        self._add_handler(store, "api", user)
 
         result = list(Router().build(ctx, _Empty()))
         static = next(r for r in result if isinstance(r, StaticFile))
@@ -305,19 +330,21 @@ class TestRouter:
     def test_deduplicates_iid_across_ops(self):
         """One resource with multiple route-emitting ops mounts once."""
         store = BuildStore()
+        user = self._res("User")
+        ctx = self._ctx("api", [user], store)
+        iid = self._add_resource(store, "api", user)
         store.add(
             "resource",
-            "api/user",
+            iid,
             "get",
             RouteHandler(method="GET", path="/{id}", function_name="get_user"),
         )
         store.add(
             "resource",
-            "api/user",
+            iid,
             "list",
             RouteHandler(method="GET", path="/", function_name="list_user"),
         )
-        ctx = self._ctx("api", [self._res("User")], store)
 
         result = list(Router().build(ctx, _Empty()))
         mounts = [r for r in result if isinstance(r, RouterMount)]
@@ -327,14 +354,16 @@ class TestRouter:
     def test_skips_resources_without_handlers(self):
         """A resource with no RouteHandler entries is not mounted."""
         store = BuildStore()
+        silent, loud = self._res("Silent"), self._res("Loud")
+        ctx = self._ctx("api", [silent, loud], store)
+        silent_iid = self._add_resource(store, "api", silent)
         store.add(
             "resource",
-            "api/silent",
+            silent_iid,
             "some_op",
             StaticFile(path="silent.py", template="x.j2"),
         )
-        self._add_handler(store, "api", "loud")
-        ctx = self._ctx("api", [self._res("Silent"), self._res("Loud")], store)
+        self._add_handler(store, "api", loud)
 
         result = list(Router().build(ctx, _Empty()))
         mounts = [r for r in result if isinstance(r, RouterMount)]
@@ -364,11 +393,11 @@ class TestRouter:
     def test_per_app_invocation_emits_its_own_router(self):
         """Each app-scope invocation emits only its own app's router."""
         store = BuildStore()
-        self._add_handler(store, "blog", "post")
-        self._add_handler(store, "shop", "product")
-
-        blog_ctx = self._ctx("blog", [self._res("Post")], store)
-        shop_ctx = self._ctx("shop", [self._res("Product")], store)
+        post, product = self._res("Post"), self._res("Product")
+        blog_ctx = self._ctx("blog", [post], store)
+        shop_ctx = self._ctx("shop", [product], store)
+        self._add_handler(store, "blog", post)
+        self._add_handler(store, "shop", product)
 
         blog_statics = [
             r
@@ -694,17 +723,10 @@ class TestAction:
             request_class: str | None = "PostRequest"
 
         ctx = _resource_ctx(resource)
-        ctx = BuildContext(
-            config=ctx.config,
-            scope=ctx.scope,
-            instance=resource,
-            instance_id="publish",
-            store=ctx.store,
-        )
 
         from kiln.operations.action import Action
 
-        opts = Action.Options(fn="blog.actions.publish")
+        opts = Action.Options(name="publish", fn="blog.actions.publish")
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
@@ -735,13 +757,13 @@ class TestAction:
             config=MinimalConfig(),
             scope=RESOURCE_SCOPE,
             instance=resource,
-            instance_id="bulk_import",
+            instance_id="post",
             store=BuildStore(),
         )
 
         from kiln.operations.action import Action
 
-        opts = Action.Options(fn="blog.actions.bulk_import")
+        opts = Action.Options(name="bulk_import", fn="blog.actions.bulk_import")
 
         with patch(
             "kiln.operations.action.introspect_action_fn",

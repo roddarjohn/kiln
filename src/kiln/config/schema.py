@@ -203,17 +203,6 @@ class App(BaseModel):
     config: AppConfig
     prefix: str = ""
 
-    @property
-    def module(self) -> str:
-        """Expose the app's module name to the engine.
-
-        :func:`foundry.engine._instance_id` derives a scope
-        instance's ID from its ``module`` attribute before falling
-        back to a positional name.  Surfacing the nested module
-        here keeps app-scope store keys stable across reorderings.
-        """
-        return self.config.module
-
 
 class ProjectConfig(FoundryConfig):
     """Top-level kiln configuration.

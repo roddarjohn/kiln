@@ -32,8 +32,16 @@ class Action:
     """Custom action endpoint via function introspection."""
 
     class Options(BaseModel):
-        """Options for action operations."""
+        """Options for action operations.
 
+        ``name`` is the action's user-facing name (e.g.
+        ``"publish"``).  The engine injects it from the matching
+        :class:`~kiln.config.schema.OperationConfig` entry so
+        ``build`` doesn't have to reach for it via the scope's
+        ``instance_id``.
+        """
+
+        name: str
         fn: str
 
     def build(
@@ -45,13 +53,14 @@ class Action:
 
         Args:
             ctx: Build context with resource config.
-            options: Parsed Action.Options with ``fn`` path.
+            options: Parsed Action.Options with ``name`` and
+                ``fn`` path.
 
         Yields:
             The route handler and a test case.
 
         """
-        action_name = Name(ctx.instance_id)
+        action_name = Name(options.name)
         info = introspect_action_fn(options.fn, ctx.instance.model)
 
         if info.is_object_action:

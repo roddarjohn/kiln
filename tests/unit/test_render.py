@@ -125,3 +125,57 @@ def test_store_entries_iter():
     ]
     assert ("resource", "user", "get", ["h1", "h2"]) in tuples
     assert ("project", "project", "scaffold", ["sf"]) in tuples
+
+
+def test_store_children_returns_registered_children_in_order():
+    store = BuildStore()
+    store.register_instance("app", "blog", "blog_app")
+    store.register_instance("resource", "a", "A", parent=("app", "blog"))
+    store.register_instance("resource", "b", "B", parent=("app", "blog"))
+
+    children = store.children("app", "blog")
+
+    assert children == [
+        (("resource", "a"), "A"),
+        (("resource", "b"), "B"),
+    ]
+
+
+def test_store_children_filters_by_scope():
+    store = BuildStore()
+    store.register_instance("app", "blog", "blog_app")
+    store.register_instance("resource", "a", "A", parent=("app", "blog"))
+    store.register_instance("database", "primary", "db", parent=("app", "blog"))
+
+    resources = store.children("app", "blog", child_scope="resource")
+
+    assert resources == [(("resource", "a"), "A")]
+
+
+def test_store_children_dedupes_repeat_registration():
+    """Registering the same instance twice doesn't duplicate the edge."""
+    store = BuildStore()
+    store.register_instance("app", "blog", "blog_app")
+    store.register_instance("resource", "a", "A", parent=("app", "blog"))
+    store.register_instance("resource", "a", "A", parent=("app", "blog"))
+
+    assert store.children("app", "blog") == [(("resource", "a"), "A")]
+
+
+def test_store_descendants_of_type_filters_and_returns_items():
+    store = BuildStore()
+    store.register_instance("app", "blog", "blog_app")
+    store.register_instance("resource", "a", "A", parent=("app", "blog"))
+    store.register_instance("resource", "b", "B", parent=("app", "blog"))
+    store.add("resource", "a", "get", 1, "skip_me")
+    store.add("resource", "b", "get", "skip_me_too")
+
+    result = store.descendants_of_type(
+        "app",
+        "blog",
+        int,
+        child_scope="resource",
+    )
+
+    # Only resource "a" has an int output; "b" has only strings.
+    assert result == [(("resource", "a"), "A", [1])]

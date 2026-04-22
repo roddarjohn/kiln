@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, RouterMount, StaticFile
@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from foundry.render import BuildStore
     from kiln.config.schema import App, ProjectConfig, ResourceConfig
 
 
@@ -53,18 +52,24 @@ class Router:
         app_config = app.config
         module = app_config.module
 
-        resource_ids = _resource_instance_ids_with_handlers(
-            ctx.store,
-            app_config.resources,
+        mounted = ctx.store.descendants_of_type(
+            ctx.scope.name,
             ctx.instance_id,
+            RouteHandler,
+            child_scope="resource",
         )
-        if not resource_ids:
+        if not mounted:
             return
 
-        for resource_id in resource_ids:
+        slugs = [
+            _resource_module_slug(cast("ResourceConfig", resource))
+            for _, resource, _ in mounted
+        ]
+
+        for slug in slugs:
             yield RouterMount(
-                module=f"{module}.routes.{resource_id}",
-                alias=f"{resource_id}_router",
+                module=f"{module}.routes.{slug}",
+                alias=f"{slug}_router",
             )
 
         yield StaticFile(
@@ -74,10 +79,10 @@ class Router:
                 "module": module,
                 "routes": [
                     {
-                        "module_name": resource_id,
-                        "alias": f"{resource_id}_router",
+                        "module_name": slug,
+                        "alias": f"{slug}_router",
                     }
-                    for resource_id in resource_ids
+                    for slug in slugs
                 ],
             },
         )
@@ -140,54 +145,21 @@ class ProjectRouter:
         )
 
 
-def _resource_instance_ids_with_handlers(
-    store: BuildStore,
-    resources: list[ResourceConfig],
-    app_instance_id: str,
-) -> list[str]:
-    """Return the base instance ids of resources that produced routes.
+def _resource_module_slug(resource: ResourceConfig) -> str:
+    """Return the Python-module slug derived from *resource*'s model.
 
-    Store keys are compounded with the enclosing app's instance
-    id (see :meth:`foundry.engine.Engine._visit`), so this
-    function looks up
-    ``("resource", f"{app_instance_id}/{base}")`` per resource
-    but returns the bare base id for output (module paths and
-    router aliases are per-app and don't need the prefix).
-
-    Args:
-        store: The populated build store.
-        resources: Configs for this app's resources.
-        app_instance_id: The enclosing app's instance id, used
-            as the store-key prefix.
-
-    Returns:
-        Base instance IDs, in config order, whose resource scope
-        emitted at least one :class:`RouteHandler`.
-
-    """
-    instance_ids: list[str] = []
-    for resource in resources:
-        base_id = _resource_instance_id(resource)
-        items = store.get_by_scope(
-            "resource",
-            f"{app_instance_id}/{base_id}",
-        )
-        if any(isinstance(item, RouteHandler) for item in items):
-            instance_ids.append(base_id)
-    return instance_ids
-
-
-def _resource_instance_id(resource: ResourceConfig) -> str:
-    """Compute the engine-generated instance ID for *resource*.
-
-    Matches :func:`foundry.engine._instance_id` for a
-    :class:`ResourceConfig`: class name from ``model``, lowercased.
+    The slug names the generated ``{app}/routes/{slug}.py`` file
+    and its router alias ``{slug}_router``.  It is derived from
+    the class name of ``resource.model`` (lowercased) rather than
+    the store's instance id — the latter is opaque and must not
+    leak into generated code.
 
     Args:
         resource: Resource config entry.
 
     Returns:
-        Instance ID string.
+        Lowercase class name, e.g. ``"article"`` for
+        ``"blog.models.Article"``.
 
     """
     _, _, class_name = resource.model.rpartition(".")

@@ -29,7 +29,7 @@ from foundry.operation import (
     get_operation_meta,
     topological_sort,
 )
-from foundry.render import BuildStore
+from foundry.render import BuildStore, InstanceKey
 from foundry.scope import PROJECT, Scope, discover_scopes
 
 
@@ -118,7 +118,7 @@ class Engine:
             package_prefix=self.package_prefix,
         )
 
-        self._visit(PROJECT, config, state, PurePosixPath())
+        self._visit(PROJECT, config, state, PurePosixPath(), None)
 
         return state.store
 
@@ -128,6 +128,7 @@ class Engine:
         parent_instance: object,
         state: _WalkState,
         parent_instance_id: PurePosixPath,
+        parent_key: InstanceKey | None,
     ) -> None:
         """Recursively walk *scope* and its descendants.
 
@@ -139,6 +140,10 @@ class Engine:
         excluded from the prefix — its ID ``"project"`` would add
         noise to every descendant without disambiguating anything.
 
+        The parent ``(scope, id)`` is also recorded on the store
+        so aggregator ops can query descendants without
+        reconstructing store keys.
+
         Args:
             scope: The scope currently being walked.
             parent_instance: The instance from which to resolve
@@ -149,12 +154,22 @@ class Engine:
             parent_instance_id: The compounded instance ID path
                 of the enclosing scope, or an empty path when the
                 parent is the project root (no prefixing).
+            parent_key: Store key of the enclosing scope instance,
+                or ``None`` at the project root.  Forwarded to
+                :meth:`BuildStore.register_instance` so
+                :meth:`BuildStore.children` surfaces the tree.
 
         """
         for own_id, inst_obj in _resolve_instances(scope, parent_instance):
             instance_path = parent_instance_id / own_id
             instance_id = str(instance_path)
-            state.store.register_instance(scope.name, instance_id, inst_obj)
+            own_key: InstanceKey = (scope.name, instance_id)
+            state.store.register_instance(
+                scope.name,
+                instance_id,
+                inst_obj,
+                parent=parent_key,
+            )
             ctx = BuildContext(
                 config=state.config,
                 scope=scope,
@@ -172,7 +187,8 @@ class Engine:
                         child,
                         inst_obj,
                         state,
-                        parent_instance_id=next_parent,
+                        next_parent,
+                        own_key,
                     )
             _run_ops(ops, ctx, after_children=True)
 
@@ -314,42 +330,31 @@ def _resolve_instances(
     items = cast("list[object]", parent_instance)
 
     return [
-        (_instance_id(item, scope.name, index), item)
+        (_instance_id(scope.name, index), item)
         for index, item in enumerate(items)
     ]
 
 
-def _instance_id(
-    item: object,
-    scope_name: str,
-    index: int,
-) -> str:
-    """Derive a human-readable instance ID for a scope item.
+def _instance_id(scope_name: str, index: int) -> str:
+    """Derive an opaque, stable instance ID for a scope item.
 
-    Checks ``name`` first, then ``module``, then extracts the
-    class name from a dotted ``model`` path, then falls back to
-    ``{scope}_{index}``.
+    Ids are ``{scope_name}-{index}`` — deterministic given config
+    order and deliberately unrelated to any config field.  Ops
+    that need a human identifier (module slug, function name,
+    test description) must derive it from the scope instance
+    directly (e.g. ``resource.model``) rather than parsing this
+    id.
 
     Args:
-        item: The config instance.
-        scope_name: Name of the scope (for fallback).
-        index: Position in the list (for fallback).
+        scope_name: Name of the scope.
+        index: Position in the scope's list.
 
     Returns:
-        Instance identifier string.
+        Instance identifier string of the form
+        ``"{scope_name}-{index}"``.
 
     """
-    name = getattr(item, "name", None)
-    if name:
-        return name
-    module = getattr(item, "module", None)
-    if module and isinstance(module, str):
-        return module
-    model = getattr(item, "model", None)
-    if model and isinstance(model, str):
-        _, _, class_name = model.rpartition(".")
-        return class_name.lower()
-    return f"{scope_name}_{index}"
+    return f"{scope_name}-{index}"
 
 
 def _resolve_options(

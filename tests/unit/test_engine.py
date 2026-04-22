@@ -157,13 +157,9 @@ def test_engine_build_resource_scope():
     engine = Engine(operations=[Get])
     store = engine.build(config)
 
-    user_items = store.get("resource", "user", "get")
-    assert len(user_items) == 1
-    assert user_items[0].function_name == "get_user"
-
-    post_items = store.get("resource", "post", "get")
-    assert len(post_items) == 1
-    assert post_items[0].function_name == "get_post"
+    handlers = store.get_by_type(RouteHandler)
+    names = {h.function_name for h in handlers}
+    assert names == {"get_user", "get_post"}
 
 
 def test_engine_build_multiple_scopes():
@@ -171,8 +167,8 @@ def test_engine_build_multiple_scopes():
     engine = Engine(operations=[Scaffold, Get])
     store = engine.build(config)
 
-    assert len(store.get("project", "project", "scaffold")) == 1
-    assert len(store.get("resource", "user", "get")) == 1
+    assert len(store.get_by_type(StaticFile)) == 1
+    assert len(store.get_by_type(RouteHandler)) == 1
 
 
 def test_engine_empty_operations():
@@ -258,26 +254,11 @@ def test_engine_auto_discovers_scopes():
 # -------------------------------------------------------------------
 
 
-def test_instance_id_from_name():
-    class Item(BaseModel):
-        name: str
-
-    assert _instance_id(Item(name="user"), "resource", 0) == "user"
-
-
-def test_instance_id_from_model():
-    class Item(BaseModel):
-        model: str
-
-    result = _instance_id(Item(model="myapp.models.Article"), "resource", 0)
-    assert result == "article"
-
-
-def test_instance_id_fallback():
-    class Item(BaseModel):
-        value: int
-
-    assert _instance_id(Item(value=1), "thing", 3) == "thing_3"
+def test_instance_id_is_opaque_and_positional():
+    """Ids are derived from scope + index, not item fields."""
+    assert _instance_id("resource", 0) == "resource-0"
+    assert _instance_id("resource", 1) == "resource-1"
+    assert _instance_id("thing", 3) == "thing-3"
 
 
 # -------------------------------------------------------------------
@@ -449,7 +430,17 @@ def test_engine_filters_by_allowed_ops():
     engine = Engine(operations=[Get, List])
     store = engine.build(config)
 
-    # get should run
-    assert len(store.get("resource", "user", "get")) == 1
-    # list should NOT run
-    assert len(store.get("resource", "user", "list")) == 0
+    get_handlers = [
+        item
+        for _scope, _iid, op, items in store.entries()
+        if op == "get"
+        for item in items
+    ]
+    list_handlers = [
+        item
+        for _scope, _iid, op, items in store.entries()
+        if op == "list"
+        for item in items
+    ]
+    assert len(get_handlers) == 1
+    assert len(list_handlers) == 0

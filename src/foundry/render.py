@@ -165,6 +165,10 @@ class RenderRegistry:
 registry = RenderRegistry()
 
 
+#: Store key for a scope instance — ``(scope_name, instance_id)``.
+InstanceKey = tuple[str, str]
+
+
 @dataclass
 class BuildStore:
     """Accumulator for objects produced during the build phase.
@@ -176,17 +180,29 @@ class BuildStore:
     assembler can attach scope-specific context to ``RenderCtx``
     without target-specific lookups.
 
+    Scope-instance ancestry is tracked independently: when the
+    engine registers an instance it may pass the parent
+    :data:`InstanceKey`, and :meth:`children` /
+    :meth:`descendants_of_type` let ops walk the tree without
+    knowing how ``instance_id`` strings are derived.
+
     Attributes:
         _items: Internal storage mapping keys to object lists.
         _instances: Map from ``(scope, instance_id)`` to the scope
             instance object (populated by the engine).
+        _children: Map from a parent :data:`InstanceKey` to its
+            registered child keys, in insertion order.  Populated
+            by :meth:`register_instance` when a parent is provided.
 
     """
 
     _items: dict[tuple[str, str, str], list[object]] = field(
         default_factory=dict
     )
-    _instances: dict[tuple[str, str], object] = field(default_factory=dict)
+    _instances: dict[InstanceKey, object] = field(default_factory=dict)
+    _children: dict[InstanceKey, list[InstanceKey]] = field(
+        default_factory=dict
+    )
 
     def add(
         self,
@@ -212,6 +228,8 @@ class BuildStore:
         scope: str,
         instance_id: str,
         instance: object,
+        *,
+        parent: InstanceKey | None = None,
     ) -> None:
         """Remember the scope instance object for a ``(scope, iid)``.
 
@@ -220,8 +238,95 @@ class BuildStore:
         :meth:`get_instance` and exposes them on ``RenderCtx`` so
         renderers can read the config object that produced each
         build entry.
+
+        Args:
+            scope: Scope name.
+            instance_id: Instance identifier.
+            instance: The scope-instance config object.
+            parent: When given, record this instance as a child of
+                ``parent`` so it surfaces via :meth:`children`.
+                Omit for root-scope instances.
+
         """
         self._instances[scope, instance_id] = instance
+        if parent is not None:
+            siblings = self._children.setdefault(parent, [])
+            child_key = (scope, instance_id)
+            if child_key not in siblings:
+                siblings.append(child_key)
+
+    def children(
+        self,
+        parent_scope: str,
+        parent_id: str,
+        *,
+        child_scope: str | None = None,
+    ) -> list[tuple[InstanceKey, object]]:
+        """Return child instances of ``(parent_scope, parent_id)``.
+
+        Children come back in registration (config) order.  When
+        *child_scope* is given, only children in that scope are
+        returned.
+
+        Args:
+            parent_scope: Parent scope name.
+            parent_id: Parent instance id.
+            child_scope: Optional scope-name filter.
+
+        Returns:
+            List of ``((child_scope, child_id), child_instance)``.
+
+        """
+        out: list[tuple[InstanceKey, object]] = []
+        for child_key in self._children.get((parent_scope, parent_id), []):
+            if child_scope is not None and child_key[0] != child_scope:
+                continue
+            out.append((child_key, self._instances[child_key]))
+        return out
+
+    def descendants_of_type(
+        self,
+        parent_scope: str,
+        parent_id: str,
+        output_type: type,
+        *,
+        child_scope: str | None = None,
+    ) -> list[tuple[InstanceKey, object, list[object]]]:
+        """Return children whose scope produced outputs of *output_type*.
+
+        Walks the direct children of ``(parent_scope, parent_id)``
+        and returns, for each child with at least one matching
+        output, the child's key, its instance object, and the
+        matching items.  Used by aggregator ops (e.g. the app-scope
+        router) to find which children contributed to a build step
+        without reconstructing store keys.
+
+        Args:
+            parent_scope: Parent scope name.
+            parent_id: Parent instance id.
+            output_type: Class of outputs to filter by.
+            child_scope: Optional scope-name filter on children.
+
+        Returns:
+            List of ``((child_scope, child_id), child_instance,
+            items)`` for every child with at least one matching
+            output.
+
+        """
+        out: list[tuple[InstanceKey, object, list[object]]] = []
+        for child_key, child_inst in self.children(
+            parent_scope,
+            parent_id,
+            child_scope=child_scope,
+        ):
+            items = [
+                item
+                for item in self.get_by_scope(*child_key)
+                if isinstance(item, output_type)
+            ]
+            if items:
+                out.append((child_key, child_inst, items))
+        return out
 
     def get_instance(
         self,
