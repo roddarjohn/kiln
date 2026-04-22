@@ -73,10 +73,6 @@ class Get:
             return_type=schema.name,
             doc=f"Get a {model.pascal} by {resource.pk}.",
             body_template="fastapi/ops/get.py.j2",
-            body_context={
-                "response_schema": schema.name,
-                "serializer_fn": serializer.function_name,
-            },
             extra_imports=[("sqlalchemy", "select"), *utils_imports()],
         )
 

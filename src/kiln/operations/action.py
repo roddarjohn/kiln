@@ -8,8 +8,10 @@ from pydantic import BaseModel
 
 from foundry.naming import Name
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, TestCase
+from foundry.outputs import RouteHandler, RouteParam, TestCase
+from kiln._helpers import PYTHON_TYPES
 from kiln.operations._introspect import introspect_action_fn
+from kiln.operations.renderers import utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -65,22 +67,42 @@ class Action:
             path = f"/{action_name.slug}"
 
         function_name = f"{action_name.raw}_action"
+        fn_module, fn_name = options.fn.rsplit(".", 1)
+
+        params: list[RouteParam] = []
+        if info.is_object_action:
+            params.append(
+                RouteParam(
+                    name=resource.pk,
+                    annotation=PYTHON_TYPES[resource.pk_type],
+                )
+            )
+        if info.request_class:
+            params.append(
+                RouteParam(name="body", annotation=info.request_class)
+            )
+
+        extra_imports: list[tuple[str, str]] = [(fn_module, fn_name)]
+        if info.is_object_action:
+            extra_imports.extend([("sqlalchemy", "select"), *utils_imports()])
+
         yield RouteHandler(
             method="POST",
             path=path,
             function_name=function_name,
+            params=params,
             response_model=info.response_class,
             return_type=info.response_class,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
             body_template="fastapi/ops/action.py.j2",
             body_context={
-                "function_name": function_name,
-                "method": "post",
-                "path": path,
-                "response_class": info.response_class,
-                "request_class": info.request_class,
+                "is_object_action": info.is_object_action,
+                "fn_name": fn_name,
+                "model_param_name": info.model_param_name or "obj",
+                "has_request_body": bool(info.request_class),
             },
+            extra_imports=extra_imports,
         )
 
         yield TestCase(

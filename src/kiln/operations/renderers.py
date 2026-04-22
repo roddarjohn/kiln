@@ -281,6 +281,8 @@ def _handler_context(
         "return_type": handler.return_type or "None",
         "doc": handler.doc,
         "body_lines": handler.body_lines,
+        "serializer_fn": handler.serializer_fn,
+        "request_schema": handler.request_schema,
         # Resource-derived context every op body may reference.
         "model_name": info.model.pascal,
         "model_lower": info.model.lower,
@@ -288,7 +290,7 @@ def _handler_context(
         "pk_py_type": info.pk_py_type,
         "get_db_fn": info.get_db_fn,
         "route_prefix": info.route_prefix,
-        # Op-specific extras (e.g. serializer_fn, query_modifiers).
+        # Op-specific extras (e.g. query_modifiers, result_expression).
         **handler.body_context,
     }
 
