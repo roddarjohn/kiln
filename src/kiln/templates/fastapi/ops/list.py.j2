@@ -1,14 +1,5 @@
-@router.{{ http_method }}("{{ route_path }}", response_model={{ response_model }})
-async def list_{{ model_lower }}(
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-{% for param in extra_params %}
-    {{ param }}
-{% endfor %}
-) -> {{ return_type }}:
-    """List {{ model_name }} records."""
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
     stmt = select({{ model_name }})
 {% for modifier in query_modifiers %}
     {{ modifier }}
@@ -19,3 +10,4 @@ async def list_{{ model_lower }}(
     result = await db.execute(stmt)
     return [{{ serializer_fn }}(obj) for obj in result.scalars()]
 {% endif %}
+{% endblock %}

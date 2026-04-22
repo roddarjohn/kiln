@@ -77,11 +77,6 @@ class List:
             doc=f"List all {model.pascal} records.",
             body_template="fastapi/ops/list.py.j2",
             body_context={
-                "http_method": "get",
-                "route_path": "/",
-                "response_model": f"list[{schema.name}]",
-                "return_type": f"list[{schema.name}]",
-                "serializer_fn": serializer.function_name,
                 "extra_params": [],
                 "query_modifiers": [],
                 "result_expression": None,
