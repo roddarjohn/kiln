@@ -10,10 +10,10 @@ from foundry.operation import EmptyOptions, operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
 from foundry.render import registry
 from kiln._helpers import PYTHON_TYPES
-from kiln.operations._render import build_handler_fragment, utils_imports
+from kiln.operations.renderers import build_handler_fragment, utils_imports
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
@@ -79,7 +79,7 @@ class Delete:
 
 
 @registry.renders(DeleteRoute)
-def _render(handler: DeleteRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: DeleteRoute, ctx: RenderCtx) -> Iterator[Fragment]:
     return build_handler_fragment(
         handler,
         ctx,

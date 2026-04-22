@@ -12,10 +12,10 @@ from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
 from foundry.render import registry
 from kiln.operations._introspect import introspect_action_fn
-from kiln.operations._render import build_handler_fragment
+from kiln.operations.renderers import build_handler_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
@@ -96,7 +96,7 @@ class Action:
 
 
 @registry.renders(ActionRoute)
-def _render(handler: ActionRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: ActionRoute, ctx: RenderCtx) -> Iterator[Fragment]:
     return build_handler_fragment(
         handler,
         ctx,

@@ -9,7 +9,7 @@ by output path to produce final files.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -49,35 +49,81 @@ class RenderCtx:
 
 
 @dataclass
-class Fragment:
-    """A single renderer's contribution to one output file.
+class FileFragment:
+    """Declares an output file's wrapper template and scalar context.
 
-    The assembler groups fragments by :attr:`path` and produces
-    the final file by rendering :attr:`shell_template` with a
-    merged :attr:`shell_context`.  Imports from every fragment
-    targeting the same path are unioned.  In the merged context,
-    list-valued entries with the same key are concatenated in
-    fragment order; scalar entries keep the first seen value.
+    One :class:`FileFragment` per output path describes the
+    template the assembler wraps the file in and the non-slot
+    context passed to it.  Every :class:`SnippetFragment`
+    sharing that path contributes a slot-list item that the
+    assembler folds into :attr:`context` before the wrapper is
+    rendered.
+
+    Multiple renderers may emit a :class:`FileFragment` for the
+    same path (e.g. every route handler at the resource declares
+    the route file) — the assembler requires them to agree on
+    :attr:`template` and unifies their :attr:`context` dicts,
+    raising if two disagree on a shared key.
+
+    A blank :attr:`template` is a convention for an empty-content
+    file (e.g. ``__init__.py``).
 
     Attributes:
         path: Output path relative to the output directory.
-        shell_template: Jinja2 template name that wraps the
-            accumulated content (e.g. ``"fastapi/route.py.j2"``).
-        shell_context: Template variables.  List values for the
-            same key across fragments concatenate; scalar values
-            are first-write-wins.
-        imports: Imports this fragment requires; merged with other
-            fragments at assembly time.
+        template: Jinja2 template name that wraps the file.
+        context: Non-slot template variables.  Merged across all
+            FileFragments at this path (shared keys must agree).
+        imports: Imports the wrapper itself needs, on top of any
+            contributed by snippets.
 
     """
 
     path: str
-    shell_template: str
-    shell_context: dict[str, Any] = field(default_factory=dict)
+    template: str
+    context: dict[str, Any] = field(default_factory=dict)
     imports: ImportCollector = field(default_factory=ImportCollector)
 
 
-_RendererFn = Callable[[Any, RenderCtx], "Fragment | list[Fragment]"]
+@dataclass
+class SnippetFragment:
+    """A contribution slotted into a file's context list.
+
+    Each snippet becomes one entry in ``file.context[slot]`` — a
+    list the wrapper template iterates over.  Snippets at the
+    same path may target different slots.
+
+    Supply exactly one of :attr:`template` (rendered by the
+    assembler into a string) or :attr:`value` (used as-is, may
+    be any type — useful for dict slots the wrapper iterates
+    over itself).
+
+    Attributes:
+        path: Output path; must match a :class:`FileFragment`.
+        slot: Key in the file's context this snippet appends to.
+        template: Jinja2 template the assembler renders against
+            :attr:`context` to produce a string slot item.
+            Mutually exclusive with :attr:`value`.
+        context: Template variables for :attr:`template`.
+        value: Raw slot item — any type, used as-is.  Mutually
+            exclusive with :attr:`template`.
+        imports: Imports this contribution needs in the output
+            file's import block.
+
+    """
+
+    path: str
+    slot: str
+    template: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
+    value: Any = None
+    imports: ImportCollector = field(default_factory=ImportCollector)
+
+
+#: Union of fragment types a renderer may yield.
+Fragment = FileFragment | SnippetFragment
+
+
+_RendererFn = Callable[[Any, RenderCtx], "Fragment | Iterable[Fragment]"]
 
 
 @dataclass
@@ -121,23 +167,21 @@ class RenderRegistry:
         obj: object,
         ctx: RenderCtx,
     ) -> list[Fragment]:
-        """Produce :class:`Fragment` objects for a build output.
+        """Produce fragments for a build output.
 
-        A renderer may return a single fragment or a list of
-        fragments; both forms are normalized here.  Multiple
-        fragments let one output contribute to more than one
-        file (e.g. a serializer emits both its serializer file
-        and an auxiliary fragment enriching the test file).
+        A renderer may return a single fragment, a list, or a
+        generator; all are normalized to a list here.  Renderers
+        typically yield a :class:`FileFragment` declaring the
+        output file plus one or more :class:`SnippetFragment`
+        contributions into its slots.
 
         Args:
             obj: The build output to render.
-            ctx: Render context with env, config, and per-scope
-                extras.
+            ctx: Render context.
 
         Returns:
-            A list of :class:`Fragment` objects, each targeting
-            some output file.  May be empty if the renderer
-            decides not to contribute.
+            A list of fragments (file + snippet).  May be empty
+            if the renderer decides not to contribute.
 
         Raises:
             LookupError: No renderer registered for the type.
@@ -149,7 +193,7 @@ class RenderRegistry:
             msg = f"No renderer for {output_type.__name__}"
             raise LookupError(msg)
         result = fn(obj, ctx)
-        if isinstance(result, Fragment):
+        if isinstance(result, FileFragment | SnippetFragment):
             return [result]
         return list(result)
 
@@ -256,10 +300,6 @@ class BuildStore:
         """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
         return self.scope_tree.scope_for(instance_id)
 
-    def parent_of(self, instance_id: str) -> str | None:
-        """Return the parent instance id, or ``None`` for the root."""
-        return self._parent_of.get(instance_id)
-
     def ancestor_of(
         self,
         instance_id: str,
@@ -267,11 +307,11 @@ class BuildStore:
     ) -> object | None:
         """Return the enclosing instance at *scope_name*, if any.
 
-        Walks parent edges from *instance_id* toward the root and
-        returns the first instance whose scope name matches.  Used
-        by descendant ops that need data from a higher scope (e.g.
-        an operation-scope op reading its enclosing resource's
-        ``model``).
+        Walks ``_parent_of`` edges from *instance_id* toward the
+        root and returns the first instance whose scope name
+        matches.  Used by descendant ops that need data from a
+        higher scope (e.g. an operation-scope op reading its
+        enclosing resource's ``model``).
 
         Args:
             instance_id: Id whose ancestor to find.
@@ -282,11 +322,11 @@ class BuildStore:
             that scope is registered.
 
         """
-        current = self.parent_of(instance_id)
+        current = self._parent_of.get(instance_id)
         while current is not None:
             if self.scope_of(current).name == scope_name:
                 return self._instances.get(current)
-            current = self.parent_of(current)
+            current = self._parent_of.get(current)
         return None
 
     def children(

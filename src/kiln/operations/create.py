@@ -9,11 +9,11 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, SchemaClass, TestCase
 from foundry.render import registry
-from kiln.operations._render import build_handler_fragment
 from kiln.operations._shared import FieldsOptions, _field_dicts
+from kiln.operations.renderers import build_handler_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
@@ -86,7 +86,7 @@ class Create:
 
 
 @registry.renders(CreateRoute)
-def _render(handler: CreateRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: CreateRoute, ctx: RenderCtx) -> Iterator[Fragment]:
     return build_handler_fragment(
         handler,
         ctx,

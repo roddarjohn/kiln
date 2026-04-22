@@ -4,7 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from foundry.render import BuildStore, Fragment, RenderCtx, RenderRegistry
+from foundry.render import (
+    BuildStore,
+    FileFragment,
+    RenderCtx,
+    RenderRegistry,
+)
 from foundry.scope import PROJECT, Scope, ScopeTree
 
 # -------------------------------------------------------------------
@@ -12,9 +17,9 @@ from foundry.scope import PROJECT, Scope, ScopeTree
 # -------------------------------------------------------------------
 
 
-def _frag(tag: str) -> Fragment:
-    """Build a Fragment whose shell_template encodes *tag* for assertions."""
-    return Fragment(path="out.py", shell_template=tag)
+def _frag(tag: str) -> FileFragment:
+    """Build a FileFragment whose template encodes *tag* for assertions."""
+    return FileFragment(path="out.py", template=tag)
 
 
 def test_renders_decorator_registers():
@@ -39,7 +44,7 @@ def test_render_calls_registered_fn():
 
     result = reg.render(42, ctx)
     assert len(result) == 1
-    assert result[0].shell_template == "value=42"
+    assert result[0].template == "value=42"
 
 
 def test_render_normalizes_list_return():
@@ -52,7 +57,7 @@ def test_render_normalizes_list_return():
         return [_frag("a"), _frag("b")]
 
     fragments = reg.render(1, ctx)
-    assert [f.shell_template for f in fragments] == ["a", "b"]
+    assert [f.template for f in fragments] == ["a", "b"]
 
 
 def test_render_no_renderer_raises():

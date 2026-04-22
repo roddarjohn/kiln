@@ -49,7 +49,7 @@ foundry.render
 kiln.operations
 ---------------
 
-.. automodule:: kiln.operations._render
+.. automodule:: kiln.operations.renderers
    :members:
 
 .. automodule:: kiln.operations.get

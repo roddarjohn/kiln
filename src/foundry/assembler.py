@@ -1,17 +1,13 @@
-"""Assembler: merge fragments into output files.
-
-The assembler is a dumb merge loop.  For every item in the build
-store, ask the registry for its fragments; group fragments by
-output path; union their imports; concatenate list-valued
-shell-context entries (first-seen wins for scalars); then render
-the shell template.  All framework- or file-specific knowledge
-lives in the renderers, not here.
+"""Assembler: combine fragments into output files.
 
 Each dispatched render gets a :class:`RenderCtx` with ``store``
-and ``instance_id`` set to the current entry.  Renderers that
-need a higher scope's config (e.g. the resource a handler
-belongs to) reach for ``ctx.store.ancestor_of(ctx.instance_id,
-"resource")``.
+and ``instance_id`` set to the current entry.  Renderers yield a
+:class:`FileFragment` (declaring the output file and its
+wrapper template) plus one or more :class:`SnippetFragment`
+contributions into the file's slot lists.  This module folds
+them: files with the same path merge, snippets render (either
+from ``value`` or their ``template``), and each file's wrapper
+is rendered once with every slot's items in order.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from foundry.imports import ImportCollector
+from foundry.render import FileFragment, SnippetFragment
 from foundry.spec import GeneratedFile
 
 if TYPE_CHECKING:
@@ -39,9 +36,8 @@ def assemble(
     """Turn a build store into rendered output files.
 
     Walks every item in the store, dispatches to the registry to
-    collect :class:`~foundry.render.Fragment` objects, groups them
-    by path, and renders each group's shell template with merged
-    imports and context.
+    collect shell/snippet fragments, then renders one file per
+    declared shell with its snippets folded in.
 
     Args:
         store: The build store from the engine's build phase.
@@ -53,78 +49,132 @@ def assemble(
         output.
 
     """
-    fragments: list[Fragment] = []
     ctx = replace(ctx, store=store)
+    fragments: list[Fragment] = []
 
     for instance_id, _, items in store.entries():
         dispatch_ctx = replace(ctx, instance_id=instance_id)
+        fragments.extend(
+            fragment
+            for item in items
+            for fragment in registry.render(item, dispatch_ctx)
+        )
 
-        for item in items:
-            # Missing renderer = silent data loss.  Let
-            # registry.render raise :class:`LookupError`; the
-            # pipeline wraps it in :class:`GenerationError`.
-            fragments.extend(registry.render(item, dispatch_ctx))
-
-    return _merge_fragments(fragments, ctx)
+    return _assemble_files(fragments, ctx)
 
 
-def _merge_fragments(
+def _assemble_files(
     fragments: list[Fragment],
     ctx: RenderCtx,
 ) -> list[GeneratedFile]:
-    """Group *fragments* by path, merge them, and render.
+    """Fold *fragments* into one :class:`GeneratedFile` per file.
 
-    Merge rules:
-
-    * Imports from every fragment targeting the same path are
-      unioned via :meth:`ImportCollector.update`.
-    * ``shell_context`` entries are merged key by key.  When two
-      fragments set the same list-valued key, the lists are
-      concatenated in fragment order; scalar values are
-      first-seen-wins.
-    * The first fragment's ``shell_template`` is used for the
-      group -- all fragments targeting a given path are expected
-      to agree on their shell template.
-    * A blank ``shell_template`` is a convention for an
-      empty-content file (e.g. ``__init__.py``).
-
-    Args:
-        fragments: All fragments contributed by renderers.
-        ctx: Render context with the Jinja environment.
-
-    Returns:
-        One :class:`GeneratedFile` per unique fragment path.
-
+    Drops fragments with an empty ``path``.  Raises
+    :class:`ValueError` for orphan snippets (no FileFragment at
+    the same path) and for FileFragment disagreements
+    (different templates or conflicting context values).
     """
-    by_path: dict[str, list[Fragment]] = {}
+    files: dict[str, FileFragment] = {}
+    snippets: dict[str, list[SnippetFragment]] = {}
+
     for frag in fragments:
         if not frag.path:
             continue
-        by_path.setdefault(frag.path, []).append(frag)
-
-    files: list[GeneratedFile] = []
-    for path, frags in by_path.items():
-        merged_imports = ImportCollector()
-        merged_ctx: dict[str, Any] = {}
-        shell_template = frags[0].shell_template
-        for frag in frags:
-            merged_imports.update(frag.imports)
-            for key, value in frag.shell_context.items():
-                if (
-                    key in merged_ctx
-                    and isinstance(merged_ctx[key], list)
-                    and isinstance(value, list)
-                ):
-                    merged_ctx[key] = merged_ctx[key] + value
-                elif key not in merged_ctx:
-                    merged_ctx[key] = value
-
-        if shell_template:
-            merged_ctx["import_block"] = merged_imports.block()
-            tmpl = ctx.env.get_template(shell_template)
-            content = tmpl.render(**merged_ctx).rstrip() + "\n"
+        if isinstance(frag, FileFragment):
+            existing = files.get(frag.path)
+            files[frag.path] = (
+                _merge_files(existing, frag) if existing else frag
+            )
         else:
-            content = ""
+            snippets.setdefault(frag.path, []).append(frag)
 
-        files.append(GeneratedFile(path=path, content=content))
-    return files
+    orphans = set(snippets) - set(files)
+    if orphans:
+        msg = (
+            "SnippetFragment targets path with no FileFragment: "
+            f"{sorted(orphans)}"
+        )
+        raise ValueError(msg)
+
+    return [
+        _render_file(file, snippets.get(file.path, ()), ctx)
+        for file in files.values()
+    ]
+
+
+def _merge_files(first: FileFragment, other: FileFragment) -> FileFragment:
+    """Combine two FileFragments targeting the same path.
+
+    The wrapper template must match; conflicting context values
+    for a shared key are a programming error.  Imports union.
+    """
+    if first.template != other.template:
+        msg = (
+            f"FileFragment template mismatch at {first.path!r}: "
+            f"{first.template!r} vs {other.template!r}"
+        )
+        raise ValueError(msg)
+
+    merged_ctx = dict(first.context)
+    for key, value in other.context.items():
+        if key in merged_ctx and merged_ctx[key] != value:
+            msg = (
+                f"FileFragment context conflict at {first.path!r} "
+                f"for {key!r}: {merged_ctx[key]!r} vs {value!r}"
+            )
+            raise ValueError(msg)
+        merged_ctx[key] = value
+
+    imports = ImportCollector()
+    imports.update(first.imports)
+    imports.update(other.imports)
+
+    return FileFragment(
+        path=first.path,
+        template=first.template,
+        context=merged_ctx,
+        imports=imports,
+    )
+
+
+def _render_file(
+    file: FileFragment,
+    snippets: list[SnippetFragment] | tuple[SnippetFragment, ...],
+    ctx: RenderCtx,
+) -> GeneratedFile:
+    """Render *file* with *snippets* folded into its slot lists.
+
+    A blank :attr:`FileFragment.template` produces empty content
+    (convention for empty files like ``__init__.py``).
+    """
+    if not file.template:
+        return GeneratedFile(path=file.path, content="")
+
+    imports = ImportCollector()
+    imports.update(file.imports)
+
+    slots: dict[str, list[Any]] = {}
+    for snippet in snippets:
+        imports.update(snippet.imports)
+        slots.setdefault(snippet.slot, []).append(_slot_item(snippet, ctx))
+
+    context: dict[str, Any] = {
+        **file.context,
+        **slots,
+        "import_block": imports.block(),
+    }
+    tmpl = ctx.env.get_template(file.template)
+    content = tmpl.render(**context).rstrip() + "\n"
+    return GeneratedFile(path=file.path, content=content)
+
+
+def _slot_item(snippet: SnippetFragment, ctx: RenderCtx) -> object:
+    """Produce the slot-list item a *snippet* contributes.
+
+    ``template`` is rendered with ``context`` (yielding a
+    string); otherwise ``value`` is passed through as-is so the
+    wrapper template can iterate over structured data.
+    """
+    if snippet.template is not None:
+        return ctx.env.get_template(snippet.template).render(**snippet.context)
+    return snippet.value

@@ -1,17 +1,18 @@
 """FastAPI renderers for build output types.
 
-Each renderer converts a build output object into a
-:class:`~foundry.render.Fragment`: the target path, the shell
-template that wraps the file, and the imports this contribution
-needs.  The assembler groups fragments by path, unions imports,
-and merges ``shell_context`` list values so multiple fragments
-can stream into the same file.
+Each renderer is an ``@registry.renders(SomeOutput)`` generator
+that yields fragments: a :class:`~foundry.render.FileFragment`
+declaring the output file's wrapper template and scalar
+context, plus one or more :class:`~foundry.render.SnippetFragment`
+contributions into its slot lists.  The assembler groups
+fragments by path, folds snippets into the file's context, and
+renders each wrapper template once.
 
 Per-op RouteHandler rendering is owned by each op module (e.g.
 :mod:`kiln.operations.list`).  Those modules call
-:func:`build_handler_fragment` with their op-specific template
-name, template context, and import tuple.  This module keeps
-only the cross-cutting renderers (schema / enum / serializer /
+:func:`build_handler_fragment` with their op-specific body
+template, context, and import tuple.  This module keeps only
+the cross-cutting renderers (schema / enum / serializer /
 testcase / static) plus a generic :class:`RouteHandler`
 fallback for hand-written handlers that aren't one of the
 registered subclasses.
@@ -27,18 +28,17 @@ from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import (
     EnumClass,
-    Field,
     RouteHandler,
     SchemaClass,
     SerializerFn,
     StaticFile,
     TestCase,
 )
-from foundry.render import Fragment, registry
+from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator
 
     import jinja2
 
@@ -119,39 +119,53 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
 
 @registry.renders(SchemaClass)
-def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Fragment:
+def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    rendered = render_schema_class(schema, ctx.env)
+    path = f"{info.app}/schemas/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
-    _add_field_imports(imports, schema.fields)
-    return Fragment(
-        path=f"{info.app}/schemas/{info.model.lower}.py",
-        shell_template="fastapi/schema_outer.py.j2",
-        shell_context={
-            "model_name": info.model.pascal,
-            "schema_classes": [rendered],
-        },
+    for f in schema.fields:
+        py_type = f.py_type
+        if py_type == "uuid.UUID":
+            imports.add("uuid")
+        elif py_type == "datetime":
+            imports.add_from("datetime", "datetime")
+        elif py_type == "date":
+            imports.add_from("datetime", "date")
+        elif py_type == "dict[str, Any]":
+            imports.add_from("typing", "Any")
+
+    yield FileFragment(
+        path=path,
+        template="fastapi/schema_outer.py.j2",
+        context={"model_name": info.model.pascal},
+    )
+    yield SnippetFragment(
+        path=path,
+        slot="schema_classes",
+        value=render_schema_class(schema, ctx.env),
         imports=imports,
     )
 
 
 @registry.renders(EnumClass)
-def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Fragment:
+def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    rendered = render_enum_class(enum)
+    path = f"{info.app}/schemas/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
     imports.add_from("enum", "Enum")
-    return Fragment(
-        path=f"{info.app}/schemas/{info.model.lower}.py",
-        shell_template="fastapi/schema_outer.py.j2",
-        shell_context={
-            "model_name": info.model.pascal,
-            "schema_classes": [rendered],
-        },
+    yield FileFragment(
+        path=path,
+        template="fastapi/schema_outer.py.j2",
+        context={"model_name": info.model.pascal},
+    )
+    yield SnippetFragment(
+        path=path,
+        slot="schema_classes",
+        value=render_enum_class(enum),
         imports=imports,
     )
 
@@ -159,7 +173,7 @@ def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Fragment:
 @registry.renders(RouteHandler)
 def _generic_handler_fragment(
     handler: RouteHandler, ctx: RenderCtx
-) -> Fragment:
+) -> Iterator[Fragment]:
     """Fallback renderer for plain RouteHandler instances.
 
     Op-specific subclasses (:class:`GetRoute`, :class:`ListRoute`,
@@ -167,13 +181,15 @@ def _generic_handler_fragment(
     op template.  Handlers that reach this function have
     ``body_lines`` already populated and are rendered as-is.
     """
-    return build_handler_fragment(handler, ctx)
+    yield from build_handler_fragment(handler, ctx)
 
 
 @registry.renders(SerializerFn)
-def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
+def _serializer_fragment(
+    ser: SerializerFn, ctx: RenderCtx
+) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    rendered = render_serializer(ser, ctx.env)
+    ser_path = f"{info.app}/serializers/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from(info.model_module, info.model.pascal)
@@ -181,54 +197,103 @@ def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
         info.package_prefix, info.app, "schemas", info.model.lower
     )
     imports.add_from(schema_mod, ser.schema_name)
-    serializer_fragment = Fragment(
-        path=f"{info.app}/serializers/{info.model.lower}.py",
-        shell_template="fastapi/serializer_outer.py.j2",
-        shell_context={
-            "model_name": info.model.pascal,
-            "serializer_fns": [rendered],
-        },
+
+    yield FileFragment(
+        path=ser_path,
+        template="fastapi/serializer_outer.py.j2",
+        context={"model_name": info.model.pascal},
+    )
+    yield SnippetFragment(
+        path=ser_path,
+        slot="serializer_fns",
+        value=render_serializer(ser, ctx.env),
         imports=imports,
     )
-    if not info.generate_tests:
-        return [serializer_fragment]
-    test_aux = Fragment(
-        path=f"tests/test_{info.app}_{info.model.lower}.py",
-        shell_template="fastapi/test_outer.py.j2",
-        shell_context={
-            "has_serializer_test": True,
-            "serializer_fields": [
-                {"name": f.name, "py_type": f.py_type} for f in ser.fields
-            ],
-        },
-    )
-    return [serializer_fragment, test_aux]
+
+    if info.generate_tests:
+        test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+        yield FileFragment(
+            path=test_path,
+            template="fastapi/test_outer.py.j2",
+            context={"has_serializer_test": True},
+        )
+        for f in ser.fields:
+            yield SnippetFragment(
+                path=test_path,
+                slot="serializer_fields",
+                value={"name": f.name, "py_type": f.py_type},
+            )
 
 
 @registry.renders(TestCase)
-def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> list[Fragment]:
+def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
     if not info.generate_tests:
-        return []
-    imports = _test_file_imports(info)
-    shell_context = _test_file_base_context(info)
-    shell_context["test_cases"] = [_testcase_dict(tc)]
-    return [
-        Fragment(
-            path=f"tests/test_{info.app}_{info.model.lower}.py",
-            shell_template="fastapi/test_outer.py.j2",
-            shell_context=shell_context,
-            imports=imports,
-        )
-    ]
+        return
+
+    test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+    route_module = prefix_import(
+        info.package_prefix, info.app, "routes", info.model.lower
+    )
+
+    imports = ImportCollector()
+    imports.add_from("__future__", "annotations")
+    imports.add("uuid")
+    imports.add("pytest")
+    imports.add("pytest_asyncio")
+    imports.add_from("unittest.mock", "AsyncMock", "MagicMock")
+    imports.add_from("httpx", "ASGITransport", "AsyncClient")
+    imports.add_from("fastapi", "FastAPI")
+    imports.add_from(route_module, "router")
+    session_mod = prefix_import(info.package_prefix, info.session_module)
+    imports.add_from(session_mod, info.get_db_fn)
+    if info.has_auth:
+        auth_module = prefix_import(info.package_prefix, "auth", "dependencies")
+        imports.add_from(auth_module, "get_current_user")
+
+    yield FileFragment(
+        path=test_path,
+        template="fastapi/test_outer.py.j2",
+        context={
+            "model_name": info.model.pascal,
+            "model_lower": info.model.lower,
+            "pk_name": info.pk_name,
+            "pk_py_type": info.pk_py_type,
+            "route_prefix": info.route_prefix,
+            "has_auth": info.has_auth,
+            "get_db_fn": info.get_db_fn,
+            "route_module": route_module,
+            "get_current_user_fn": (
+                "get_current_user" if info.has_auth else None
+            ),
+        },
+        imports=imports,
+    )
+    yield SnippetFragment(
+        path=test_path,
+        slot="test_cases",
+        value={
+            "op_name": tc.op_name,
+            "method": tc.method,
+            "path": tc.path,
+            "status_success": tc.status_success,
+            "status_not_found": tc.status_not_found,
+            "status_invalid": tc.status_invalid,
+            "requires_auth": tc.requires_auth,
+            "has_request_body": tc.has_request_body,
+            "request_schema": tc.request_schema,
+            "request_fields": tc.request_fields,
+            "action_name": tc.action_name,
+        },
+    )
 
 
 @registry.renders(StaticFile)
-def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Fragment:
-    return Fragment(
+def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> FileFragment:
+    return FileFragment(
         path=sf.path,
-        shell_template=sf.template,
-        shell_context=dict(sf.context),
+        template=sf.template,
+        context=dict(sf.context),
     )
 
 
@@ -257,8 +322,8 @@ def build_handler_fragment(
     body_template: str | None = None,
     body_extra: dict[str, object] | None = None,
     extra_imports: Iterable[tuple[str, str]] = (),
-) -> Fragment:
-    """Build a :class:`Fragment` for one route handler.
+) -> Iterator[Fragment]:
+    """Yield the file + handler snippet for one route.
 
     Op-specific imports (sqlalchemy verbs, generated utils, ...)
     are the renderer's concern, not the shared builder's.  Each
@@ -269,57 +334,95 @@ def build_handler_fragment(
         ctx: Current render context.
         body_template: Path to the op-specific body template.
             ``None`` falls back to :func:`_render_handler_string`,
-            which emits the handler's own ``body_lines`` verbatim.
+            which emits the handler's own ``body_lines`` verbatim
+            as a pre-rendered string.
         body_extra: Extra template variables merged on top of
             the shared handler context.
         extra_imports: ``(module, name)`` pairs the op renderer
             needs on top of the handler-derived imports.
 
-    Returns:
-        A fragment targeting ``<app>/routes/<model>.py`` with
-        merged imports and shell context.
+    Yields:
+        A :class:`FileFragment` declaring ``<app>/routes/
+        <model>.py`` followed by a :class:`SnippetFragment`
+        contributing the handler into the ``route_handlers`` slot.
 
     """
     info = _resource_info(ctx)
-    if body_template is None:
-        rendered = _render_handler_string(handler)
+    path = f"{info.app}/routes/{info.model.lower}.py"
 
-    else:
-        common: dict[str, object] = {
-            "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
-            "pk_name": info.pk_name,
-            "pk_py_type": info.pk_py_type,
-            "get_db_fn": info.get_db_fn,
-            "route_prefix": info.route_prefix,
-            "extra_deps": handler.extra_deps,
-        }
+    imports = ImportCollector()
+    imports.add_from("__future__", "annotations")
+    imports.add_from("typing", "Annotated")
+    imports.add_from("fastapi", "APIRouter", "Depends")
+    imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
+    imports.add_from(info.model_module, info.model.pascal)
+    _add_pk_type_imports(imports, info.pk_py_type)
 
-        rendered = ctx.env.get_template(body_template).render(
-            **common, **(body_extra or {})
+    session_mod = prefix_import(info.package_prefix, info.session_module)
+    imports.add_from(session_mod, info.get_db_fn)
+
+    if handler.status_code in (201, 204):
+        imports.add_from("starlette", "status")
+
+    schema_mod = prefix_import(
+        info.package_prefix, info.app, "schemas", info.model.lower
+    )
+    if handler.request_schema:
+        imports.add_from(schema_mod, handler.request_schema)
+
+    response_schema = _response_schema_name(handler)
+    if response_schema:
+        imports.add_from(schema_mod, response_schema)
+    if handler.serializer_fn:
+        serializer_mod = prefix_import(
+            info.package_prefix, info.app, "serializers", info.model.lower
         )
+        imports.add_from(serializer_mod, handler.serializer_fn)
 
-    imports = _handler_imports(handler, info)
+    for module, name in handler.extra_imports:
+        imports.add_from(module, name)
     for module, name in extra_imports:
         imports.add_from(module, name)
 
-    return Fragment(
-        path=f"{info.app}/routes/{info.model.lower}.py",
-        shell_template="fastapi/route.py.j2",
-        shell_context={
+    yield FileFragment(
+        path=path,
+        template="fastapi/route.py.j2",
+        context={
             "model_name": info.model.pascal,
             "model_lower": info.model.lower,
             "route_prefix": info.route_prefix,
-            "route_handlers": [rendered],
         },
-        imports=imports,
     )
+    if body_template is None:
+        yield SnippetFragment(
+            path=path,
+            slot="route_handlers",
+            value=_render_handler_string(handler),
+            imports=imports,
+        )
+    else:
+        yield SnippetFragment(
+            path=path,
+            slot="route_handlers",
+            template=body_template,
+            context={
+                "model_name": info.model.pascal,
+                "model_lower": info.model.lower,
+                "pk_name": info.pk_name,
+                "pk_py_type": info.pk_py_type,
+                "get_db_fn": info.get_db_fn,
+                "route_prefix": info.route_prefix,
+                "extra_deps": handler.extra_deps,
+                **(body_extra or {}),
+            },
+            imports=imports,
+        )
 
 
 # -------------------------------------------------------------------
 # Content renderers -- produce code strings without touching paths or
 # imports.  Exposed at module level so tests can exercise them
-# directly and so Fragment builders above can reuse them.
+# directly and so renderers above can reuse them.
 # -------------------------------------------------------------------
 
 
@@ -356,26 +459,6 @@ def render_serializer(ser: SerializerFn, env: jinja2.Environment) -> str:
         model_name=ser.model_name,
         schema_name=ser.schema_name,
         fields=fields,
-    )
-
-
-def render_router_mount(mount: object) -> str:
-    """Render a router-mount snippet string.
-
-    Retained as a standalone helper because ``RouterMount``
-    outputs are currently consumed by the static-file router
-    generator rather than the fragment merge loop.  Kept for
-    test coverage of mount-line formatting.
-    """
-    module = getattr(mount, "module", "")
-    alias = getattr(mount, "alias", "")
-    prefix = getattr(mount, "prefix", None)
-    prefix_arg = f', prefix="{prefix}"' if prefix else ""
-    return (
-        f"from {module} import router "
-        f"as {alias}\n"
-        f"app_router.include_router("
-        f"{alias}{prefix_arg})"
     )
 
 
@@ -462,65 +545,6 @@ def _response_schema_name(handler: RouteHandler) -> str | None:
     return rm
 
 
-# -------------------------------------------------------------------
-# Handler-level imports.  Union across all fragments produces the
-# final route file's import block.
-# -------------------------------------------------------------------
-
-
-def _handler_imports(
-    handler: RouteHandler,
-    info: _ResourceInfo,
-) -> ImportCollector:
-    """Compute the imports contributed by a single route handler.
-
-    Covers only what is derivable from the handler and its
-    resource: the always-present fastapi/sqlalchemy scaffolding,
-    the model and pk-type imports, and anything the handler
-    carries directly (status code, request/response schema,
-    serializer, ``extra_imports``).  Op-specific imports
-    (sqlalchemy verbs, generated utils) are owned by the op
-    renderer and added via :func:`build_handler_fragment`'s
-    ``extra_imports`` argument.
-    """
-    imports = ImportCollector()
-    imports.add_from("__future__", "annotations")
-    imports.add_from("typing", "Annotated")
-    imports.add_from("fastapi", "APIRouter", "Depends")
-    imports.add_from("sqlalchemy.ext.asyncio", "AsyncSession")
-    imports.add_from(info.model_module, info.model.pascal)
-    _add_pk_type_imports(imports, info.pk_py_type)
-
-    session_mod = prefix_import(info.package_prefix, info.session_module)
-    imports.add_from(session_mod, info.get_db_fn)
-
-    if handler.status_code in (201, 204):
-        imports.add_from("starlette", "status")
-
-    if handler.request_schema:
-        schema_mod = prefix_import(
-            info.package_prefix, info.app, "schemas", info.model.lower
-        )
-        imports.add_from(schema_mod, handler.request_schema)
-
-    response_schema = _response_schema_name(handler)
-    if response_schema:
-        schema_mod = prefix_import(
-            info.package_prefix, info.app, "schemas", info.model.lower
-        )
-        imports.add_from(schema_mod, response_schema)
-    if handler.serializer_fn:
-        serializer_mod = prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
-        )
-        imports.add_from(serializer_mod, handler.serializer_fn)
-
-    for module, name in handler.extra_imports:
-        imports.add_from(module, name)
-
-    return imports
-
-
 def _add_pk_type_imports(
     imports: ImportCollector,
     pk_py_type: str,
@@ -532,88 +556,3 @@ def _add_pk_type_imports(
         imports.add_from("datetime", "datetime")
     if "date" in pk_py_type and "datetime" not in pk_py_type:
         imports.add_from("datetime", "date")
-
-
-def _add_field_imports(
-    imports: ImportCollector,
-    fields: Sequence[Field],
-) -> None:
-    """Add type-specific imports for schema field types."""
-    for f in fields:
-        py_type = f.py_type
-        if py_type == "uuid.UUID":
-            imports.add("uuid")
-        elif py_type == "datetime":
-            imports.add_from("datetime", "datetime")
-        elif py_type == "date":
-            imports.add_from("datetime", "date")
-        elif py_type == "dict[str, Any]":
-            imports.add_from("typing", "Any")
-
-
-# -------------------------------------------------------------------
-# Test-file helpers
-# -------------------------------------------------------------------
-
-
-def _test_file_imports(info: _ResourceInfo) -> ImportCollector:
-    """Return the base imports every generated test file needs."""
-    imports = ImportCollector()
-    imports.add_from("__future__", "annotations")
-    imports.add("uuid")
-    imports.add("pytest")
-    imports.add("pytest_asyncio")
-    imports.add_from("unittest.mock", "AsyncMock", "MagicMock")
-    imports.add_from("httpx", "ASGITransport", "AsyncClient")
-    imports.add_from("fastapi", "FastAPI")
-    route_module = prefix_import(
-        info.package_prefix, info.app, "routes", info.model.lower
-    )
-    imports.add_from(route_module, "router")
-    session_mod = prefix_import(info.package_prefix, info.session_module)
-    imports.add_from(session_mod, info.get_db_fn)
-    if info.has_auth:
-        auth_module = prefix_import(info.package_prefix, "auth", "dependencies")
-        imports.add_from(auth_module, "get_current_user")
-    return imports
-
-
-def _test_file_base_context(info: _ResourceInfo) -> dict[str, object]:
-    """Build the per-file context for the test outer template.
-
-    ``has_serializer_test`` and ``serializer_fields`` are owned
-    by the :class:`SerializerFn` fragment so they are absent
-    here.  The template treats both as optional/falsy by default.
-    """
-    route_module = prefix_import(
-        info.package_prefix, info.app, "routes", info.model.lower
-    )
-    get_current_user_fn = "get_current_user" if info.has_auth else None
-    return {
-        "model_name": info.model.pascal,
-        "model_lower": info.model.lower,
-        "pk_name": info.pk_name,
-        "pk_py_type": info.pk_py_type,
-        "route_prefix": info.route_prefix,
-        "has_auth": info.has_auth,
-        "get_db_fn": info.get_db_fn,
-        "route_module": route_module,
-        "get_current_user_fn": get_current_user_fn,
-    }
-
-
-def _testcase_dict(tc: TestCase) -> dict[str, object]:
-    """Convert a :class:`TestCase` into the dict shape the template expects."""
-    return {
-        "op_name": tc.op_name,
-        "method": tc.method,
-        "path": tc.path,
-        "status_success": tc.status_success,
-        "status_not_found": tc.status_not_found,
-        "status_invalid": tc.status_invalid,
-        "requires_auth": tc.requires_auth,
-        "has_request_body": tc.has_request_body,
-        "request_schema": tc.request_schema,
-        "request_fields": tc.request_fields,
-        "action_name": tc.action_name,
-    }

@@ -237,7 +237,7 @@ Kiln's built-in renderers are colocated with their operations:
 op-specific :class:`RouteHandler` subclasses register at the bottom
 of each op module (``kiln.operations.get``, ``kiln.operations.list``,
 …), and the shared cross-cutting renderers plus fragment-builder
-helpers live in ``kiln.operations._render``.  All registrations run
+helpers live in ``kiln.operations.renderers``.  All registrations run
 at module import time and populate the module-level
 :data:`foundry.render.registry` singleton; loading operations via
 the ``foundry.operations`` entry-point group is therefore enough to

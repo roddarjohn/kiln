@@ -17,14 +17,14 @@ from kiln.operations._list_config import (  # noqa: TC001
     OrderConfig,
     PaginateConfig,
 )
-from kiln.operations._render import build_handler_fragment
 from kiln.operations._shared import (
     _construct_response_schema,
     _construct_serializer,
 )
+from kiln.operations.renderers import build_handler_fragment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
@@ -96,7 +96,7 @@ class List:
 
 
 @registry.renders(ListRoute)
-def _render(handler: ListRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: ListRoute, ctx: RenderCtx) -> Iterator[Fragment]:
     return build_handler_fragment(
         handler,
         ctx,

@@ -10,19 +10,19 @@ from foundry.operation import operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
 from foundry.render import registry
 from kiln._helpers import PYTHON_TYPES
-from kiln.operations._render import (
-    _response_schema_name,
-    build_handler_fragment,
-    utils_imports,
-)
 from kiln.operations._shared import (
     FieldsOptions,
     _construct_response_schema,
     _construct_serializer,
 )
+from kiln.operations.renderers import (
+    _response_schema_name,
+    build_handler_fragment,
+    utils_imports,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
@@ -97,7 +97,7 @@ class Get:
 
 
 @registry.renders(GetRoute)
-def _render(handler: GetRoute, ctx: RenderCtx) -> Fragment:
+def _render(handler: GetRoute, ctx: RenderCtx) -> Iterator[Fragment]:
     return build_handler_fragment(
         handler,
         ctx,

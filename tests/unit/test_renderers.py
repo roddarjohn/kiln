@@ -6,27 +6,31 @@ import pytest
 
 from foundry.assembler import assemble
 from foundry.env import create_jinja_env
+from foundry.imports import ImportCollector
 from foundry.outputs import (
     EnumClass,
     Field,
     RouteHandler,
     RouteParam,
-    RouterMount,
     SchemaClass,
     SerializerFn,
     StaticFile,
     TestCase,
 )
-from foundry.render import BuildStore, RenderCtx
+from foundry.render import (
+    BuildStore,
+    FileFragment,
+    RenderCtx,
+    SnippetFragment,
+)
 from foundry.render import registry as shared_registry
 from foundry.scope import discover_scopes
 from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
-from kiln.operations._render import (
+from kiln.operations.renderers import (
     _render_handler_string,
     _response_schema_name,
     _status_suffix,
     render_enum_class,
-    render_router_mount,
     render_schema_class,
     render_serializer,
 )
@@ -189,26 +193,6 @@ def test_render_enum_class_string():
     assert "AGE = 'age'" in result
 
 
-def test_render_router_mount_with_prefix():
-    mount = RouterMount(
-        module="myapp.routes.user",
-        alias="user_router",
-        prefix="/users",
-    )
-    result = render_router_mount(mount)
-    assert "from myapp.routes.user import router" in result
-    assert 'prefix="/users"' in result
-
-
-def test_render_router_mount_no_prefix():
-    mount = RouterMount(
-        module="myapp.routes.user",
-        alias="user_router",
-    )
-    result = render_router_mount(mount)
-    assert "prefix=" not in result
-
-
 # -------------------------------------------------------------------
 # Registry registrations (only assert shape; Fragment content is
 # exercised via the assembler tests).
@@ -234,9 +218,10 @@ def test_registry_static_file_fragment(registry):
     fragments = registry.render(sf, rctx)
     assert len(fragments) == 1
     frag = fragments[0]
+    assert isinstance(frag, FileFragment)
     assert frag.path == "db/session.py"
-    assert frag.shell_template == "init/db_session.py.j2"
-    assert frag.shell_context == {"key": "value"}
+    assert frag.template == "init/db_session.py.j2"
+    assert frag.context == {"key": "value"}
 
 
 def test_render_serializer_string():
@@ -329,6 +314,15 @@ def _resource(
     )
 
 
+# Scope-instance ids used by :func:`_store_with_resource`.  The
+# shorthand ``{module, resources, ...}`` config is wrapped into a
+# single implicit app by :class:`ProjectConfig`, so the chain is
+# always project → app → resource → operation.
+_APP_ID = "project.apps.0"
+_RESOURCE_ID = f"{_APP_ID}.resources.0"
+_OP_ID = f"{_RESOURCE_ID}.operations.0"
+
+
 def _rctx(
     resource: ResourceConfig,
     *,
@@ -342,20 +336,19 @@ def _rctx(
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }
     )
-    store = _store_with_resource(resource, config)
     return RenderCtx(
         env=jinja_env,
         config=config,
         package_prefix="_generated",
-        store=store,
-        instance_id="project.resources.0.operations.0",
+        store=_store_with_resource(resource, config),
+        instance_id=_OP_ID,
     )
 
 
 def _store_with_resource(
     resource: ResourceConfig, config: ProjectConfig
 ) -> BuildStore:
-    """Register a project→resource→operation chain for renderer tests.
+    """Register a project→app→resource→operation chain for renderer tests.
 
     Renderers look up the enclosing resource via
     ``ctx.store.ancestor_of(ctx.instance_id, "resource")``, so the
@@ -364,13 +357,28 @@ def _store_with_resource(
     """
     store = BuildStore(scope_tree=discover_scopes(ProjectConfig))
     store.register_instance("project", config)
-    store.register_instance("project.resources.0", resource, parent="project")
-    store.register_instance(
-        "project.resources.0.operations.0",
-        object(),
-        parent="project.resources.0",
-    )
+    store.register_instance(_APP_ID, object(), parent="project")
+    store.register_instance(_RESOURCE_ID, resource, parent=_APP_ID)
+    store.register_instance(_OP_ID, object(), parent=_RESOURCE_ID)
     return store
+
+
+def _file(fragments, path):
+    """Return the FileFragment at *path* (asserts exactly one)."""
+    files = [
+        f for f in fragments if isinstance(f, FileFragment) and f.path == path
+    ]
+    assert len(files) == 1, f"expected one FileFragment at {path}, got {files}"
+    return files[0]
+
+
+def _snippets(fragments, path, slot):
+    """Return SnippetFragments at *path* in *slot*, in yield order."""
+    return [
+        f
+        for f in fragments
+        if isinstance(f, SnippetFragment) and f.path == path and f.slot == slot
+    ]
 
 
 def test_enum_fragment(registry):
@@ -379,15 +387,13 @@ def test_enum_fragment(registry):
         members=[("TITLE", "title")],
     )
     fragments = registry.render(enum, _rctx(_resource()))
-    assert len(fragments) == 1
-    frag = fragments[0]
-    assert frag.path == "myapp/schemas/post.py"
-    assert (
-        "class PostSortField(str, Enum):"
-        in frag.shell_context["schema_classes"][0]
-    )
-    block = frag.imports.block()
-    assert "from enum import Enum" in block
+    path = "myapp/schemas/post.py"
+    shell = _file(fragments, path)
+    assert shell.template == "fastapi/schema_outer.py.j2"
+    snippets = _snippets(fragments, path, "schema_classes")
+    assert len(snippets) == 1
+    assert "class PostSortField(str, Enum):" in snippets[0].value
+    assert "from enum import Enum" in snippets[0].imports.block()
 
 
 def test_serializer_fragment_without_tests(registry):
@@ -398,8 +404,8 @@ def test_serializer_fragment_without_tests(registry):
         fields=[Field(name="id", py_type="int")],
     )
     fragments = registry.render(ser, _rctx(_resource()))
-    assert len(fragments) == 1
-    assert fragments[0].path == "myapp/serializers/post.py"
+    paths = {f.path for f in fragments}
+    assert paths == {"myapp/serializers/post.py"}
 
 
 def test_serializer_fragment_with_tests(registry):
@@ -413,15 +419,17 @@ def test_serializer_fragment_with_tests(registry):
         ser,
         _rctx(_resource(generate_tests=True)),
     )
-    assert len(fragments) == 2
     paths = {f.path for f in fragments}
     assert paths == {
         "myapp/serializers/post.py",
         "tests/test_myapp_post.py",
     }
-    test_frag = next(f for f in fragments if f.path.startswith("tests/"))
-    assert test_frag.shell_context["has_serializer_test"] is True
-    assert test_frag.shell_context["serializer_fields"] == [
+    test_shell = _file(fragments, "tests/test_myapp_post.py")
+    assert test_shell.context["has_serializer_test"] is True
+    field_snippets = _snippets(
+        fragments, "tests/test_myapp_post.py", "serializer_fields"
+    )
+    assert [s.value for s in field_snippets] == [
         {"name": "id", "py_type": "int"}
     ]
 
@@ -448,11 +456,10 @@ def test_testcase_fragment_no_auth(registry):
         tc,
         _rctx(_resource(generate_tests=True)),
     )
-    frag = fragments[0]
-    assert frag.shell_context["has_auth"] is False
-    assert frag.shell_context["get_current_user_fn"] is None
-    block = frag.imports.block()
-    assert "auth.dependencies" not in block
+    shell = _file(fragments, "tests/test_myapp_post.py")
+    assert shell.context["has_auth"] is False
+    assert shell.context["get_current_user_fn"] is None
+    assert "auth.dependencies" not in shell.imports.block()
 
 
 def test_testcase_fragment_with_tests(registry):
@@ -470,18 +477,24 @@ def test_testcase_fragment_with_tests(registry):
             auth=AuthConfig(verify_credentials_fn="myapp.auth.verify"),
         ),
     )
-    assert len(fragments) == 1
-    frag = fragments[0]
-    assert frag.path == "tests/test_myapp_post.py"
-    assert frag.shell_context["model_name"] == "Post"
-    assert frag.shell_context["has_auth"] is True
-    assert frag.shell_context["get_current_user_fn"] == "get_current_user"
-    cases = frag.shell_context["test_cases"]
+    path = "tests/test_myapp_post.py"
+    shell = _file(fragments, path)
+    assert shell.context["model_name"] == "Post"
+    assert shell.context["has_auth"] is True
+    assert shell.context["get_current_user_fn"] == "get_current_user"
+    cases = [s.value for s in _snippets(fragments, path, "test_cases")]
     assert len(cases) == 1
     assert cases[0]["op_name"] == "get"
     assert cases[0]["status_not_found"] == 404
-    block = frag.imports.block()
-    assert "from _generated.auth.dependencies" in block
+    assert "from _generated.auth.dependencies" in shell.imports.block()
+
+
+def _unioned_imports(fragments):
+    """Union every fragment's ImportCollector for block() assertions."""
+    merged = ImportCollector()
+    for frag in fragments:
+        merged.update(frag.imports)
+    return merged
 
 
 def test_schema_fragment_field_imports(registry):
@@ -495,7 +508,7 @@ def test_schema_fragment_field_imports(registry):
         ],
     )
     fragments = registry.render(schema, _rctx(_resource()))
-    block = fragments[0].imports.block()
+    block = _unioned_imports(fragments).block()
     assert "import uuid" in block
     assert "from datetime import date, datetime" in block
     assert "from typing import Any" in block
@@ -512,7 +525,7 @@ def test_handler_fragment_datetime_pk(registry):
     )
     handler.params.append(RouteParam(name="id", annotation="datetime"))
     fragments = registry.render(handler, _rctx(_resource(pk_type="datetime")))
-    block = fragments[0].imports.block()
+    block = _unioned_imports(fragments).block()
     assert "from datetime import datetime" in block
     assert "from _generated.myapp.serializers.post" in block
     assert "from _generated.myapp.schemas.post" in block
@@ -525,7 +538,7 @@ def test_handler_fragment_date_pk(registry):
         function_name="get_post",
     )
     fragments = registry.render(handler, _rctx(_resource(pk_type="date")))
-    block = fragments[0].imports.block()
+    block = _unioned_imports(fragments).block()
     assert "from datetime import date" in block
 
 
@@ -539,7 +552,7 @@ def test_handler_fragment_unknown_op_no_db_verb(registry):
         extra_imports=[("myapp.actions", "publish")],
     )
     fragments = registry.render(handler, _rctx(_resource()))
-    block = fragments[0].imports.block()
+    block = _unioned_imports(fragments).block()
     assert "from sqlalchemy import" not in block
     assert "from myapp.actions import publish" in block
 
@@ -555,7 +568,8 @@ def test_handler_fragment_custom_route_prefix(registry):
         handler,
         _rctx(_resource(route_prefix="/articles")),
     )
-    assert fragments[0].shell_context["route_prefix"] == "/articles"
+    shell = _file(fragments, "myapp/routes/post.py")
+    assert shell.context["route_prefix"] == "/articles"
 
 
 # -------------------------------------------------------------------
@@ -602,7 +616,7 @@ def test_action_route_dispatches_via_registry(registry):
         config=config,
         package_prefix="_generated",
         store=_store_with_resource(resource, config),
-        instance_id="project.resources.0.operations.0",
+        instance_id=_OP_ID,
     )
 
     handler = ActionRoute(
@@ -613,15 +627,14 @@ def test_action_route_dispatches_via_registry(registry):
         request_schema="PostPublishRequest",
     )
     fragments = registry.render(handler, rctx)
-    assert len(fragments) == 1
-    frag = fragments[0]
-    assert frag.path == "myapp/routes/post.py"
-    env.get_template.assert_called_with("fastapi/ops/action.py.j2")
-    call_kwargs = tmpl.render.call_args.kwargs
-    assert call_kwargs["function_name"] == "publish_action"
-    assert call_kwargs["method"] == "post"
-    assert call_kwargs["response_class"] == "PostResource"
-    assert call_kwargs["request_class"] == "PostPublishRequest"
+    path = "myapp/routes/post.py"
+    _file(fragments, path)
+    [snippet] = _snippets(fragments, path, "route_handlers")
+    assert snippet.template == "fastapi/ops/action.py.j2"
+    assert snippet.context["function_name"] == "publish_action"
+    assert snippet.context["method"] == "post"
+    assert snippet.context["response_class"] == "PostResource"
+    assert snippet.context["request_class"] == "PostPublishRequest"
 
 
 def test_response_schema_name_list_envelope():
@@ -661,6 +674,8 @@ def test_render_handler_body_unknown_op_falls_through(registry):
         body_lines=["return None"],
     )
     fragments = registry.render(handler, _rctx(_resource()))
-    rendered = fragments[0].shell_context["route_handlers"][0]
-    assert "async def custom(" in rendered
-    assert "return None" in rendered
+    [snippet] = _snippets(fragments, "myapp/routes/post.py", "route_handlers")
+    # body_template=None path: snippet.value is the pre-rendered string.
+    assert snippet.template is None
+    assert "async def custom(" in snippet.value
+    assert "return None" in snippet.value
