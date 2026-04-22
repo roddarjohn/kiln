@@ -27,8 +27,6 @@ from kiln.operations.renderers import (
     _response_schema_name,
     _status_suffix,
     render_enum_class,
-    render_schema_class,
-    render_serializer,
 )
 from kiln.target import target as kiln_target
 
@@ -164,20 +162,6 @@ def test_render_handler_default_param():
 # -------------------------------------------------------------------
 
 
-def test_render_schema_class_string():
-    schema = SchemaClass(
-        name="UserResource",
-        fields=[
-            Field(name="id", py_type="int"),
-            Field(name="name", py_type="str"),
-        ],
-    )
-    result = render_schema_class(schema, jinja_env)
-    assert "class UserResource(BaseModel):" in result
-    assert "id: int" in result
-    assert "name: str" in result
-
-
 def test_render_enum_class_string():
     enum = EnumClass(
         name="SortField",
@@ -218,19 +202,6 @@ def test_registry_static_file_fragment(registry):
     assert frag.path == "db/session.py"
     assert frag.template == "init/db_session.py.j2"
     assert frag.context == {"key": "value"}
-
-
-def test_render_serializer_string():
-    from foundry.outputs import SerializerFn
-
-    ser = SerializerFn(
-        function_name="to_user_resource",
-        model_name="User",
-        schema_name="UserResource",
-        fields=[Field(name="id", py_type="int")],
-    )
-    result = render_serializer(ser, jinja_env)
-    assert "to_user_resource" in result
 
 
 # -------------------------------------------------------------------

@@ -155,15 +155,19 @@ class SnippetFragment:
     def render_slot_item(self, env: jinja2.Environment) -> object:
         """Return the slot-list item this snippet contributes.
 
-        Renders :attr:`template` against :attr:`context` when set;
-        otherwise passes :attr:`value` through unchanged.
+        When :attr:`template` is set the assembler renders it
+        against :attr:`context` and strips surrounding whitespace,
+        so the surrounding file template can join items with its
+        own separators without fighting jinja's trailing
+        newline.  Otherwise :attr:`value` is passed through
+        unchanged.
         """
         if self.template is not None:
             return render_template(
                 env=env,
                 template_name=self.template,
                 **self.context,
-            )
+            ).strip()
 
         return self.value
 

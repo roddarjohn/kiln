@@ -23,7 +23,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from foundry.env import render_template
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import (
@@ -39,8 +38,6 @@ from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-    import jinja2
 
     from foundry.render import RenderCtx
     from kiln.config.schema import ResourceConfig
@@ -141,10 +138,23 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
         template="fastapi/schema_outer.py.j2",
         context={"model_name": info.model.pascal},
     )
+
     yield SnippetFragment(
         path=path,
         slot="schema_classes",
-        value=render_schema_class(schema, ctx.env),
+        template="fastapi/schema_parts/schema_class.py.j2",
+        context={
+            "class_name": schema.name,
+            "doc": schema.doc,
+            "fields": [
+                {
+                    "name": f.name,
+                    "py_type": f.py_type,
+                    "optional": f.optional,
+                }
+                for f in schema.fields
+            ],
+        },
         imports=imports,
     )
 
@@ -231,7 +241,27 @@ def _handler_fragment(
         yield SnippetFragment(
             path=path,
             slot="route_handlers",
-            value=_render_handler_string(handler),
+            template="fastapi/handler_default.py.j2",
+            context={
+                "decorators": handler.decorators,
+                "method": handler.method.lower(),
+                "path": handler.path,
+                "response_model": handler.response_model,
+                "status_suffix": _status_suffix(handler.status_code),
+                "status_code": handler.status_code,
+                "function_name": handler.function_name,
+                "params": [
+                    {
+                        "name": p.name,
+                        "annotation": p.annotation,
+                        "default": p.default,
+                    }
+                    for p in handler.params
+                ],
+                "return_type": handler.return_type or "object",
+                "doc": handler.doc,
+                "body_lines": handler.body_lines,
+            },
             imports=imports,
         )
     else:
@@ -275,7 +305,13 @@ def _serializer_fragment(
     yield SnippetFragment(
         path=ser_path,
         slot="serializer_fns",
-        value=render_serializer(ser, ctx.env),
+        template="fastapi/serializer_fn.py.j2",
+        context={
+            "function_name": ser.function_name,
+            "model_name": ser.model_name,
+            "schema_name": ser.schema_name,
+            "fields": [{"name": f.name} for f in ser.fields],
+        },
         imports=imports,
     )
 
@@ -391,84 +427,17 @@ def utils_imports() -> list[tuple[str, str]]:
 # -------------------------------------------------------------------
 
 
-def render_schema_class(schema: SchemaClass, env: jinja2.Environment) -> str:
-    """Render a Pydantic model class definition string."""
-    fields = [
-        {"name": f.name, "py_type": f.py_type, "optional": f.optional}
-        for f in schema.fields
-    ]
-    return render_template(
-        env=env,
-        template_name="fastapi/schema_parts/schema_class.py.j2",
-        class_name=schema.name,
-        doc=schema.doc,
-        fields=fields,
-    ).strip()
-
-
 def render_enum_class(enum: EnumClass) -> str:
-    """Render an Enum class definition string."""
+    """Render an Enum class definition string.
+
+    Kept as a Python string builder because repr-formatted
+    member values aren't something jinja filters express
+    cleanly.  Called from :func:`_enum_fragment` to pre-render
+    the slot value.
+    """
     lines = [f"class {enum.name}({enum.base}):"]
     for member_name, member_value in enum.members:
         lines.append(f"    {member_name} = {member_value!r}")
-    return "\n".join(lines)
-
-
-def render_serializer(ser: SerializerFn, env: jinja2.Environment) -> str:
-    """Render a single serializer function as a standalone string."""
-    fields = [{"name": f.name} for f in ser.fields]
-    return render_template(
-        env=env,
-        template_name="fastapi/serializer_fn.py.j2",
-        function_name=ser.function_name,
-        model_name=ser.model_name,
-        schema_name=ser.schema_name,
-        fields=fields,
-    ).strip()
-
-
-def _render_handler_string(handler: RouteHandler) -> str:
-    """Render a RouteHandler into a standalone function string.
-
-    Used for handlers whose :attr:`body_lines` are already
-    populated (hand-written or unknown-op fallbacks).  Op-specific
-    bodies are rendered from op templates via
-    :func:`build_handler_fragment`.
-    """
-    lines: list[str] = list(handler.decorators)
-
-    method = handler.method.lower()
-    decorator_parts = [f'"{handler.path}"']
-    if handler.response_model:
-        decorator_parts.append(f"response_model={handler.response_model}")
-    status_suffix = _status_suffix(handler.status_code)
-    if status_suffix:
-        decorator_parts.append(f"status_code=status.{status_suffix}")
-    elif handler.status_code:
-        decorator_parts.append(f"status_code={handler.status_code}")
-
-    lines.append(f"@router.{method}({', '.join(decorator_parts)})")
-
-    params = []
-    for p in handler.params:
-        if p.default is not None:
-            params.append(f"    {p.name}: {p.annotation} = {p.default},")
-        else:
-            params.append(f"    {p.name}: {p.annotation},")
-
-    return_type = handler.return_type or "object"
-    lines.append(f"async def {handler.function_name}(")
-    lines.extend(params)
-    lines.append(f") -> {return_type}:")
-
-    if handler.doc:
-        lines.append(f'    """{handler.doc}"""')
-
-    if handler.body_lines:
-        lines.extend(f"    {line}" for line in handler.body_lines)
-    else:
-        lines.append("    pass")
-
     return "\n".join(lines)
 
 
