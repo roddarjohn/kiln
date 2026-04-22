@@ -52,18 +52,21 @@ class Router:
         app_config = app.config
         module = app_config.module
 
-        mounted = ctx.store.descendants_of_type(
+        # Route handlers live at operation scope (grandchildren of
+        # the app), so walk each resource and ask whether any of
+        # its descendants produced a handler.
+        mounted: list[ResourceConfig] = []
+        for resource_id, resource_obj in ctx.store.children(
             ctx.instance_id,
-            RouteHandler,
             child_scope="resource",
-        )
+        ):
+            if ctx.store.outputs_under(resource_id, RouteHandler):
+                mounted.append(cast("ResourceConfig", resource_obj))
+
         if not mounted:
             return
 
-        slugs = [
-            _resource_module_slug(cast("ResourceConfig", resource))
-            for _, resource, _ in mounted
-        ]
+        slugs = [_resource_module_slug(resource) for resource in mounted]
 
         for slug in slugs:
             yield RouterMount(

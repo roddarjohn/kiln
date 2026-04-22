@@ -25,7 +25,6 @@ from pydantic import BaseModel
 from foundry.operation import (
     EmptyOptions,
     OperationEntry,
-    OperationMeta,
     OperationRegistry,
     load_default_registry,
 )
@@ -207,7 +206,6 @@ def _run_ops(
             only pre-phase ops.
 
     """
-    allowed = _allowed_ops(ctx.instance)
     for meta, op_cls in ops:
         if meta.after_children != after_children:
             continue
@@ -220,15 +218,9 @@ def _run_ops(
             continue
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
-        has_when = callable(when_method)
-        # An instance's ``operations`` list gates user-facing ops.
-        # Cross-cutting ops that define ``when`` opt-in at runtime
-        # and bypass the explicit list.
-        if not has_when and allowed is not None and meta.name not in allowed:
+        if callable(when_method) and not when_method(ctx):
             continue
-        if has_when and when_method is not None and not when_method(ctx):
-            continue
-        options = _resolve_options(meta, op_cls, ctx.instance)
+        options = _resolve_options(op_cls, ctx.instance)
         ctx.store.add(
             ctx.instance_id,
             meta.name,
@@ -271,22 +263,17 @@ def _configs_for_scope(
     ]
 
 
-def _resolve_options(
-    meta: OperationMeta,
-    op_cls: type,
-    instance: object,
-) -> BaseModel:
+def _resolve_options(op_cls: type, instance: object) -> BaseModel:
     """Build the Options model for an operation.
 
-    If the instance is a Pydantic model with an ``options``
-    field matching the operation's Options class, use that.
-    Otherwise, return a default-constructed Options.
+    If the instance exposes an ``options`` dict (as
+    :class:`~kiln.config.schema.OperationConfig` does via
+    ``model_extra``), those keys populate the Options model.
+    Otherwise a default-constructed Options is returned.
 
     Args:
-        meta: Operation metadata (used for ``meta.name`` lookups
-            in the instance's ``operations`` list).
         op_cls: The operation class.
-        instance: The config instance for this scope.
+        instance: The config instance at the op's scope.
 
     Returns:
         A populated Options model.
@@ -296,75 +283,9 @@ def _resolve_options(
     if options_cls is None:
         return EmptyOptions()
 
-    # Check if instance has an options dict/field we can use.
     if isinstance(instance, BaseModel):
         raw = getattr(instance, "options", None)
         if isinstance(raw, dict):
             return options_cls(**raw)
 
-    # Check instance.operations for a matching entry with options.
-    raw = _find_op_options(instance, meta.name)
-    if raw:
-        return options_cls(**raw)
-
     return options_cls()
-
-
-def _find_op_options(
-    instance: object,
-    op_name: str,
-) -> dict[str, object] | None:
-    """Find options for a named operation in the instance's list.
-
-    Checks ``instance.operations`` for an entry whose ``name``
-    matches *op_name* and returns its ``options`` dict.
-
-    Args:
-        instance: The config instance for one scope item.
-        op_name: The operation name to find.
-
-    Returns:
-        Options dict, or ``None`` if not found.
-
-    """
-    ops = getattr(instance, "operations", None)
-    if ops is None:
-        return None
-    for entry in ops:
-        if isinstance(entry, str):
-            continue
-        name = getattr(entry, "name", None)
-        if name == op_name:
-            options = getattr(entry, "options", None)
-            if isinstance(options, dict):
-                return options
-    return None
-
-
-def _allowed_ops(instance: object) -> set[str] | None:
-    """Extract allowed operation names from a scope instance.
-
-    If the instance has an ``operations`` field (a list of
-    strings or objects with a ``name`` attribute), returns the
-    set of operation names.  Otherwise returns ``None`` meaning
-    all operations are allowed.
-
-    Args:
-        instance: The config instance for one scope item.
-
-    Returns:
-        Set of operation names, or ``None`` if unrestricted.
-
-    """
-    ops = getattr(instance, "operations", None)
-    if ops is None:
-        return None
-    names: set[str] = set()
-    for entry in ops:
-        if isinstance(entry, str):
-            names.add(entry)
-        else:
-            name = getattr(entry, "name", None)
-            if name:
-                names.add(name)
-    return names

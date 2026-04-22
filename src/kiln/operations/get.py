@@ -58,10 +58,7 @@ class Get:
         """
         resource = cast(
             "ResourceConfig",
-            ctx.store.ancestor_of(
-                ctx.instance_id,
-                "resource",
-            ),
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
         _, model = Name.from_dotted(resource.model)
 

@@ -34,13 +34,14 @@ if TYPE_CHECKING:
     from kiln.config.schema import ResourceConfig
 
 
-@operation(
-    "auth",
-    scope="resource",
-    requires=["get", "list", "create", "update", "delete", "action"],
-)
+@operation("auth", scope="resource", after_children=True)
 class Auth:
-    """Augment CRUD/action handlers and tests with auth."""
+    """Augment CRUD/action handlers and tests with auth.
+
+    Runs at resource scope with ``after_children=True`` so all
+    operation-scope ops under this resource have already produced
+    their handlers and test cases by the time auth sweeps through.
+    """
 
     def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
         """Apply only when auth is configured and the resource opts in.
@@ -83,11 +84,9 @@ class Auth:
         dep_line = "current_user: Annotated[dict, Depends(get_current_user)],"
         import_pair = (auth_mod, "get_current_user")
 
-        items = ctx.store.get_by_instance(ctx.instance_id)
-        for item in items:
-            if isinstance(item, RouteHandler):
-                item.extra_deps.append(dep_line)
-                item.extra_imports.append(import_pair)
-            elif isinstance(item, TestCase):
-                item.requires_auth = True
+        for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
+            handler.extra_deps.append(dep_line)
+            handler.extra_imports.append(import_pair)
+        for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
+            test.requires_auth = True
         return ()

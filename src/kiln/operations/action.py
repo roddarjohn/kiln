@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -27,44 +27,48 @@ class ActionRoute(RouteHandler):
     """Route handler emitted by the :class:`Action` operation."""
 
 
-@operation("action", scope="resource")
+@operation("action", scope="operation")
 class Action:
-    """Custom action endpoint via function introspection."""
+    """Custom action endpoint via function introspection.
+
+    Dispatches on the presence of a ``fn`` attribute rather than
+    a literal name match: any :class:`OperationConfig` whose
+    ``options`` include ``fn`` becomes an action.
+    """
 
     class Options(BaseModel):
-        """Options for action operations.
+        """Options for action operations."""
 
-        ``name`` is the action's user-facing name (e.g.
-        ``"publish"``).  The engine injects it from the matching
-        :class:`~kiln.config.schema.OperationConfig` entry so
-        ``build`` doesn't have to reach for it via the scope's
-        ``instance_id``.
-        """
-
-        name: str
         fn: str
+
+    def when(self, ctx: BuildContext[OperationConfig]) -> bool:
+        """Activate whenever the op config carries an ``fn`` field."""
+        return getattr(ctx.instance, "fn", None) is not None
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: Options,
     ) -> Iterable[object]:
         """Produce output for a custom action endpoint.
 
         Args:
-            ctx: Build context with resource config.
-            options: Parsed Action.Options with ``name`` and
-                ``fn`` path.
+            ctx: Build context for the action's operation entry.
+            options: Parsed Action.Options with ``fn`` path.
 
         Yields:
             The route handler and a test case.
 
         """
-        action_name = Name(options.name)
-        info = introspect_action_fn(options.fn, ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        action_name = Name(ctx.instance.name)
+        info = introspect_action_fn(options.fn, resource.model)
 
         if info.is_object_action:
-            path = f"/{{{ctx.instance.pk}}}/{action_name.slug}"
+            path = f"/{{{resource.pk}}}/{action_name.slug}"
 
         else:
             path = f"/{action_name.slug}"

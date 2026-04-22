@@ -25,6 +25,7 @@ from kiln.config.schema import (
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
+    OperationConfig,
     ProjectConfig,
     ResourceConfig,
 )
@@ -51,17 +52,18 @@ class MinimalConfig(BaseModel):
     apps: list[object] = []
 
 
+APP_SCOPE = Scope(name="app", config_key="apps", parent=PROJECT)
 RESOURCE_SCOPE = Scope(
     name="resource",
     config_key="resources",
-    parent=PROJECT,
+    parent=APP_SCOPE,
 )
-
-APP_SCOPE = Scope(
-    name="app",
-    config_key="apps",
-    parent=PROJECT,
+OPERATION_SCOPE = Scope(
+    name="operation",
+    config_key="operations",
+    parent=RESOURCE_SCOPE,
 )
+SCOPE_TREE = ScopeTree([PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE])
 
 
 def _resource_ctx(
@@ -70,14 +72,45 @@ def _resource_ctx(
     config: MinimalConfig | None = None,
     store: BuildStore | None = None,
 ) -> BuildContext:
-    """Build a BuildContext for a resource operation."""
+    """Build a BuildContext for a resource-scope operation."""
     cfg = config or MinimalConfig()
+    s = store or BuildStore(scope_tree=SCOPE_TREE)
+    resource_id = "project.apps.0.resources.0"
+    s.register_instance(resource_id, resource)
     return BuildContext(
         config=cfg,
         scope=RESOURCE_SCOPE,
         instance=resource,
-        instance_id=resource.model.rpartition(".")[2].lower(),
-        store=store or BuildStore(),
+        instance_id=resource_id,
+        store=s,
+    )
+
+
+def _operation_ctx(
+    resource: ResourceConfig,
+    op_config: OperationConfig,
+    *,
+    config: MinimalConfig | None = None,
+    store: BuildStore | None = None,
+) -> BuildContext:
+    """Build a BuildContext for an operation-scope op.
+
+    Registers the resource as the op's enclosing ancestor so ops
+    can walk ``ctx.store.ancestor_of(ctx.instance_id, "resource")``
+    for the resource config.
+    """
+    cfg = config or MinimalConfig()
+    s = store or BuildStore(scope_tree=SCOPE_TREE)
+    resource_id = "project.apps.0.resources.0"
+    op_id = f"{resource_id}.operations.0"
+    s.register_instance(resource_id, resource)
+    s.register_instance(op_id, op_config, parent=resource_id)
+    return BuildContext(
+        config=cfg,
+        scope=OPERATION_SCOPE,
+        instance=op_config,
+        instance_id=op_id,
+        store=s,
     )
 
 
@@ -521,7 +554,7 @@ class TestGet:
     def test_get_emits_schema_and_handler(self):
         """Get emits its own ``{Model}Resource`` schema + serializer."""
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
         result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
@@ -540,7 +573,7 @@ class TestGet:
 
     def test_get_test_case(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
         result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
 
         tests = [r for r in result if isinstance(r, TestCase)]
@@ -559,7 +592,7 @@ class TestGet:
             pk="user_id",
             pk_type="int",
         )
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
         result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/{user_id}"
@@ -578,7 +611,7 @@ class TestList:
     def test_list_emits_schema_and_handler(self):
         """List emits its own ``{Model}ListItem`` schema + serializer."""
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
@@ -600,7 +633,7 @@ class TestList:
 
     def test_list_test_case(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].op_name == "list"
@@ -617,7 +650,7 @@ class TestCreate:
 
     def test_create_emits_schema_and_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="create"))
         opts = _FieldsOpts(fields=_FIELDS)
         result = list(Create().build(ctx, opts))
 
@@ -632,7 +665,7 @@ class TestCreate:
 
     def test_create_test_case(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="create"))
         opts = _FieldsOpts(fields=_FIELDS)
         result = list(Create().build(ctx, opts))
         tests = [r for r in result if isinstance(r, TestCase)]
@@ -652,7 +685,7 @@ class TestUpdate:
 
     def test_update_with_fields(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="update"))
         opts = _FieldsOpts(fields=_FIELDS)
         result = list(Update().build(ctx, opts))
 
@@ -672,7 +705,7 @@ class TestUpdate:
             pk="user_id",
             pk_type="int",
         )
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="update"))
         opts = _FieldsOpts(fields=_FIELDS)
         result = list(Update().build(ctx, opts))
         tests = [r for r in result if isinstance(r, TestCase)]
@@ -692,7 +725,7 @@ class TestDelete:
 
     def test_delete_basic(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="delete"))
         result = list(Delete().build(ctx, _Empty()))
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
@@ -703,7 +736,7 @@ class TestDelete:
 
     def test_delete_test_case(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="delete"))
         result = list(Delete().build(ctx, _Empty()))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].status_success == 204
@@ -715,7 +748,7 @@ class TestDelete:
             pk="item_id",
             pk_type="str",
         )
-        ctx = _resource_ctx(resource)
+        ctx = _operation_ctx(resource, OperationConfig(name="delete"))
         result = list(Delete().build(ctx, _Empty()))
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.path == "/{item_id}"
@@ -741,11 +774,15 @@ class TestAction:
             response_class: str | None = "PostResult"
             request_class: str | None = "PostRequest"
 
-        ctx = _resource_ctx(resource)
+        op_config = OperationConfig(
+            name="publish",
+            fn="blog.actions.publish",
+        )
+        ctx = _operation_ctx(resource, op_config)
 
         from kiln.operations.action import Action
 
-        opts = Action.Options(name="publish", fn="blog.actions.publish")
+        opts = Action.Options(fn="blog.actions.publish")
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
@@ -772,17 +809,15 @@ class TestAction:
             response_class: str | None = None
             request_class: str | None = None
 
-        ctx = BuildContext(
-            config=MinimalConfig(),
-            scope=RESOURCE_SCOPE,
-            instance=resource,
-            instance_id="post",
-            store=BuildStore(),
+        op_config = OperationConfig(
+            name="bulk_import",
+            fn="blog.actions.bulk_import",
         )
+        ctx = _operation_ctx(resource, op_config)
 
         from kiln.operations.action import Action
 
-        opts = Action.Options(name="bulk_import", fn="blog.actions.bulk_import")
+        opts = Action.Options(fn="blog.actions.bulk_import")
 
         with patch(
             "kiln.operations.action.introspect_action_fn",

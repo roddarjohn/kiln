@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -32,7 +32,12 @@ class UpdateRoute(RouteHandler):
     """Route handler emitted by the :class:`Update` operation."""
 
 
-@operation("update", scope="resource", requires=["create"])
+@operation(
+    "update",
+    scope="operation",
+    dispatch_on="name",
+    requires=["create"],
+)
 class Update:
     """PATCH /{pk} -- partially update a resource."""
 
@@ -40,13 +45,13 @@ class Update:
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for PATCH /{pk}.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"update"`` operation entry.
             options: Parsed :class:`FieldsOptions`.
 
         Yields:
@@ -54,7 +59,11 @@ class Update:
             optional), the route handler, and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        _, model = Name.from_dotted(resource.model)
         request_schema = model.suffixed("UpdateRequest")
 
         yield SchemaClass(
@@ -68,22 +77,22 @@ class Update:
 
         yield UpdateRoute(
             method="PATCH",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             function_name=f"update_{model.lower}",
             params=[
                 RouteParam(
-                    name=ctx.instance.pk,
-                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                    name=resource.pk,
+                    annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
-            doc=f"Update a {model.pascal} by {ctx.instance.pk}.",
+            doc=f"Update a {model.pascal} by {resource.pk}.",
             request_schema=request_schema,
         )
 
         yield TestCase(
             op_name="update",
             method="patch",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             status_success=200,
             status_not_found=404,
             status_invalid=422,

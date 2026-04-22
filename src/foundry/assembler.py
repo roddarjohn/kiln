@@ -68,18 +68,27 @@ def _scoped_ctx(
     store: BuildStore,
     instance_id: str,
 ) -> RenderCtx:
-    """Return a :class:`RenderCtx` carrying the current scope instance.
+    """Return a :class:`RenderCtx` carrying every ancestor instance.
 
-    Looks up the scope-instance object and attaches it to
-    ``ctx.extras`` under the scope name (derived from the id) so
-    renderers can read the originating config object without
-    walking the full tree.
+    Attaches the current scope instance and every ancestor (keyed
+    by scope name) to ``ctx.extras``, so a renderer at
+    ``operation`` scope can read ``ctx.extras["resource"]``,
+    ``ctx.extras["app"]`` etc. without walking the store itself.
     """
+    extras = dict(ctx.extras)
+
     instance = store.get_instance(instance_id)
-    if instance is None:
-        return ctx
-    scope_name = store.scope_of(instance_id).name
-    return replace(ctx, extras={**ctx.extras, scope_name: instance})
+    if instance is not None:
+        extras[store.scope_of(instance_id).name] = instance
+
+    for scope in store.scope_tree:
+        if scope.name in extras or scope.name == "project":
+            continue
+        ancestor = store.ancestor_of(instance_id, scope.name)
+        if ancestor is not None:
+            extras[scope.name] = ancestor
+
+    return replace(ctx, extras=extras)
 
 
 def _merge_fragments(

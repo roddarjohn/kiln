@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -25,7 +25,12 @@ class CreateRoute(RouteHandler):
     """Route handler emitted by the :class:`Create` operation."""
 
 
-@operation("create", scope="resource", requires=["list"])
+@operation(
+    "create",
+    scope="operation",
+    dispatch_on="name",
+    requires=["list"],
+)
 class Create:
     """POST / -- create a new resource."""
 
@@ -33,13 +38,13 @@ class Create:
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for POST /.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"create"`` operation entry.
             options: Parsed :class:`FieldsOptions`.
 
         Yields:
@@ -47,7 +52,11 @@ class Create:
             and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        _, model = Name.from_dotted(resource.model)
         request_schema = model.suffixed("CreateRequest")
 
         yield SchemaClass(

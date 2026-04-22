@@ -6,12 +6,8 @@ import pytest
 from pydantic import BaseModel, Field
 
 from foundry import Engine, Scoped, operation
-from foundry.engine import (
-    _allowed_ops,
-    _find_op_options,
-    _resolve_options,
-)
-from foundry.operation import EmptyOptions, OperationMeta, OperationRegistry
+from foundry.engine import _resolve_options
+from foundry.operation import EmptyOptions, OperationRegistry
 from foundry.outputs import RouteHandler, StaticFile
 
 # -------------------------------------------------------------------
@@ -93,8 +89,7 @@ def test_resolve_options_default():
     class Op:
         pass
 
-    meta = OperationMeta(name="test_op", scope="resource")
-    opts = _resolve_options(meta, Op, object())
+    opts = _resolve_options(Op, object())
     assert isinstance(opts, EmptyOptions)
 
 
@@ -103,8 +98,7 @@ def test_resolve_options_custom():
         class Options(BaseModel):
             count: int = 5
 
-    meta = OperationMeta(name="test_op2", scope="resource")
-    opts = _resolve_options(meta, Op, object())
+    opts = _resolve_options(Op, object())
     assert opts.count == 5
 
 
@@ -116,8 +110,7 @@ def test_resolve_options_from_instance():
     class Inst(BaseModel):
         options: dict = {"count": 10}
 
-    meta = OperationMeta(name="test_op3", scope="resource")
-    opts = _resolve_options(meta, Op, Inst())
+    opts = _resolve_options(Op, Inst())
     assert opts.count == 10
 
 
@@ -247,73 +240,6 @@ def test_engine_build_accepts_ops_across_all_discovered_scopes():
 
 
 # -------------------------------------------------------------------
-# _allowed_ops
-# -------------------------------------------------------------------
-
-
-def test_allowed_ops_none_when_no_operations():
-    class Item(BaseModel):
-        name: str
-
-    assert _allowed_ops(Item(name="x")) is None
-
-
-def test_allowed_ops_from_string_list():
-    class Item(BaseModel):
-        operations: list[str] = []
-
-    result = _allowed_ops(Item(operations=["get", "list"]))
-    assert result == {"get", "list"}
-
-
-def test_allowed_ops_from_objects():
-    class OpEntry(BaseModel):
-        name: str
-
-    class Item(BaseModel):
-        operations: list[str | OpEntry] = []
-
-    result = _allowed_ops(Item(operations=["get", OpEntry(name="create")]))
-    assert result == {"get", "create"}
-
-
-# -------------------------------------------------------------------
-# _find_op_options
-# -------------------------------------------------------------------
-
-
-def test_find_op_options_found():
-    class OpEntry(BaseModel):
-        name: str
-
-        @property
-        def options(self):
-            return {"count": 10}
-
-    class Item(BaseModel):
-        operations: list[str | OpEntry] = []
-
-    item = Item(operations=["get", OpEntry(name="create")])
-    result = _find_op_options(item, "create")
-    assert result == {"count": 10}
-
-
-def test_find_op_options_not_found():
-    class Item(BaseModel):
-        operations: list[str] = []
-
-    item = Item(operations=["get", "list"])
-    assert _find_op_options(item, "create") is None
-
-
-def test_find_op_options_no_operations():
-    class Item(BaseModel):
-        name: str
-
-    assert _find_op_options(Item(name="x"), "get") is None
-
-
-# -------------------------------------------------------------------
 # Engine: operation filtering
 # -------------------------------------------------------------------
 
@@ -402,43 +328,40 @@ def test_engine_after_children_at_any_scope():
     assert call_order == ["pre:x", "post:x"]
 
 
-def test_engine_filters_by_allowed_ops():
-    """Only operations in the instance's list run."""
+def test_engine_dispatches_by_name():
+    """``dispatch_on="name"`` runs each op only on the matching instance."""
 
-    class FilterResource(BaseModel):
+    class Entry(BaseModel):
         name: str
-        operations: list[str] = Field(default_factory=list)
 
-    class FilterConfig(BaseModel):
-        resources: Annotated[list[FilterResource], Scoped(name="resource")] = (
-            Field(default_factory=list)
+    class Host(BaseModel):
+        entries: Annotated[list[Entry], Scoped(name="entry")] = Field(
+            default_factory=list,
         )
 
-    config = FilterConfig(
-        resources=[
-            FilterResource(
-                name="user",
-                operations=["get"],
-            )
-        ]
-    )
-    registry = OperationRegistry()
-    _register_get(registry)
-    _register_list(registry)
+    class Cfg(BaseModel):
+        hosts: Annotated[list[Host], Scoped(name="host")] = Field(
+            default_factory=list,
+        )
 
+    registry = OperationRegistry()
+
+    @operation("alpha", scope="entry", dispatch_on="name", registry=registry)
+    class Alpha:
+        def build(self, _ctx, _options):
+            return [RouteHandler(method="GET", path="/", function_name="alpha")]
+
+    @operation("beta", scope="entry", dispatch_on="name", registry=registry)
+    class Beta:
+        def build(self, _ctx, _options):
+            return [RouteHandler(method="GET", path="/", function_name="beta")]
+
+    config = Cfg(
+        hosts=[Host(entries=[Entry(name="alpha"), Entry(name="beta")])]
+    )
     store = Engine(registry=registry).build(config)
 
-    get_handlers = [
-        item
-        for _iid, op, items in store.entries()
-        if op == "get"
-        for item in items
-    ]
-    list_handlers = [
-        item
-        for _iid, op, items in store.entries()
-        if op == "list"
-        for item in items
-    ]
-    assert len(get_handlers) == 1
-    assert len(list_handlers) == 0
+    names = {h.function_name for h in store.get_by_type(RouteHandler)}
+    assert names == {"alpha", "beta"}
+    # Each op fires exactly once, on the entry whose name matches it.
+    assert len(store.get_by_type(RouteHandler)) == 2

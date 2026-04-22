@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -25,45 +25,54 @@ class DeleteRoute(RouteHandler):
     """Route handler emitted by the :class:`Delete` operation."""
 
 
-@operation("delete", scope="resource", requires=["update"])
+@operation(
+    "delete",
+    scope="operation",
+    dispatch_on="name",
+    requires=["update"],
+)
 class Delete:
     """DELETE /{pk} -- delete a resource."""
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         _options: EmptyOptions,
     ) -> Iterable[object]:
         """Produce output for DELETE /{pk}.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"delete"`` operation entry.
             _options: Unused.
 
         Yields:
             The route handler and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        _, model = Name.from_dotted(resource.model)
 
         yield DeleteRoute(
             method="DELETE",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             function_name=f"delete_{model.lower}",
             params=[
                 RouteParam(
-                    name=ctx.instance.pk,
-                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                    name=resource.pk,
+                    annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
             status_code=204,
-            doc=f"Delete a {model.pascal} by {ctx.instance.pk}.",
+            doc=f"Delete a {model.pascal} by {resource.pk}.",
         )
 
         yield TestCase(
             op_name="delete",
             method="delete",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             status_success=204,
             status_not_found=404,
         )

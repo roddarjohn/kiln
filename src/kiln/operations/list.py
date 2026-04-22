@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
 @dataclass
@@ -36,7 +36,7 @@ class ListRoute(RouteHandler):
     """Route handler emitted by the :class:`List` operation."""
 
 
-@operation("list", scope="resource", requires=["get"])
+@operation("list", scope="operation", dispatch_on="name", requires=["get"])
 class List:
     """GET / -- list all resources."""
 
@@ -50,13 +50,13 @@ class List:
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: Options,
     ) -> Iterable[object]:
         """Produce output for GET /.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"list"`` operation entry.
             options: Parsed ``Options``.
 
         Yields:
@@ -64,7 +64,11 @@ class List:
             route handler, and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        _, model = Name.from_dotted(resource.model)
         schema = _construct_response_schema(
             model, options.fields, suffix="ListItem"
         )
