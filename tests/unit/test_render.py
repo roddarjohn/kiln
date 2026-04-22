@@ -4,13 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from foundry.render import (
-    BuildStore,
-    FileFragment,
-    RenderCtx,
-    RenderRegistry,
-)
+from foundry.render import FileFragment, RenderCtx, RenderRegistry
 from foundry.scope import PROJECT, Scope, ScopeTree
+from foundry.store import BuildStore
 
 # -------------------------------------------------------------------
 # RenderRegistry
@@ -27,10 +23,10 @@ def test_renders_decorator_registers():
 
     @reg.renders(int)
     def render_int(_obj, _ctx):
-        return _frag("int")
+        yield _frag("int")
 
-    assert reg.has_renderer(int)
-    assert not reg.has_renderer(str)
+    assert int in reg._entries
+    assert str not in reg._entries
 
 
 def test_render_calls_registered_fn():
@@ -40,14 +36,14 @@ def test_render_calls_registered_fn():
 
     @reg.renders(int)
     def render_int(obj, _ctx):
-        return _frag(f"value={obj}")
+        yield _frag(f"value={obj}")
 
     result = reg.render(42, ctx)
     assert len(result) == 1
     assert result[0].template == "value=42"
 
 
-def test_render_normalizes_list_return():
+def test_render_accepts_list_return():
     reg = RenderRegistry()
     env = MagicMock()
     ctx = RenderCtx(env=env, config={})
@@ -72,47 +68,6 @@ def test_render_no_renderer_raises():
 # -------------------------------------------------------------------
 # BuildStore
 # -------------------------------------------------------------------
-
-
-def test_store_add_and_get():
-    store = BuildStore()
-    store.add("user", "get", "handler1")
-    assert store.get("user", "get") == ["handler1"]
-
-
-def test_store_get_empty():
-    store = BuildStore()
-    assert store.get("user", "get") == []
-
-
-def test_store_add_multiple():
-    store = BuildStore()
-    store.add("user", "get", "a", "b")
-    store.add("user", "get", "c")
-    assert store.get("user", "get") == ["a", "b", "c"]
-
-
-def test_store_get_by_instance():
-    store = BuildStore()
-    store.add("user", "get", "h1")
-    store.add("user", "list", "h2")
-    store.add("post", "get", "h3")
-    assert set(store.get_by_instance("user")) == {"h1", "h2"}
-
-
-def test_store_get_by_type():
-    store = BuildStore()
-    store.add("user", "get", 1, "a")
-    store.add("user", "list", 2, "b")
-    ints = store.get_by_type(int)
-    assert set(ints) == {1, 2}
-
-
-def test_store_all_items():
-    store = BuildStore()
-    store.add("user", "get", "a")
-    store.add("main", "router", "b")
-    assert set(store.all_items()) == {"a", "b"}
 
 
 def test_store_entries_iter():
@@ -199,7 +154,7 @@ def test_store_children_dedupes_repeat_registration():
     assert store.children(app_id) == [(f"{app_id}.resources.0", "A")]
 
 
-def test_store_descendants_of_type_filters_and_returns_items():
+def test_store_outputs_under_filters_by_type():
     store = BuildStore(scope_tree=_SCOPE_TREE)
     app_id = "project.apps.0"
     res_a = f"{app_id}.resources.0"
@@ -210,11 +165,5 @@ def test_store_descendants_of_type_filters_and_returns_items():
     store.add(res_a, "get", 1, "skip_me")
     store.add(res_b, "get", "skip_me_too")
 
-    result = store.descendants_of_type(
-        app_id,
-        int,
-        child_scope="resource",
-    )
-
-    # Only resource A has an int output; B has only strings.
-    assert result == [(res_a, "A", [1])]
+    # Only ``1`` is an int anywhere under app_id.
+    assert store.outputs_under(app_id, int) == [1]

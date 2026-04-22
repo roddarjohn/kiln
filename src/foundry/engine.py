@@ -8,7 +8,7 @@ a set of operations, and a render registry, it:
 3. Topologically sorts operations within each scope.
 4. Walks the config tree recursively, invoking each operation's
    ``build`` method at the appropriate scope level.
-5. Collects output into a :class:`~foundry.render.BuildStore`.
+5. Collects output into a :class:`~foundry.store.BuildStore`.
 6. Returns the store for a downstream assembler to render.
 
 The engine does *not* render output to files -- that belongs
@@ -28,8 +28,8 @@ from foundry.operation import (
     OperationRegistry,
     load_default_registry,
 )
-from foundry.render import BuildStore
 from foundry.scope import PROJECT, Scope, ScopeTree, discover_scopes
+from foundry.store import BuildStore
 
 
 @dataclass
@@ -96,7 +96,7 @@ class Engine:
             config: The project config model instance.
 
         Returns:
-            An :class:`~foundry.render.BuildStore` containing
+            An :class:`~foundry.store.BuildStore` containing
             all objects produced by operations.
 
         """

@@ -358,8 +358,8 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
 
 
 @registry.renders(StaticFile)
-def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> FileFragment:
-    return FileFragment(
+def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
+    yield FileFragment(
         path=sf.path,
         template=sf.template,
         context=dict(sf.context),

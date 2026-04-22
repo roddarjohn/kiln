@@ -16,8 +16,8 @@ from foundry.outputs import (
     StaticFile,
     TestCase,
 )
-from foundry.render import BuildStore
 from foundry.scope import PROJECT, Scope, ScopeTree
+from foundry.store import BuildStore
 from kiln.config.schema import (
     App,
     AppConfig,

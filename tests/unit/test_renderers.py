@@ -17,14 +17,10 @@ from foundry.outputs import (
     StaticFile,
     TestCase,
 )
-from foundry.render import (
-    BuildStore,
-    FileFragment,
-    RenderCtx,
-    SnippetFragment,
-)
+from foundry.render import FileFragment, RenderCtx, SnippetFragment
 from foundry.render import registry as shared_registry
 from foundry.scope import discover_scopes
+from foundry.store import BuildStore
 from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
 from kiln.operations.renderers import (
     _render_handler_string,
@@ -200,11 +196,11 @@ def test_render_enum_class_string():
 
 
 def test_registry_has_all_types(registry):
-    assert registry.has_renderer(SchemaClass)
-    assert registry.has_renderer(EnumClass)
-    assert registry.has_renderer(RouteHandler)
-    assert registry.has_renderer(StaticFile)
-    assert registry.has_renderer(TestCase)
+    assert SchemaClass in registry._entries
+    assert EnumClass in registry._entries
+    assert RouteHandler in registry._entries
+    assert StaticFile in registry._entries
+    assert TestCase in registry._entries
 
 
 def test_registry_static_file_fragment(registry):

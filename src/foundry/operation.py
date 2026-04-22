@@ -184,10 +184,10 @@ def operation(  # noqa: PLR0913
 
     Operations can also modify earlier operations' outputs by
     inspecting :attr:`BuildContext.store` and mutating the
-    objects returned by :meth:`BuildStore.get_by_type` or
-    friends in place.  Combined with ``requires`` for ordering
-    and ``when`` for activation, a single operation mechanism
-    covers both "produce" and "augment" roles.
+    objects returned by :meth:`BuildStore.outputs_under` in
+    place.  Combined with ``requires`` for ordering and ``when``
+    for activation, a single operation mechanism covers both
+    "produce" and "augment" roles.
 
     Args:
         name: Unique operation name.

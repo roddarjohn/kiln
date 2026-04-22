@@ -38,9 +38,10 @@ from foundry.outputs import (
     TestCase,
 )
 from foundry.pipeline import generate
-from foundry.render import BuildStore, RenderCtx, RenderRegistry
+from foundry.render import RenderCtx, RenderRegistry
 from foundry.scope import PROJECT, Scope, Scoped, discover_scopes
 from foundry.spec import FileSpec, GeneratedFile, wire_exports
+from foundry.store import BuildStore
 from foundry.target import Target, discover_targets
 
 __all__ = [

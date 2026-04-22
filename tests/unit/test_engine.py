@@ -124,9 +124,8 @@ def test_engine_build_project_scope():
     _register_scaffold(registry)
 
     store = Engine(registry=registry).build(ProjectConfig())
-    items = store.get("project", "scaffold")
+    items = store.outputs_under("project", StaticFile)
     assert len(items) == 1
-    assert isinstance(items[0], StaticFile)
 
 
 def test_engine_build_resource_scope():
@@ -140,7 +139,7 @@ def test_engine_build_resource_scope():
     )
 
     store = Engine(registry=registry).build(config)
-    handlers = store.get_by_type(RouteHandler)
+    handlers = store.outputs_under("project", RouteHandler)
     names = {h.function_name for h in handlers}
     assert names == {"get_user", "get_post"}
 
@@ -152,15 +151,15 @@ def test_engine_build_multiple_scopes():
     config = ProjectConfig(resources=[ResourceConfig(name="user")])
 
     store = Engine(registry=registry).build(config)
-    assert len(store.get_by_type(StaticFile)) == 1
-    assert len(store.get_by_type(RouteHandler)) == 1
+    assert len(store.outputs_under("project", StaticFile)) == 1
+    assert len(store.outputs_under("project", RouteHandler)) == 1
 
 
 def test_engine_empty_operations():
     engine = Engine(registry=OperationRegistry())
     config = ProjectConfig()
     store = engine.build(config)
-    assert store.all_items() == []
+    assert list(store.entries()) == []
 
 
 def test_engine_unknown_scope_raises():
@@ -204,7 +203,7 @@ def test_engine_respects_dependency_order():
         def build(self, ctx, _options):
             call_order.append("second")
             # Can see first's output in the store.
-            earlier = ctx.store.get(ctx.instance_id, "first")
+            earlier = ctx.store.outputs_under(ctx.instance_id, RouteHandler)
             assert len(earlier) == 1
             return []
 
@@ -219,7 +218,7 @@ def test_engine_build_returns_empty_for_empty_scope():
     _register_get(registry)
 
     store = Engine(registry=registry).build(ProjectConfig(resources=[]))
-    assert store.all_items() == []
+    assert list(store.entries()) == []
 
 
 def test_engine_build_accepts_ops_across_all_discovered_scopes():
@@ -235,8 +234,8 @@ def test_engine_build_accepts_ops_across_all_discovered_scopes():
     # Builds without validate_scopes raising, proving "project" and
     # "resource" scopes were both discovered from the config tree.
     store = Engine(registry=registry).build(config)
-    assert len(store.get_by_type(StaticFile)) == 1
-    assert len(store.get_by_type(RouteHandler)) == 1
+    assert len(store.outputs_under("project", StaticFile)) == 1
+    assert len(store.outputs_under("project", RouteHandler)) == 1
 
 
 # -------------------------------------------------------------------
@@ -270,7 +269,7 @@ def test_engine_after_children_sees_child_output():
     class Aggregator:
         def build(self, ctx, _options):
             call_order.append("aggregator")
-            handlers = ctx.store.get_by_type(RouteHandler)
+            handlers = ctx.store.outputs_under("project", RouteHandler)
             names = sorted(h.function_name for h in handlers)
             return [
                 StaticFile(
@@ -292,7 +291,7 @@ def test_engine_after_children_sees_child_output():
     assert call_order[-1] == "aggregator"
     assert {"child:user", "child:post"}.issubset(call_order[:-1])
 
-    agg_items = store.get("project", "aggregator")
+    agg_items = store.outputs_under("project", StaticFile)
     assert len(agg_items) == 1
     assert agg_items[0].context["handlers"] == ["handler_post", "handler_user"]
 
@@ -361,7 +360,8 @@ def test_engine_dispatches_by_name():
     )
     store = Engine(registry=registry).build(config)
 
-    names = {h.function_name for h in store.get_by_type(RouteHandler)}
+    handlers = store.outputs_under("project", RouteHandler)
+    names = {h.function_name for h in handlers}
     assert names == {"alpha", "beta"}
     # Each op fires exactly once, on the entry whose name matches it.
-    assert len(store.get_by_type(RouteHandler)) == 2
+    assert len(store.outputs_under("project", RouteHandler)) == 2

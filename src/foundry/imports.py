@@ -80,6 +80,13 @@ class ImportCollector:
             for name in names:
                 self._from[module_name][name] = None
 
+    def __or__(self, other: ImportCollector) -> ImportCollector:
+        """Return a new collector with imports from both operands."""
+        combined = ImportCollector()
+        combined.update(other=self)
+        combined.update(other=other)
+        return combined
+
     def block(self) -> str:
         """Return all imports as a single string block.
 
