@@ -54,22 +54,6 @@ class SchemaClass:
     validators: list[str] = field(default_factory=list)
     doc: str | None = None
 
-    def add_field(
-        self,
-        name: str,
-        py_type: str,
-        *,
-        optional: bool = False,
-    ) -> None:
-        """Append a field."""
-        self.fields.append(
-            Field(
-                name=name,
-                py_type=py_type,
-                optional=optional,
-            )
-        )
-
 
 @dataclass
 class EnumClass:
@@ -91,6 +75,11 @@ class RouteHandler:
 
     Produced by CRUD and action operations.  The assembler
     collects all handlers for a resource into one route file.
+
+    The renderer builds the handler's body via :attr:`body_template`
+    rendered with :attr:`body_context`; ops that carry the body
+    inline set :attr:`body_lines` instead and leave
+    :attr:`body_template` ``None``.
     """
 
     method: str
@@ -104,22 +93,12 @@ class RouteHandler:
     status_code: int | None = None
     return_type: str | None = None
     body_lines: list[str] = field(default_factory=list)
+    body_template: str | None = None
+    body_context: dict[str, object] = field(default_factory=dict)
     decorators: list[str] = field(default_factory=list)
     doc: str | None = None
     extra_deps: list[str] = field(default_factory=list)
     extra_imports: list[tuple[str, str]] = field(default_factory=list)
-
-    def add_decorator(self, decorator: str) -> None:
-        """Append a decorator to the handler."""
-        self.decorators.append(decorator)
-
-    def prepend_body(self, line: str) -> None:
-        """Insert a line at the start of the function body."""
-        self.body_lines.insert(0, line)
-
-    def append_body(self, line: str) -> None:
-        """Append a line to the function body."""
-        self.body_lines.append(line)
 
 
 @dataclass

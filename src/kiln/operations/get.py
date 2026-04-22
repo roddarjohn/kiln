@@ -2,39 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
-from foundry.render import registry
 from kiln._helpers import PYTHON_TYPES
-from kiln.operations._render import (
-    _response_schema_name,
-    build_handler_fragment,
-    utils_imports,
-)
 from kiln.operations._shared import (
     FieldsOptions,
     _construct_response_schema,
     _construct_serializer,
 )
+from kiln.operations.renderers import utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from foundry.render import Fragment, RenderCtx
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import OperationConfig, ResourceConfig
 
 
-@dataclass
-class GetRoute(RouteHandler):
-    """Route handler emitted by the :class:`Get` operation."""
-
-
-@operation("get", scope="resource")
+@operation("get", scope="operation", dispatch_on="name")
 class Get:
     """GET /{pk} -- retrieve a single resource."""
 
@@ -42,13 +30,13 @@ class Get:
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[OperationConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for GET /{pk}.
 
         Args:
-            ctx: Build context with resource config.
+            ctx: Build context for the ``"get"`` operation entry.
             options: Parsed :class:`FieldsOptions`.
 
         Yields:
@@ -56,7 +44,11 @@ class Get:
             route handler, and a test case.
 
         """
-        _, model = Name.from_dotted(ctx.instance.model)
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+        _, model = Name.from_dotted(resource.model)
 
         schema = _construct_response_schema(
             model, options.fields, suffix="Resource"
@@ -66,41 +58,29 @@ class Get:
         yield schema
         yield serializer
 
-        yield GetRoute(
+        yield RouteHandler(
             method="GET",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             function_name=f"get_{model.lower}",
             params=[
                 RouteParam(
-                    name=ctx.instance.pk,
-                    annotation=PYTHON_TYPES[ctx.instance.pk_type],
+                    name=resource.pk,
+                    annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
             response_model=schema.name,
             serializer_fn=serializer.function_name,
             return_type=schema.name,
-            doc=f"Get a {model.pascal} by {ctx.instance.pk}.",
+            doc=f"Get a {model.pascal} by {resource.pk}.",
+            body_template="fastapi/ops/get.py.j2",
+            extra_imports=[("sqlalchemy", "select"), *utils_imports()],
         )
 
         yield TestCase(
             op_name="get",
             method="get",
-            path=f"/{{{ctx.instance.pk}}}",
+            path=f"/{{{resource.pk}}}",
             status_success=200,
             status_not_found=404,
             response_schema=schema.name,
         )
-
-
-@registry.renders(GetRoute)
-def _render(handler: GetRoute, ctx: RenderCtx) -> Fragment:
-    return build_handler_fragment(
-        handler,
-        ctx,
-        body_template="fastapi/ops/get.py.j2",
-        body_extra={
-            "response_schema": _response_schema_name(handler),
-            "serializer_fn": handler.serializer_fn,
-        },
-        extra_imports=[("sqlalchemy", "select"), *utils_imports()],
-    )

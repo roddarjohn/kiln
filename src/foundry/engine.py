@@ -8,7 +8,7 @@ a set of operations, and a render registry, it:
 3. Topologically sorts operations within each scope.
 4. Walks the config tree recursively, invoking each operation's
    ``build`` method at the appropriate scope level.
-5. Collects output into a :class:`~foundry.render.BuildStore`.
+5. Collects output into a :class:`~foundry.store.BuildStore`.
 6. Returns the store for a downstream assembler to render.
 
 The engine does *not* render output to files -- that belongs
@@ -18,18 +18,18 @@ to framework-specific assemblers in the ``kiln`` package.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
 from foundry.operation import (
     EmptyOptions,
-    discover_operations,
-    get_operation_meta,
-    topological_sort,
+    OperationEntry,
+    OperationRegistry,
+    load_default_registry,
 )
-from foundry.render import BuildStore
-from foundry.scope import PROJECT, Scope, discover_scopes
+from foundry.scope import PROJECT, Scope, ScopeTree, discover_scopes
+from foundry.store import BuildStore
 
 
 @dataclass
@@ -69,21 +69,17 @@ class Engine:
     """Orchestrates the build phase of code generation.
 
     Attributes:
-        operations: Operation classes decorated with
-            ``@operation``.  Defaults to every class registered
-            under the ``foundry.operations`` entry-point group
-            (see :func:`~foundry.operation.discover_operations`),
-            so production callers just write ``Engine()``.  Tests
-            override this to run a curated subset.
-        scopes: Discovered scopes (auto-populated from
-            config if not provided).
+        registry: :class:`~foundry.operation.OperationRegistry`
+            holding the ops to run.  Defaults to the populated
+            :data:`~foundry.operation.DEFAULT_REGISTRY`; tests
+            pass an isolated registry to keep their ops out of
+            the global one.
         package_prefix: Dotted prefix for generated imports,
             forwarded to every :class:`BuildContext`.
 
     """
 
-    operations: list[type] = field(default_factory=discover_operations)
-    scopes: list[Scope] = field(default_factory=list)
+    registry: OperationRegistry = field(default_factory=load_default_registry)
     package_prefix: str = ""
 
     def build(self, config: BaseModel) -> BuildStore:
@@ -100,404 +96,206 @@ class Engine:
             config: The project config model instance.
 
         Returns:
-            An :class:`~foundry.render.BuildStore` containing
+            An :class:`~foundry.store.BuildStore` containing
             all objects produced by operations.
 
         """
-        if not self.scopes:
-            self.scopes = discover_scopes(type(config))
+        scope_tree = discover_scopes(type(config))
+        self.registry.validate_scopes({scope.name for scope in scope_tree})
 
-        _validate_ops(self.operations, self.scopes)
-
-        pre_ops, post_ops = _group_and_sort(self.operations, self.scopes)
         state = _WalkState(
             config=config,
-            store=BuildStore(),
-            pre_ops=pre_ops,
-            post_ops=post_ops,
-            children_of=_index_children(self.scopes),
+            store=BuildStore(scope_tree=scope_tree),
+            ops=self.registry.sorted_by_scope(),
+            scope_tree=scope_tree,
             package_prefix=self.package_prefix,
         )
-        self._visit(PROJECT, config, state)
+
+        # Bootstrap the project root; every descendant flows
+        # through _visit recursively.
+        _visit(
+            scope=PROJECT,
+            instance_config=config,
+            instance_id="project",
+            parent_id=None,
+            state=state,
+        )
+
         return state.store
-
-    def _visit(
-        self,
-        scope: Scope,
-        parent_instance: object,
-        state: _WalkState,
-        parent_iid: str = "",
-    ) -> None:
-        """Recursively walk *scope* and its descendants.
-
-        Instance IDs are compounded with ``/`` across non-root
-        ancestors so sibling scope trees can't collide on a bare
-        base ID.  For example, an ``article`` resource nested
-        under the ``blog`` app lands in the store under
-        ``("resource", "blog/article")``.  The project scope is
-        excluded from the prefix — its ID ``"project"`` would add
-        noise to every descendant without disambiguating anything.
-
-        Args:
-            scope: The scope currently being walked.
-            parent_instance: The instance from which to resolve
-                this scope's items (for the root, this is the
-                project config itself).
-            state: Shared walk state — config, store, op groups,
-                and the child-scope index.
-            parent_iid: The compounded instance ID of the
-                enclosing scope, or ``""`` when the parent is the
-                project root (no prefixing).
-
-        """
-        for own_iid, inst_obj in _resolve_instances(scope, parent_instance):
-            full_iid = f"{parent_iid}/{own_iid}" if parent_iid else own_iid
-            state.store.register_instance(scope.name, full_iid, inst_obj)
-            ctx = BuildContext(
-                config=state.config,
-                scope=scope,
-                instance=inst_obj,
-                instance_id=full_iid,
-                store=state.store,
-                package_prefix=state.package_prefix,
-            )
-            _run_ops(state.pre_ops.get(scope.name, []), ctx)
-            next_parent = "" if scope is PROJECT else full_iid
-            for child in state.children_of.get(scope.name, []):
-                self._visit(child, inst_obj, state, parent_iid=next_parent)
-            _run_ops(state.post_ops.get(scope.name, []), ctx)
 
 
 @dataclass
 class _WalkState:
-    """Constants threaded through every recursive :meth:`Engine._visit`."""
+    """Constants threaded through every recursive :func:`_visit`."""
 
     config: BaseModel
     store: BuildStore
-    pre_ops: dict[str, list[type]]
-    post_ops: dict[str, list[type]]
-    children_of: dict[str, list[Scope]]
+    ops: dict[str, list[OperationEntry]]
+    scope_tree: ScopeTree
     package_prefix: str
 
 
-def _index_children(scopes: list[Scope]) -> dict[str, list[Scope]]:
-    """Group scopes by their parent's name.
+def _visit(
+    scope: Scope,
+    instance_config: BaseModel,
+    instance_id: str,
+    parent_id: str | None,
+    state: _WalkState,
+) -> None:
+    """Register one scope instance and recurse into its child scopes.
+
+    Instance IDs are dot-joined paths that mirror the config
+    structure — ``"project"`` at the root, then ``config_key.index``
+    segments for each descendant level.  A resource at index 2
+    under app at index 0 lands at
+    ``"project.apps.0.resources.2"``, so the scope tree is
+    recoverable from the id by matching each config_key back to
+    its :class:`~foundry.scope.Scope`.
 
     Args:
-        scopes: All discovered scopes.
-
-    Returns:
-        Mapping from parent scope name to the list of its
-        direct child scopes, in discovery order.
-
-    """
-    out: dict[str, list[Scope]] = {}
-    for s in scopes:
-        if s.parent is None:
-            continue
-        out.setdefault(s.parent.name, []).append(s)
-    return out
-
-
-def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
-    """Raise if any operation has missing or unknown metadata.
-
-    Args:
-        operations: Operation classes to validate.
-        scopes: Discovered scopes.
-
-    Raises:
-        ValueError: If an operation has no metadata or targets
-            an unknown scope.
+        scope: The scope this instance belongs to.
+        instance_config: The pydantic config object for this instance.
+        instance_id: Pre-compounded dot-path id for this instance.
+        parent_id: Id of the enclosing scope instance, or ``None``
+            for the project root.
+        state: Walk state shared across the recursion.
 
     """
-    names = {s.name for s in scopes}
+    state.store.register_instance(
+        instance_id,
+        instance_config,
+        parent=parent_id,
+    )
 
-    for op_cls in operations:
-        meta = get_operation_meta(op_cls)
+    ctx = BuildContext(
+        config=state.config,
+        scope=scope,
+        instance=instance_config,
+        instance_id=instance_id,
+        store=state.store,
+        package_prefix=state.package_prefix,
+    )
 
-        if meta is None:
-            msg = f"{op_cls} has no @operation metadata"
-            raise ValueError(msg)
+    ops = state.ops.get(scope.name, [])
+    _run_ops(ops, ctx, after_children=False)
 
-        if meta.scope not in names:
-            msg = (
-                f"Operation '{meta.name}' targets "
-                f"scope '{meta.scope}' which was not "
-                f"discovered from the config"
+    for child_scope in state.scope_tree.children_of(scope):
+        for own_id, child_config in _configs_for_scope(
+            scope=child_scope,
+            parent_config=instance_config,
+        ):
+            _visit(
+                scope=child_scope,
+                instance_config=child_config,
+                instance_id=f"{instance_id}.{own_id}",
+                parent_id=instance_id,
+                state=state,
             )
-            raise ValueError(msg)
 
-
-def _group_and_sort(
-    operations: list[type],
-    scopes: list[Scope],
-) -> tuple[dict[str, list[type]], dict[str, list[type]]]:
-    """Group operations by scope and topologically sort each group.
-
-    Args:
-        operations: All operation classes.
-        scopes: Discovered scopes.
-
-    Returns:
-        A tuple ``(pre_ops, post_ops)``.  Both are maps from
-        scope name to topo-sorted operation classes.  ``pre_ops``
-        covers operations with ``after_children=False``;
-        ``post_ops`` covers operations with ``after_children=True``.
-
-    """
-    pre_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
-    post_by_scope: dict[str, list[type]] = {s.name: [] for s in scopes}
-    for op_cls in operations:
-        meta = get_operation_meta(op_cls)
-        if meta is None:  # pragma: no cover - validated earlier
-            continue
-        bucket = post_by_scope if meta.after_children else pre_by_scope
-        bucket[meta.scope].append(op_cls)
-
-    pre_ops = {
-        name: topological_sort(ops) if ops else []
-        for name, ops in pre_by_scope.items()
-    }
-
-    post_ops = {
-        name: topological_sort(ops) if ops else []
-        for name, ops in post_by_scope.items()
-    }
-
-    return pre_ops, post_ops
+    _run_ops(ops, ctx, after_children=True)
 
 
 def _run_ops(
-    ops: list[type],
+    ops: list[OperationEntry],
     ctx: BuildContext[Any],
+    *,
+    after_children: bool,
 ) -> None:
-    """Execute operations for one scope instance.
+    """Execute the matching phase of operations for one scope instance.
 
     Args:
-        ops: Sorted operation classes.
+        ops: Sorted ``(meta, cls)`` entries for the scope (both
+            phases).
         ctx: Build context for this scope instance.
+        after_children: When ``True``, run only post-phase ops
+            (``meta.after_children=True``); when ``False``, run
+            only pre-phase ops.
 
     """
-    allowed = _allowed_ops(ctx.instance)
-    for op_cls in ops:
-        meta = get_operation_meta(op_cls)
-        if meta is None:  # pragma: no cover
+    for meta, op_cls in ops:
+        if meta.after_children != after_children:
             continue
+
+        # dispatch_on: fire only on the instance whose discriminator
+        # matches this op's name (e.g. OperationConfig.name == "get").
+        if (
+            meta.dispatch_on is not None
+            and getattr(ctx.instance, meta.dispatch_on, None) != meta.name
+        ):
+            continue
+
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
-        has_when = callable(when_method)
-        # An instance's ``operations`` list gates user-facing ops.
-        # Cross-cutting ops that define ``when`` opt-in at runtime
-        # and bypass the explicit list.
-        if not has_when and allowed is not None and meta.name not in allowed:
+        if callable(when_method) and not when_method(ctx):
             continue
-        if has_when and when_method is not None and not when_method(ctx):
-            continue
+
         options = _resolve_options(op_cls, ctx.instance)
+
         ctx.store.add(
-            ctx.scope.name,
             ctx.instance_id,
             meta.name,
             *operation_instance.build(ctx, options),
         )
 
 
-def _resolve_instances(
+def _configs_for_scope(
+    *,
     scope: Scope,
-    parent_instance: object,
-) -> list[tuple[str, object]]:
-    """Yield ``(instance_id, instance_object)`` pairs for *scope*.
+    parent_config: BaseModel,
+) -> list[tuple[str, BaseModel]]:
+    """Yield ``(own_id, scope_config)`` pairs for child *scope*.
 
-    The root (project) scope always returns a single entry with
-    the parent instance itself.  Child scopes walk
-    :attr:`Scope.resolve_path` from *parent_instance* to locate
-    the list of items, then emit one entry per item.
+    Walks :attr:`Scope.resolve_path` from *parent_config* to the
+    scoped ``list[BaseModel]`` field and emits one entry per item.
+    Never called with the project scope — :func:`_visit` handles
+    that root case directly.
 
     Args:
         scope: The scope to enumerate.
-        parent_instance: The parent scope instance from which
+        parent_config: The enclosing scope's config from which
             to resolve this scope's items.
 
     Returns:
-        List of ``(id, object)`` tuples.
+        List of ``(own_id, scope_config)`` tuples, where
+        ``own_id`` is the ``"{config_key}.{index}"`` segment that
+        :func:`_visit` compounds onto the parent's id.
 
     """
-    if scope is PROJECT or scope.parent is None:
-        return [("project", parent_instance)]
+    attr_value: object = parent_config
+    for attr in scope.resolve_path:
+        attr_value = getattr(attr_value, attr)
 
-    path = scope.resolve_path or (scope.config_key,)
-    items = _walk_path(parent_instance, path)
-    if not isinstance(items, list):
-        return []
-    result: list[tuple[str, object]] = []
-    for index, item in enumerate(items):
-        instance_id = _instance_id(item, scope.name, index)
-        result.append((instance_id, item))
-    return result
+    scope_configs = cast("list[BaseModel]", attr_value)
+
+    return [
+        (f"{scope.config_key}.{index}", scope_config)
+        for index, scope_config in enumerate(scope_configs)
+    ]
 
 
-def _walk_path(obj: object, path: tuple[str, ...]) -> object:
-    """Follow dotted attribute *path* from *obj*.
-
-    Args:
-        obj: Starting object.
-        path: Sequence of attribute names to walk.
-
-    Returns:
-        The attribute at the end of the path, or an empty list
-        if any step is missing.
-
-    """
-    cur = obj
-    for attr in path:
-        cur = getattr(cur, attr, None)
-        if cur is None:
-            return []
-    return cur
-
-
-# Back-compat shim for tests that imported the old helper.
-def _scope_instances(
-    config: BaseModel,
-    scope: Scope,
-) -> list[tuple[str, object]]:
-    """Resolve scope instances from the top-level config.
-
-    Only valid for direct children of the project scope (or the
-    project scope itself).  Preserved so existing tests that
-    exercise the helper keep working; production code goes
-    through :func:`_resolve_instances` via the recursive walk.
-    """
-    return _resolve_instances(scope, config)
-
-
-def _instance_id(
-    item: object,
-    scope_name: str,
-    index: int,
-) -> str:
-    """Derive a human-readable instance ID for a scope item.
-
-    Checks ``name`` first, then ``module``, then extracts the
-    class name from a dotted ``model`` path, then falls back to
-    ``{scope}_{index}``.
-
-    Args:
-        item: The config instance.
-        scope_name: Name of the scope (for fallback).
-        index: Position in the list (for fallback).
-
-    Returns:
-        Instance identifier string.
-
-    """
-    name = getattr(item, "name", None)
-    if name:
-        return name
-    module = getattr(item, "module", None)
-    if module and isinstance(module, str):
-        return module
-    model = getattr(item, "model", None)
-    if model and isinstance(model, str):
-        _, _, class_name = model.rpartition(".")
-        return class_name.lower()
-    return f"{scope_name}_{index}"
-
-
-def _resolve_options(
-    op_cls: type,
-    instance: object,
-) -> BaseModel:
+def _resolve_options(op_cls: type, instance: object) -> BaseModel:
     """Build the Options model for an operation.
 
-    If the instance is a Pydantic model with an ``options``
-    field matching the operation's Options class, use that.
-    Otherwise, return a default-constructed Options.
+    If the instance exposes an ``options`` dict (as
+    :class:`~kiln.config.schema.OperationConfig` does via
+    ``model_extra``), those keys populate the Options model.
+    Otherwise a default-constructed Options is returned.
 
     Args:
         op_cls: The operation class.
-        instance: The config instance for this scope.
+        instance: The config instance at the op's scope.
 
     Returns:
         A populated Options model.
 
     """
-    meta = get_operation_meta(op_cls)
     options_cls = getattr(op_cls, "Options", None)
     if options_cls is None:
         return EmptyOptions()
 
-    # Check if instance has an options dict/field we can use.
     if isinstance(instance, BaseModel):
         raw = getattr(instance, "options", None)
         if isinstance(raw, dict):
             return options_cls(**raw)
 
-    # Check instance.operations for a matching entry with options.
-    if meta is not None:
-        raw = _find_op_options(instance, meta.name)
-        if raw:
-            return options_cls(**raw)
-
     return options_cls()
-
-
-def _find_op_options(
-    instance: object,
-    op_name: str,
-) -> dict[str, object] | None:
-    """Find options for a named operation in the instance's list.
-
-    Checks ``instance.operations`` for an entry whose ``name``
-    matches *op_name* and returns its ``options`` dict.
-
-    Args:
-        instance: The config instance for one scope item.
-        op_name: The operation name to find.
-
-    Returns:
-        Options dict, or ``None`` if not found.
-
-    """
-    ops = getattr(instance, "operations", None)
-    if ops is None:
-        return None
-    for entry in ops:
-        if isinstance(entry, str):
-            continue
-        name = getattr(entry, "name", None)
-        if name == op_name:
-            options = getattr(entry, "options", None)
-            if isinstance(options, dict):
-                return options
-    return None
-
-
-def _allowed_ops(instance: object) -> set[str] | None:
-    """Extract allowed operation names from a scope instance.
-
-    If the instance has an ``operations`` field (a list of
-    strings or objects with a ``name`` attribute), returns the
-    set of operation names.  Otherwise returns ``None`` meaning
-    all operations are allowed.
-
-    Args:
-        instance: The config instance for one scope item.
-
-    Returns:
-        Set of operation names, or ``None`` if unrestricted.
-
-    """
-    ops = getattr(instance, "operations", None)
-    if ops is None:
-        return None
-    names: set[str] = set()
-    for entry in ops:
-        if isinstance(entry, str):
-            names.add(entry)
-        else:
-            name = getattr(entry, "name", None)
-            if name:
-                names.add(name)
-    return names

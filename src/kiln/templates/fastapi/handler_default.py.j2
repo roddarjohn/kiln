@@ -1,0 +1,27 @@
+{% for decorator in decorators %}
+{{ decorator }}
+{% endfor %}
+@router.{{ method }}("{{ path }}"{% if response_model %}, response_model={{ response_model }}{% endif %}{% if status_suffix %}, status_code=status.{{ status_suffix }}{% elif status_code %}, status_code={{ status_code }}{% endif %})
+async def {{ function_name }}(
+{% for param in params %}
+    {{ param.name }}: {{ param.annotation }}{% if param.default is not none %} = {{ param.default }}{% endif %},
+{% endfor %}
+{% for dep in extra_deps|default([]) %}
+    {{ dep }}
+{% endfor %}
+{% for param in extra_params|default([]) %}
+    {{ param }}
+{% endfor %}
+) -> {{ return_type }}:
+{% if doc %}
+    """{{ doc }}"""
+{% endif %}
+{% block body %}
+{% if body_lines %}
+{% for line in body_lines %}
+    {{ line }}
+{% endfor %}
+{% else %}
+    pass
+{% endif %}
+{% endblock %}

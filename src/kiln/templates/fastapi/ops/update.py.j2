@@ -1,13 +1,5 @@
-@router.patch("/{{ '{' }}{{ pk_name }}{{ '}' }}")
-async def update_{{ model_lower }}(
-    {{ pk_name }}: {{ pk_py_type }},
-    body: {{ model_name }}UpdateRequest,
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-) -> None:
-    """Update a {{ model_name }}."""
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
@@ -15,3 +7,4 @@ async def update_{{ model_lower }}(
     )
     assert_rowcount(result, detail="{{ model_name }} not found")
     await db.commit()
+{% endblock %}

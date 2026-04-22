@@ -1,37 +1,15 @@
-{% if action.is_object_action %}
-@router.post("/{{ '{' }}{{ pk_name }}{{ '}' }}/{{ action.slug }}", response_model={{ action.response_class }})
-async def {{ action.handler_name }}(
-    {{ pk_name }}: {{ pk_py_type }},
-{% if action.request_class %}
-    body: {{ action.request_class }},
-{% endif %}
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-) -> {{ action.response_class }}:
-    """Execute the {{ action.name }} action on {{ model_name }}."""
-    {{ action.model_param_name }} = await get_object_from_query_or_404(
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+{% if is_object_action %}
+    {{ model_param_name }} = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
-    result = await {{ action.fn_name }}({{ action.model_param_name }}, db=db{% if action.request_class %}, body=body{% endif %})
-    await db.commit()
-    return result
+    result = await {{ fn_name }}({{ model_param_name }}, db=db{% if has_request_body %}, body=body{% endif %})
 {% else %}
-@router.post("/{{ action.slug }}", response_model={{ action.response_class }})
-async def {{ action.handler_name }}(
-{% if action.request_class %}
-    body: {{ action.request_class }},
+    result = await {{ fn_name }}(db=db{% if has_request_body %}, body=body{% endif %})
 {% endif %}
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-) -> {{ action.response_class }}:
-    """Execute the {{ action.name }} collection action."""
-    result = await {{ action.fn_name }}(db=db{% if action.request_class %}, body=body{% endif %})
     await db.commit()
     return result
-{% endif %}
+{% endblock %}

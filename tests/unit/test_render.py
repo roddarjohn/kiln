@@ -4,16 +4,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from foundry.render import BuildStore, Fragment, RenderCtx, RenderRegistry
+from foundry.render import FileFragment, RenderCtx, RenderRegistry
+from foundry.scope import PROJECT, Scope, ScopeTree
+from foundry.store import BuildStore
 
 # -------------------------------------------------------------------
 # RenderRegistry
 # -------------------------------------------------------------------
 
 
-def _frag(tag: str) -> Fragment:
-    """Build a Fragment whose shell_template encodes *tag* for assertions."""
-    return Fragment(path="out.py", shell_template=tag)
+def _frag(tag: str) -> FileFragment:
+    """Build a FileFragment whose template encodes *tag* for assertions."""
+    return FileFragment(path="out.py", template=tag)
 
 
 def test_renders_decorator_registers():
@@ -21,10 +23,10 @@ def test_renders_decorator_registers():
 
     @reg.renders(int)
     def render_int(_obj, _ctx):
-        return _frag("int")
+        yield _frag("int")
 
-    assert reg.has_renderer(int)
-    assert not reg.has_renderer(str)
+    assert int in reg._entries
+    assert str not in reg._entries
 
 
 def test_render_calls_registered_fn():
@@ -34,14 +36,14 @@ def test_render_calls_registered_fn():
 
     @reg.renders(int)
     def render_int(obj, _ctx):
-        return _frag(f"value={obj}")
+        yield _frag(f"value={obj}")
 
     result = reg.render(42, ctx)
     assert len(result) == 1
-    assert result[0].shell_template == "value=42"
+    assert result[0].template == "value=42"
 
 
-def test_render_normalizes_list_return():
+def test_render_accepts_list_return():
     reg = RenderRegistry()
     env = MagicMock()
     ctx = RenderCtx(env=env, config={})
@@ -51,7 +53,7 @@ def test_render_normalizes_list_return():
         return [_frag("a"), _frag("b")]
 
     fragments = reg.render(1, ctx)
-    assert [f.shell_template for f in fragments] == ["a", "b"]
+    assert [f.template for f in fragments] == ["a", "b"]
 
 
 def test_render_no_renderer_raises():
@@ -68,60 +70,100 @@ def test_render_no_renderer_raises():
 # -------------------------------------------------------------------
 
 
-def test_store_add_and_get():
-    store = BuildStore()
-    store.add("resource", "user", "get", "handler1")
-    result = store.get("resource", "user", "get")
-    assert result == ["handler1"]
-
-
-def test_store_get_empty():
-    store = BuildStore()
-    assert store.get("resource", "user", "get") == []
-
-
-def test_store_add_multiple():
-    store = BuildStore()
-    store.add("resource", "user", "get", "a", "b")
-    store.add("resource", "user", "get", "c")
-    assert store.get("resource", "user", "get") == [
-        "a",
-        "b",
-        "c",
-    ]
-
-
-def test_store_get_by_scope():
-    store = BuildStore()
-    store.add("resource", "user", "get", "h1")
-    store.add("resource", "user", "list", "h2")
-    store.add("resource", "post", "get", "h3")
-    result = store.get_by_scope("resource", "user")
-    assert set(result) == {"h1", "h2"}
-
-
-def test_store_get_by_type():
-    store = BuildStore()
-    store.add("resource", "user", "get", 1, "a")
-    store.add("resource", "user", "list", 2, "b")
-    ints = store.get_by_type(int)
-    assert set(ints) == {1, 2}
-
-
-def test_store_all_items():
-    store = BuildStore()
-    store.add("resource", "user", "get", "a")
-    store.add("app", "main", "router", "b")
-    assert set(store.all_items()) == {"a", "b"}
-
-
 def test_store_entries_iter():
     store = BuildStore()
-    store.add("resource", "user", "get", "h1", "h2")
-    store.add("project", "project", "scaffold", "sf")
+    store.add("user", "get", "h1", "h2")
+    store.add("project", "scaffold", "sf")
     tuples = [
-        (scope, instance_id, op_name, items)
-        for scope, instance_id, op_name, items in store.entries()
+        (instance_id, op_name, items)
+        for instance_id, op_name, items in store.entries()
     ]
-    assert ("resource", "user", "get", ["h1", "h2"]) in tuples
-    assert ("project", "project", "scaffold", ["sf"]) in tuples
+    assert ("user", "get", ["h1", "h2"]) in tuples
+    assert ("project", "scaffold", ["sf"]) in tuples
+
+
+# Scope tree used by the store-ancestry tests below.  Mirrors
+# what ``discover_scopes`` would produce for a config with
+# ``apps[*].resources`` and ``apps[*].databases``.
+_APP_SCOPE = Scope(name="app", config_key="apps", parent=PROJECT)
+_RESOURCE_SCOPE = Scope(
+    name="resource", config_key="resources", parent=_APP_SCOPE
+)
+_DATABASE_SCOPE = Scope(
+    name="database", config_key="databases", parent=_APP_SCOPE
+)
+_SCOPE_TREE = ScopeTree([PROJECT, _APP_SCOPE, _RESOURCE_SCOPE, _DATABASE_SCOPE])
+
+
+def test_store_children_returns_registered_children_in_order():
+    store = BuildStore(scope_tree=_SCOPE_TREE)
+    app_id = "project.apps.0"
+    store.register_instance(app_id, "blog_app")
+    store.register_instance(
+        f"{app_id}.resources.0",
+        "A",
+        parent=app_id,
+    )
+    store.register_instance(
+        f"{app_id}.resources.1",
+        "B",
+        parent=app_id,
+    )
+
+    assert store.children(app_id) == [
+        (f"{app_id}.resources.0", "A"),
+        (f"{app_id}.resources.1", "B"),
+    ]
+
+
+def test_store_children_filters_by_scope():
+    store = BuildStore(scope_tree=_SCOPE_TREE)
+    app_id = "project.apps.0"
+    store.register_instance(app_id, "blog_app")
+    store.register_instance(
+        f"{app_id}.resources.0",
+        "A",
+        parent=app_id,
+    )
+    store.register_instance(
+        f"{app_id}.databases.0",
+        "db",
+        parent=app_id,
+    )
+
+    resources = store.children(app_id, child_scope="resource")
+    assert resources == [(f"{app_id}.resources.0", "A")]
+
+
+def test_store_children_dedupes_repeat_registration():
+    """Registering the same instance twice doesn't duplicate the edge."""
+    store = BuildStore(scope_tree=_SCOPE_TREE)
+    app_id = "project.apps.0"
+    store.register_instance(app_id, "blog_app")
+    store.register_instance(
+        f"{app_id}.resources.0",
+        "A",
+        parent=app_id,
+    )
+    store.register_instance(
+        f"{app_id}.resources.0",
+        "A",
+        parent=app_id,
+    )
+
+    assert store.children(app_id) == [(f"{app_id}.resources.0", "A")]
+
+
+def test_store_outputs_under_filters_by_type():
+    store = BuildStore(scope_tree=_SCOPE_TREE)
+    app_id = "project.apps.0"
+    res_a = f"{app_id}.resources.0"
+    res_b = f"{app_id}.resources.1"
+    store.register_instance(app_id, "blog_app")
+    store.register_instance(res_a, "A", parent=app_id)
+    store.register_instance(res_b, "B", parent=app_id)
+    store.add(res_a, "get", 1, "skip_me")
+    store.add(res_b, "get", "skip_me_too")
+
+    # Only ``1`` is an int anywhere under app_id.
+    assert store.outputs_under(app_id, int) == [1]

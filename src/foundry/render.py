@@ -9,15 +9,15 @@ by output path to produce final files.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from foundry.env import render_template
 from foundry.imports import ImportCollector
+from foundry.store import BuildStore
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import jinja2
 
 
@@ -30,50 +30,153 @@ class RenderCtx:
         config: The full project config dict (or model).
         package_prefix: Dotted prefix for generated imports,
             e.g. ``"_generated"``.
-        extras: Per-dispatch extras supplied by the assembler,
-            typically the current scope instance (e.g.
-            ``{"resource": <ResourceConfig>}``) so that renderers
-            can derive paths and imports without the assembler
-            having to know per-type details.
+        language: Target language identifier used to render
+            import blocks (e.g. ``"python"``).  Must match a
+            formatter declared in the ``foundry.import_formatters``
+            entry-point group.
+        store: The build store.  Renderers reach ancestor scope
+            instances through it (e.g. a handler rendered at
+            operation scope looks up its resource via
+            ``store.ancestor_of(instance_id, "resource")``).
+        instance_id: Id of the scope instance whose output is
+            being rendered.  Paired with :attr:`store` for
+            ancestor and self lookups.
 
     """
 
     env: jinja2.Environment
     config: Any
     package_prefix: str = ""
-    extras: Mapping[str, Any] = field(default_factory=dict)
+    language: str = ""
+    store: BuildStore = field(default_factory=BuildStore)
+    instance_id: str = ""
 
 
 @dataclass
-class Fragment:
-    """A single renderer's contribution to one output file.
+class FileFragment:
+    """Declares an output file's wrapper template and scalar context.
 
-    The assembler groups fragments by :attr:`path` and produces
-    the final file by rendering :attr:`shell_template` with a
-    merged :attr:`shell_context`.  Imports from every fragment
-    targeting the same path are unioned.  In the merged context,
-    list-valued entries with the same key are concatenated in
-    fragment order; scalar entries keep the first seen value.
+    One :class:`FileFragment` per output path describes the
+    template the assembler wraps the file in and the non-slot
+    context passed to it.  Every :class:`SnippetFragment`
+    sharing that path contributes a slot-list item that the
+    assembler folds into :attr:`context` before the wrapper is
+    rendered.
+
+    Multiple renderers may emit a :class:`FileFragment` for the
+    same path (e.g. every route handler at the resource declares
+    the route file) — the assembler requires them to agree on
+    :attr:`template` and unifies their :attr:`context` dicts,
+    raising if two disagree on a shared key.
+
+    A blank :attr:`template` is a convention for an empty-content
+    file (e.g. ``__init__.py``).
 
     Attributes:
         path: Output path relative to the output directory.
-        shell_template: Jinja2 template name that wraps the
-            accumulated content (e.g. ``"fastapi/route.py.j2"``).
-        shell_context: Template variables.  List values for the
-            same key across fragments concatenate; scalar values
-            are first-write-wins.
-        imports: Imports this fragment requires; merged with other
-            fragments at assembly time.
+        template: Jinja2 template name that wraps the file.
+        context: Non-slot template variables.  Merged across all
+            FileFragments at this path (shared keys must agree).
+        imports: Imports the wrapper itself needs, on top of any
+            contributed by snippets.
 
     """
 
     path: str
-    shell_template: str
-    shell_context: dict[str, Any] = field(default_factory=dict)
+    template: str
+    context: dict[str, Any] = field(default_factory=dict)
     imports: ImportCollector = field(default_factory=ImportCollector)
 
+    def __or__(self, other: FileFragment) -> FileFragment:
+        """Merge two FileFragments targeting the same path.
 
-_RendererFn = Callable[[Any, RenderCtx], "Fragment | list[Fragment]"]
+        Raises :class:`ValueError` if the two fragments disagree
+        on :attr:`template`, or if any shared :attr:`context` key
+        has two different values.  Imports union.
+        """
+        if self.template != other.template:
+            msg = (
+                f"FileFragment template mismatch at {self.path!r}: "
+                f"{self.template!r} vs {other.template!r}"
+            )
+            raise ValueError(msg)
+
+        for key in self.context.keys() & other.context.keys():
+            if self.context[key] != other.context[key]:
+                msg = (
+                    f"FileFragment context conflict at {self.path!r} "
+                    f"for {key!r}: {self.context[key]!r} vs "
+                    f"{other.context[key]!r}"
+                )
+                raise ValueError(msg)
+
+        return FileFragment(
+            path=self.path,
+            template=self.template,
+            context=self.context | other.context,
+            imports=self.imports | other.imports,
+        )
+
+
+@dataclass
+class SnippetFragment:
+    """A contribution slotted into a file's context list.
+
+    Each snippet becomes one entry in ``file.context[slot]`` — a
+    list the wrapper template iterates over.  Snippets at the
+    same path may target different slots.
+
+    Supply exactly one of :attr:`template` (rendered by the
+    assembler into a string) or :attr:`value` (used as-is, may
+    be any type — useful for dict slots the wrapper iterates
+    over itself).
+
+    Attributes:
+        path: Output path; must match a :class:`FileFragment`.
+        slot: Key in the file's context this snippet appends to.
+        template: Jinja2 template the assembler renders against
+            :attr:`context` to produce a string slot item.
+            Mutually exclusive with :attr:`value`.
+        context: Template variables for :attr:`template`.
+        value: Raw slot item — any type, used as-is.  Mutually
+            exclusive with :attr:`template`.
+        imports: Imports this contribution needs in the output
+            file's import block.
+
+    """
+
+    path: str
+    slot: str
+    template: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
+    value: Any = None
+    imports: ImportCollector = field(default_factory=ImportCollector)
+
+    def render_slot_item(self, env: jinja2.Environment) -> object:
+        """Return the slot-list item this snippet contributes.
+
+        When :attr:`template` is set the assembler renders it
+        against :attr:`context` and strips surrounding whitespace,
+        so the surrounding file template can join items with its
+        own separators without fighting jinja's trailing
+        newline.  Otherwise :attr:`value` is passed through
+        unchanged.
+        """
+        if self.template is not None:
+            return render_template(
+                env=env,
+                template_name=self.template,
+                **self.context,
+            ).strip()
+
+        return self.value
+
+
+#: Union of fragment types a renderer may yield.
+Fragment = FileFragment | SnippetFragment
+
+
+_RendererFn = Callable[[Any, RenderCtx], "Iterable[Fragment]"]
 
 
 @dataclass
@@ -117,22 +220,20 @@ class RenderRegistry:
         obj: object,
         ctx: RenderCtx,
     ) -> list[Fragment]:
-        """Produce :class:`Fragment` objects for a build output.
+        """Produce fragments for a build output.
 
-        A renderer may return a single fragment or a list of
-        fragments; both forms are normalized here.  Multiple
-        fragments let one output contribute to more than one
-        file (e.g. a serializer emits both its serializer file
-        and an auxiliary fragment enriching the test file).
+        Every registered renderer returns an iterable of
+        fragments (typically as a generator via ``yield``).
+        Renderers usually yield a :class:`FileFragment`
+        declaring the output file plus one or more
+        :class:`SnippetFragment` contributions into its slots.
 
         Args:
             obj: The build output to render.
-            ctx: Render context with env, config, and per-scope
-                extras.
+            ctx: Render context.
 
         Returns:
-            A list of :class:`Fragment` objects, each targeting
-            some output file.  May be empty if the renderer
+            A list of fragments.  May be empty if the renderer
             decides not to contribute.
 
         Raises:
@@ -144,14 +245,7 @@ class RenderRegistry:
         if fn is None:
             msg = f"No renderer for {output_type.__name__}"
             raise LookupError(msg)
-        result = fn(obj, ctx)
-        if isinstance(result, Fragment):
-            return [result]
-        return list(result)
-
-    def has_renderer(self, output_type: type) -> bool:
-        """Return whether any renderer is registered for *output_type*."""
-        return output_type in self._entries
+        return list(fn(obj, ctx))
 
 
 #: Process-wide render registry.
@@ -163,146 +257,3 @@ class RenderRegistry:
 #: separate renderer-discovery step is needed — by the time the
 #: pipeline's assembler runs, every renderer is registered.
 registry = RenderRegistry()
-
-
-@dataclass
-class BuildStore:
-    """Accumulator for objects produced during the build phase.
-
-    Objects are keyed by ``(scope_name, instance_id, op_name)``
-    so the engine and later operations can query earlier output.
-    The store also retains a map from ``(scope, instance_id)`` to
-    the scope instance object that produced the entries, so the
-    assembler can attach scope-specific context to ``RenderCtx``
-    without target-specific lookups.
-
-    Attributes:
-        _items: Internal storage mapping keys to object lists.
-        _instances: Map from ``(scope, instance_id)`` to the scope
-            instance object (populated by the engine).
-
-    """
-
-    _items: dict[tuple[str, str, str], list[object]] = field(
-        default_factory=dict
-    )
-    _instances: dict[tuple[str, str], object] = field(default_factory=dict)
-
-    def add(
-        self,
-        scope: str,
-        instance_id: str,
-        op_name: str,
-        *objects: object,
-    ) -> None:
-        """Store build outputs for a build step.
-
-        Args:
-            scope: Scope name (e.g. ``"resource"``).
-            instance_id: Instance identifier within the scope.
-            op_name: Operation name that produced these objects.
-            *objects: The build outputs to store.
-
-        """
-        key = (scope, instance_id, op_name)
-        self._items.setdefault(key, []).extend(objects)
-
-    def register_instance(
-        self,
-        scope: str,
-        instance_id: str,
-        instance: object,
-    ) -> None:
-        """Remember the scope instance object for a ``(scope, iid)``.
-
-        Called by the engine before operations run at each scope
-        instance.  The assembler looks instances up via
-        :meth:`get_instance` and exposes them on ``RenderCtx`` so
-        renderers can read the config object that produced each
-        build entry.
-        """
-        self._instances[scope, instance_id] = instance
-
-    def get_instance(
-        self,
-        scope: str,
-        instance_id: str,
-    ) -> object | None:
-        """Return the instance registered for ``(scope, iid)``, if any."""
-        return self._instances.get((scope, instance_id))
-
-    def get(
-        self,
-        scope: str,
-        instance_id: str,
-        op_name: str,
-    ) -> list[object]:
-        """Retrieve build outputs for a specific build step.
-
-        Args:
-            scope: Scope name.
-            instance_id: Instance identifier.
-            op_name: Operation name.
-
-        Returns:
-            List of build outputs, empty if none stored.
-
-        """
-        return list(self._items.get((scope, instance_id, op_name), []))
-
-    def get_by_scope(
-        self,
-        scope: str,
-        instance_id: str,
-    ) -> list[object]:
-        """Retrieve all build outputs for a scope instance.
-
-        Args:
-            scope: Scope name.
-            instance_id: Instance identifier.
-
-        Returns:
-            All build outputs across all operations for this
-            scope instance.
-
-        """
-        result: list[object] = []
-        for (stored_scope, stored_id, _), items in self._items.items():
-            if stored_scope == scope and stored_id == instance_id:
-                result.extend(items)
-        return result
-
-    def get_by_type(self, output_type: type) -> list[object]:
-        """Retrieve all build outputs of a given type.
-
-        Args:
-            output_type: The output class to filter by.
-
-        Returns:
-            All matching build outputs across all keys.
-
-        """
-        result: list[object] = []
-        for items in self._items.values():
-            result.extend(
-                item for item in items if isinstance(item, output_type)
-            )
-        return result
-
-    def all_items(self) -> list[object]:
-        """Return every stored build output."""
-        result: list[object] = []
-        for items in self._items.values():
-            result.extend(items)
-        return result
-
-    def entries(
-        self,
-    ) -> Iterator[tuple[str, str, str, list[object]]]:
-        """Iterate stored entries as ``(scope, instance_id, op_name, items)``.
-
-        Used by the assembler to walk the store and dispatch
-        each item to the correct renderer with scope-aware context.
-        """
-        for (scope, instance_id, op_name), items in self._items.items():
-            yield scope, instance_id, op_name, items

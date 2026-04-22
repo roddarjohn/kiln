@@ -235,7 +235,7 @@ Every output type has a default renderer.  Op-specific
 ``RouteHandler`` subclasses register their renderers at the bottom of
 each ``kiln.operations.<op>`` module; the shared cross-cutting
 renderers (``SchemaClass``, ``EnumClass``, ``SerializerFn``,
-``StaticFile``, ``TestCase``) live in ``kiln.operations._render``.
+``StaticFile``, ``TestCase``) live in ``kiln.operations.renderers``.
 You can override or supplement any of these without changing the
 operation that produces the output.
 

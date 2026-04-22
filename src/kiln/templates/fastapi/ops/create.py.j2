@@ -1,11 +1,5 @@
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def create_{{ model_lower }}(
-    body: {{ model_name }}CreateRequest,
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-) -> None:
-    """Create a {{ model_name }}."""
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
     await db.execute(insert({{ model_name }}).values(**body.model_dump()))
     await db.commit()
+{% endblock %}
