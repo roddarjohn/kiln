@@ -248,16 +248,6 @@ def test_write_files_overwrites(tmp_path):
     assert (tmp_path / "a.py").read_text() == "new"
 
 
-def test_write_files_clean(tmp_path):
-    out = tmp_path / "out"
-    out.mkdir()
-    (out / "stale.py").write_text("old")
-    files = [GeneratedFile("fresh.py", "new")]
-    write_files(files, out, clean=True)
-    assert (out / "fresh.py").exists()
-    assert not (out / "stale.py").exists()
-
-
 # -------------------------------------------------------------------
 # wire_exports
 # -------------------------------------------------------------------

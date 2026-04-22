@@ -5,9 +5,10 @@ Usage
    :local:
    :depth: 2
 
-This page covers day-to-day usage of the ``kiln`` CLI.  For a
-walkthrough of a brand-new project, see :doc:`getting_started`.  For
-the complete config schema, see :doc:`reference`.
+This page covers day-to-day usage of the ``foundry`` CLI as backed
+by the kiln target.  For a walkthrough of a brand-new project, see
+:doc:`getting_started`.  For the complete config schema, see
+:doc:`reference`.
 
 Install
 -------
@@ -16,31 +17,49 @@ Install
 
    pip install kiln-generator  # or: uv add kiln-generator
 
+Installing ``kiln-generator`` ships both the generic ``foundry`` CLI
+and the kiln target it discovers at startup.
+
 The CLI
 -------
 
-``kiln generate``
-^^^^^^^^^^^^^^^^^
+``foundry generate``
+^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: text
 
-   kiln generate --config PATH [--out DIR] [--clean]
+   foundry generate --config PATH [--out DIR] [--target NAME] [--clean]
 
 ``--config / -c`` *(required)*
     Path to the ``.json`` or ``.jsonnet`` config file.
 ``--out / -o`` *(optional)*
-    Output root directory.  Defaults to the config's
-    ``package_prefix`` value (e.g. ``_generated``).  Set
-    ``package_prefix: ""`` in the config to write directly into the
-    current directory.
+    Output root directory.  Defaults to the target's own policy --
+    kiln writes into the config's ``package_prefix`` value (e.g.
+    ``_generated``).  Set ``package_prefix: ""`` in the config to
+    write directly into the current directory.
+``--target / -t`` *(optional)*
+    Which registered target to use.  Optional when exactly one target
+    is installed (``kiln``, when only kiln-generator is installed).
 ``--clean``
-    Delete ``--out`` before generating.  Useful when you remove a
+    Run ``foundry clean`` before generating.  Useful when you remove a
     resource from the config -- without ``--clean`` the previously
     generated files for that resource stay on disk.
 
-Re-running ``kiln generate`` is always safe: every generated file is
+Re-running ``foundry generate`` is always safe: every generated file is
 overwritten.  Never edit files under the output directory -- the next
 run will discard your changes.
+
+``foundry clean``
+^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   foundry clean --config PATH [--out DIR] [--target NAME]
+
+Deletes the output directory.  Resolves ``--out`` the same way
+``foundry generate`` does, so pointing the two commands at the same
+config produces matching paths.  The current working directory is
+never deleted.
 
 Config format
 -------------
@@ -148,7 +167,7 @@ Each entry in a resource's ``operations`` list is either:
        params: [{ name: "at", type: "datetime" }],
      }
 
-  kiln generates a ``POST /{id}/publish`` handler that calls
+  foundry generates a ``POST /{id}/publish`` handler that calls
   ``blog.actions.publish``.
 
 Built-in operations
@@ -242,13 +261,13 @@ API versioning
 --------------
 
 kiln has no built-in ``--version`` flag.  To maintain multiple API
-versions, run ``kiln generate`` against separate configs into separate
+versions, run ``foundry generate`` against separate configs into separate
 output trees and mount each at a different prefix:
 
 .. code-block:: bash
 
-   kiln generate --config v1.jsonnet --out _generated_v1/
-   kiln generate --config v2.jsonnet --out _generated_v2/
+   foundry generate --config v1.jsonnet --out _generated_v1/
+   foundry generate --config v2.jsonnet --out _generated_v2/
 
 .. code-block:: python
 

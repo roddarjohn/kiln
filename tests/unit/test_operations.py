@@ -20,11 +20,12 @@ from foundry.outputs import (
 from foundry.render import BuildStore
 from foundry.scope import PROJECT, Scope
 from kiln.config.schema import (
-    AppRef,
+    App,
+    AppConfig,
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
-    KilnConfig,
+    ProjectConfig,
     ResourceConfig,
 )
 from kiln.operations._shared import _field_dicts
@@ -106,14 +107,6 @@ class _Empty(BaseModel):
 class TestScaffold:
     """Tests for Scaffold operation."""
 
-    def test_default_db_session(self):
-        """No databases → default session.py."""
-        ctx = _project_ctx()
-        result = list(Scaffold().build(ctx, _Empty()))
-        paths = [f.path for f in result]
-        assert "db/__init__.py" in paths
-        assert "db/session.py" in paths
-
     def test_named_databases(self):
         """Named databases produce per-key session files."""
         config = MinimalConfig(
@@ -128,15 +121,6 @@ class TestScaffold:
         assert "db/primary_session.py" in paths
         assert "db/analytics_session.py" in paths
         assert "db/session.py" not in paths
-
-    def test_db_session_context(self):
-        """Default session has expected context values."""
-        ctx = _project_ctx()
-        result = list(Scaffold().build(ctx, _Empty()))
-        session = next(f for f in result if f.path == "db/session.py")
-        assert session.context["url_env"] == "DATABASE_URL"
-        assert session.context["get_db_fn"] == "get_db"
-        assert session.context["pool_pre_ping"] is True
 
     def test_named_db_context(self):
         """Named db session has correct get_db_fn."""
@@ -247,19 +231,22 @@ class TestRouter:
     ) -> BuildContext:
         """Context for Router running at the app scope.
 
-        The Router now runs once per :class:`AppRef`, so the
-        scope instance is an AppRef wrapping an inner KilnConfig
-        carrying the module and resources for this app.
+        The Router runs once per :class:`App`, so the scope
+        instance is an App wrapping an inner AppConfig carrying
+        the module and resources for this app.
         """
-        app_ref = AppRef(
-            config=KilnConfig(module=module, resources=resources),
+        app = App(
+            config=AppConfig(module=module, resources=resources),
             prefix="",
         )
-        project = KilnConfig(module="project", apps=[app_ref])
+        project = ProjectConfig(
+            apps=[app],
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
         return BuildContext(
             config=project,
             scope=APP_SCOPE,
-            instance=app_ref,
+            instance=app,
             instance_id=module,
             store=store,
         )
@@ -413,9 +400,9 @@ class TestProjectRouter:
         assert result == []
 
     def test_with_apps(self):
-        app_config = KilnConfig(module="blog")
+        app_config = AppConfig(module="blog")
         config = MinimalConfig(
-            apps=[AppRef(config=app_config, prefix="/blog")],
+            apps=[App(config=app_config, prefix="/blog")],
         )
         ctx = _project_ctx(config)
         result = list(ProjectRouter().build(ctx, _Empty()))
@@ -428,12 +415,12 @@ class TestProjectRouter:
         assert sf.context["apps"][0]["prefix"] == "/blog"
 
     def test_with_auth_and_apps(self):
-        app_config = KilnConfig(module="blog")
+        app_config = AppConfig(module="blog")
         config = MinimalConfig(
             auth=AuthConfig(
                 verify_credentials_fn="myapp.verify",
             ),
-            apps=[AppRef(config=app_config, prefix="/blog")],
+            apps=[App(config=app_config, prefix="/blog")],
         )
         ctx = _project_ctx(config)
         result = list(ProjectRouter().build(ctx, _Empty()))

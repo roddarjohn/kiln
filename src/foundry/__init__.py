@@ -18,13 +18,16 @@ Target-agnostic primitives for building code generators:
 layers a concrete FastAPI / SQLAlchemy generator on top of it.
 """
 
+from foundry.config import FoundryConfig, load_config
 from foundry.engine import BuildContext, Engine
 from foundry.env import create_jinja_env, render_snippet
+from foundry.errors import CLIError, ConfigError, GenerationError
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import, split_dotted_class
 from foundry.operation import (
     EmptyOptions,
     OperationMeta,
+    discover_operations,
     get_operation_meta,
     operation,
     topological_sort,
@@ -41,20 +44,26 @@ from foundry.outputs import (
     StaticFile,
     TestCase,
 )
+from foundry.pipeline import generate
 from foundry.render import BuildStore, RenderCtx, RenderRegistry
-from foundry.scope import PROJECT, Scope, discover_scopes
+from foundry.scope import PROJECT, Scope, Scoped, discover_scopes
 from foundry.spec import FileSpec, GeneratedFile, wire_exports
+from foundry.target import Target, discover_targets
 
 __all__ = [
     "PROJECT",
     "BuildContext",
     "BuildStore",
+    "CLIError",
+    "ConfigError",
     "EmptyOptions",
     "Engine",
     "EnumClass",
     "Field",
     "FileSpec",
+    "FoundryConfig",
     "GeneratedFile",
+    "GenerationError",
     "ImportCollector",
     "Name",
     "OperationMeta",
@@ -65,12 +74,18 @@ __all__ = [
     "RouterMount",
     "SchemaClass",
     "Scope",
+    "Scoped",
     "SerializerFn",
     "StaticFile",
+    "Target",
     "TestCase",
     "create_jinja_env",
+    "discover_operations",
     "discover_scopes",
+    "discover_targets",
+    "generate",
     "get_operation_meta",
+    "load_config",
     "operation",
     "prefix_import",
     "render_snippet",

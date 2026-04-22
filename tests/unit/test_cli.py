@@ -1,12 +1,14 @@
-"""Tests for the CLI entry point."""
+"""Tests for the foundry CLI entry point, backed by the kiln target."""
 
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from foundry import GeneratedFile, write_files
-from kiln.cli import app
+from foundry.cli import app, cli_main
+from foundry.errors import ConfigError
 
 runner = CliRunner()
 
@@ -14,7 +16,7 @@ runner = CliRunner()
 def test_help():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "autogenerating" in result.output
+    assert "code-generation" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -22,14 +24,31 @@ def test_help():
 # ---------------------------------------------------------------------------
 
 
-def test_generate_bad_config_exits_1(tmp_path: Path):
+def test_generate_bad_config_raises_config_error(tmp_path: Path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("version: 1")
     result = runner.invoke(
         app, ["generate", "--config", str(bad), "--out", str(tmp_path)]
     )
-    assert result.exit_code == 1
-    assert "Error" in result.output
+    assert isinstance(result.exception, ConfigError)
+
+
+def test_cli_main_renders_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("version: 1")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["foundry", "generate", "--config", str(bad), "--out", str(tmp_path)],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main()
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "Error loading config" in captured.err
 
 
 def _write_json_config(tmp_path: Path, data: dict) -> Path:
@@ -48,6 +67,7 @@ def test_generate_writes_app_files(tmp_path: Path):
         tmp_path,
         {
             "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
             "resources": [
                 {
                     "model": "myapp.models.Post",
@@ -114,6 +134,7 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
                 "type": "jwt",
                 "verify_credentials_fn": "myapp.auth.verify",
             },
+            "databases": [{"key": "primary", "default": True}],
             "resources": [],
         },
     )
@@ -184,6 +205,96 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     root_router = (out / "routes" / "__init__.py").read_text()
     assert "blog_router" in root_router
     assert "inventory_router" in root_router
+
+
+# ---------------------------------------------------------------------------
+# clean
+# ---------------------------------------------------------------------------
+
+
+def test_clean_removes_out_dir(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "stale.py").write_text("old")
+    result = runner.invoke(
+        app, ["clean", "--config", str(cfg), "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert "Cleaned" in result.output
+    assert not out.exists()
+
+
+def test_clean_noop_when_out_missing(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
+    missing = tmp_path / "never_existed"
+    result = runner.invoke(
+        app, ["clean", "--config", str(cfg), "--out", str(missing)]
+    )
+    assert result.exit_code == 0
+    assert "Nothing to clean" in result.output
+
+
+def test_clean_bad_config_raises_config_error(tmp_path: Path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("version: 1")
+    result = runner.invoke(
+        app, ["clean", "--config", str(bad), "--out", str(tmp_path)]
+    )
+    assert isinstance(result.exception, ConfigError)
+
+
+def test_generate_clean_flag_removes_stale(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [
+                {
+                    "model": "myapp.models.Post",
+                    "operations": [
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    stale = out / "stale.py"
+    stale.write_text("old")
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--config",
+            str(cfg),
+            "--out",
+            str(out),
+            "--clean",
+        ],
+    )
+    assert result.exit_code == 0
+    assert not stale.exists()
+    assert (out / "myapp" / "routes" / "post.py").exists()
 
 
 # ---------------------------------------------------------------------------

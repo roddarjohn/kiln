@@ -8,11 +8,14 @@ to the class so the engine can discover and wire it.
 
 from __future__ import annotations
 
+import importlib.metadata
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from pydantic import BaseModel
+
+ENTRY_POINT_GROUP = "foundry.operations"
 
 # -------------------------------------------------------------------
 # Metadata
@@ -154,6 +157,27 @@ def get_operation_meta(
 ) -> OperationMeta | None:
     """Return the :class:`OperationMeta` for *cls*, or ``None``."""
     return getattr(cls, _OPERATION_META_ATTR, None)
+
+
+def discover_operations() -> list[type]:
+    """Load every class registered under the ``foundry.operations`` group.
+
+    Any installed package can declare operations in its
+    ``pyproject.toml``::
+
+        [project.entry-points."foundry.operations"]
+        my_op = "my_pkg.ops:MyOp"
+
+    and they will surface here without the calling generator
+    needing to know the package exists.
+
+    Returns:
+        Operation classes in the order returned by
+        :func:`importlib.metadata.entry_points`.
+
+    """
+    eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
+    return [ep.load() for ep in eps]
 
 
 # -------------------------------------------------------------------

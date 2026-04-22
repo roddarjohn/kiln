@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from foundry.operation import (
     EmptyOptions,
+    discover_operations,
     get_operation_meta,
     topological_sort,
 )
@@ -69,7 +70,11 @@ class Engine:
 
     Attributes:
         operations: Operation classes decorated with
-            ``@operation``.
+            ``@operation``.  Defaults to every class registered
+            under the ``foundry.operations`` entry-point group
+            (see :func:`~foundry.operation.discover_operations`),
+            so production callers just write ``Engine()``.  Tests
+            override this to run a curated subset.
         scopes: Discovered scopes (auto-populated from
             config if not provided).
         package_prefix: Dotted prefix for generated imports,
@@ -77,7 +82,7 @@ class Engine:
 
     """
 
-    operations: list[type] = field(default_factory=list)
+    operations: list[type] = field(default_factory=discover_operations)
     scopes: list[Scope] = field(default_factory=list)
     package_prefix: str = ""
 
@@ -147,6 +152,7 @@ class Engine:
         """
         for own_iid, inst_obj in _resolve_instances(scope, parent_instance):
             full_iid = f"{parent_iid}/{own_iid}" if parent_iid else own_iid
+            state.store.register_instance(scope.name, full_iid, inst_obj)
             ctx = BuildContext(
                 config=state.config,
                 scope=scope,
@@ -206,11 +212,14 @@ def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
 
     """
     names = {s.name for s in scopes}
+
     for op_cls in operations:
         meta = get_operation_meta(op_cls)
+
         if meta is None:
             msg = f"{op_cls} has no @operation metadata"
             raise ValueError(msg)
+
         if meta.scope not in names:
             msg = (
                 f"Operation '{meta.name}' targets "
@@ -250,10 +259,12 @@ def _group_and_sort(
         name: topological_sort(ops) if ops else []
         for name, ops in pre_by_scope.items()
     }
+
     post_ops = {
         name: topological_sort(ops) if ops else []
         for name, ops in post_by_scope.items()
     }
+
     return pre_ops, post_ops
 
 

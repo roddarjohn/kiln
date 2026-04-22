@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
-from kiln.generators._helpers import PYTHON_TYPES
+from foundry.render import registry
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations._render import (
+    _response_schema_name,
+    build_handler_fragment,
+    utils_imports,
+)
 from kiln.operations._shared import (
     FieldsOptions,
     _construct_response_schema,
     _construct_serializer,
-)
-from kiln.renderers import registry
-from kiln.renderers.fastapi import (
-    _response_schema_name,
-    build_handler_fragment,
-    utils_imports,
 )
 
 if TYPE_CHECKING:
@@ -58,8 +58,10 @@ class Get:
         """
         _, model = Name.from_dotted(ctx.instance.model)
 
-        schema = _construct_response_schema(model, options.fields, "Resource")
-        serializer = _construct_serializer(model, schema, "resource")
+        schema = _construct_response_schema(
+            model, options.fields, suffix="Resource"
+        )
+        serializer = _construct_serializer(model, schema, stem="resource")
 
         yield schema
         yield serializer

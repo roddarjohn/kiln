@@ -6,10 +6,10 @@ By the end you will have a working FastAPI application with generated
 routes, schemas, and (optionally) auth wired to SQLAlchemy models you
 define yourself.
 
-What kiln generates -- and doesn't
+What foundry generates -- and doesn't
 ----------------------------------
 
-kiln generates FastAPI code from a config file.  Specifically, it
+foundry generates FastAPI code from a config file.  Specifically, it
 produces:
 
 * **Routes** -- one FastAPI router per resource, with handlers for the
@@ -47,7 +47,10 @@ Install
 
 Verify the CLI is available::
 
-   kiln --help
+   foundry --help
+
+kiln registers itself as a target for the generic ``foundry`` CLI
+shipped in the same package, so ``foundry`` is the command you run.
 
 Project layout
 --------------
@@ -78,7 +81,7 @@ the generated output.
 Step 1 -- Define your SQLAlchemy models
 ---------------------------------------
 
-kiln generates routes and schemas *around* SQLAlchemy models you
+foundry generates routes and schemas *around* SQLAlchemy models you
 define.  A minimal ``myapp/models.py``:
 
 .. code-block:: python
@@ -163,9 +166,9 @@ Key points:
 Step 3 -- Generate
 ------------------
 
-Run kiln::
+Run the CLI::
 
-   kiln generate --config app.jsonnet
+   foundry generate --config app.jsonnet
 
 Output lands in ``_generated/``:
 
@@ -185,8 +188,8 @@ Output lands in ``_generated/``:
        └── serializers/
            └── article.py
 
-``--out`` overrides the output root; ``--clean`` deletes the output
-directory first.
+``--out`` overrides the output root; ``--clean`` runs ``foundry clean``
+first to remove any stale files.
 
 Step 4 -- Mount the router
 --------------------------
@@ -245,7 +248,7 @@ Add an ``auth`` block to the config to turn on JWT authentication:
      }],
    }
 
-You provide ``verify_credentials`` -- kiln generates the rest
+You provide ``verify_credentials`` -- foundry generates the rest
 (``auth/dependencies.py`` with ``get_current_user``, and
 ``auth/router.py`` with a ``/auth/token`` login endpoint).
 
@@ -275,7 +278,7 @@ API, say), wrap each app's config in an ``apps`` list:
      ],
    }
 
-``kiln generate --config project.jsonnet`` produces the per-app code
+``foundry generate --config project.jsonnet`` produces the per-app code
 plus a top-level ``_generated/routes/__init__.py`` that mounts each
 app at its prefix.  Mount that in FastAPI:
 

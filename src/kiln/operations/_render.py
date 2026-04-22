@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from foundry.env import render_snippet
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import (
@@ -33,13 +34,13 @@ from foundry.outputs import (
     StaticFile,
     TestCase,
 )
-from foundry.render import Fragment
-from kiln.generators._env import render_snippet
-from kiln.generators._helpers import PYTHON_TYPES, resolve_db_session
-from kiln.renderers import registry
+from foundry.render import Fragment, registry
+from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+    import jinja2
 
     from foundry.render import RenderCtx
 
@@ -84,9 +85,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     parts = model_module.rsplit(".", 1)
     app = parts[0] if len(parts) > 1 else model_module
 
-    databases = getattr(config, "databases", [])
-    db_key = getattr(resource, "db_key", None)
-    session_module, get_db_fn = resolve_db_session(db_key, databases)
+    db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
     if not route_prefix:
         route_prefix = f"/{model.lower}s"
@@ -100,15 +99,15 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[getattr(resource, "pk_type", "uuid")],
         has_auth=getattr(config, "auth", None) is not None,
-        session_module=session_module,
-        get_db_fn=get_db_fn,
+        session_module=db.session_module,
+        get_db_fn=db.get_db_fn,
         generate_tests=getattr(resource, "generate_tests", False),
     )
 
 
 # -------------------------------------------------------------------
 # Built-in renderers -- register at module import time against the
-# shared :data:`~kiln.renderers.registry`.  Op-specific RouteHandler
+# shared :data:`foundry.render.registry`.  Op-specific RouteHandler
 # subclasses decorate their own module's renderer against the same
 # registry; those registrations fire when the op module is imported
 # (e.g. via entry points in the generate pipeline).
@@ -118,7 +117,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 @registry.renders(SchemaClass)
 def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Fragment:
     info = _resource_info(ctx)
-    rendered = render_schema_class(schema)
+    rendered = render_schema_class(schema, ctx.env)
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
@@ -170,7 +169,7 @@ def _generic_handler_fragment(
 @registry.renders(SerializerFn)
 def _serializer_fragment(ser: SerializerFn, ctx: RenderCtx) -> list[Fragment]:
     info = _resource_info(ctx)
-    rendered = render_serializer(ser)
+    rendered = render_serializer(ser, ctx.env)
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from(info.model_module, info.model.pascal)
@@ -320,13 +319,14 @@ def build_handler_fragment(
 # -------------------------------------------------------------------
 
 
-def render_schema_class(schema: SchemaClass) -> str:
+def render_schema_class(schema: SchemaClass, env: jinja2.Environment) -> str:
     """Render a Pydantic model class definition string."""
     fields = [
         {"name": f.name, "py_type": f.py_type, "optional": f.optional}
         for f in schema.fields
     ]
     return render_snippet(
+        env,
         "fastapi/schema_parts/schema_class.py.j2",
         class_name=schema.name,
         doc=schema.doc,
@@ -342,10 +342,11 @@ def render_enum_class(enum: EnumClass) -> str:
     return "\n".join(lines)
 
 
-def render_serializer(ser: SerializerFn) -> str:
+def render_serializer(ser: SerializerFn, env: jinja2.Environment) -> str:
     """Render a single serializer function as a standalone string."""
     fields = [{"name": f.name} for f in ser.fields]
     return render_snippet(
+        env,
         "fastapi/serializer_fn.py.j2",
         function_name=ser.function_name,
         model_name=ser.model_name,

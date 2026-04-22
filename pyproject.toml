@@ -32,9 +32,12 @@ Changelog = "https://github.com/roddarjohn/kiln/blob/main/CHANGELOG.md"
 Issues = "https://github.com/roddarjohn/kiln/issues"
 
 [project.scripts]
-kiln = "kiln.cli:app"
+foundry = "foundry.cli:cli_main"
 
-[project.entry-points."kiln.operations"]
+[project.entry-points."foundry.targets"]
+kiln = "kiln.target:target"
+
+[project.entry-points."foundry.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
 auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
 get = "kiln.operations.get:Get"

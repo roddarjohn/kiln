@@ -10,18 +10,18 @@ from pydantic import BaseModel
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import RouteHandler, TestCase
+from foundry.render import registry
 from kiln.config.schema import FieldSpec  # noqa: TC001
 from kiln.operations._list_config import (  # noqa: TC001
     FilterConfig,
     OrderConfig,
     PaginateConfig,
 )
+from kiln.operations._render import build_handler_fragment
 from kiln.operations._shared import (
     _construct_response_schema,
     _construct_serializer,
 )
-from kiln.renderers import registry
-from kiln.renderers.fastapi import build_handler_fragment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -65,8 +65,10 @@ class List:
 
         """
         _, model = Name.from_dotted(ctx.instance.model)
-        schema = _construct_response_schema(model, options.fields, "ListItem")
-        serializer = _construct_serializer(model, schema, "list_item")
+        schema = _construct_response_schema(
+            model, options.fields, suffix="ListItem"
+        )
+        serializer = _construct_serializer(model, schema, stem="list_item")
         yield schema
         yield serializer
 

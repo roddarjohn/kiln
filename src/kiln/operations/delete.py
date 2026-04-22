@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
 from foundry.outputs import RouteHandler, RouteParam, TestCase
-from kiln.generators._helpers import PYTHON_TYPES
-from kiln.renderers import registry
-from kiln.renderers.fastapi import build_handler_fragment, utils_imports
+from foundry.render import registry
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations._render import build_handler_fragment, utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

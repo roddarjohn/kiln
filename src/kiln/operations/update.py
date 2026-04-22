@@ -14,10 +14,10 @@ from foundry.outputs import (
     SchemaClass,
     TestCase,
 )
-from kiln.generators._helpers import PYTHON_TYPES
+from foundry.render import registry
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations._render import build_handler_fragment, utils_imports
 from kiln.operations._shared import FieldsOptions, _field_dicts
-from kiln.renderers import registry
-from kiln.renderers.fastapi import build_handler_fragment, utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

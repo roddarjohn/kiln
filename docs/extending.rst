@@ -96,10 +96,10 @@ Add your operation to your package's ``pyproject.toml``:
 
 .. code-block:: toml
 
-   [project.entry-points."kiln.operations"]
+   [project.entry-points."foundry.operations"]
    bulk_create = "my_pkg.ops:BulkCreate"
 
-``kiln generate`` discovers all installed operations at startup, so
+``foundry generate`` discovers all installed operations at startup, so
 as long as your package is ``pip install``\ ed alongside kiln the
 operation is available.
 
@@ -231,38 +231,38 @@ the route file's top-of-file import block automatically.
 Swapping a renderer
 -------------------
 
-Every output type has a default renderer in
-``kiln.renderers.fastapi``.  You can override or supplement these
-without changing the operation that produces the output.
+Every output type has a default renderer.  Op-specific
+``RouteHandler`` subclasses register their renderers at the bottom of
+each ``kiln.operations.<op>`` module; the shared cross-cutting
+renderers (``SchemaClass``, ``EnumClass``, ``SerializerFn``,
+``StaticFile``, ``TestCase``) live in ``kiln.operations._render``.
+You can override or supplement any of these without changing the
+operation that produces the output.
 
-Register an additional renderer with a ``when`` predicate.  The
-registry tries registrations in order and uses the first whose
-predicate matches:
+Register an additional renderer with a ``when`` predicate against the
+module-level :data:`foundry.render.registry`.  The registry tries
+registrations in order and uses the first whose predicate matches:
 
 .. code-block:: python
 
    from foundry.outputs import RouteHandler
-   from foundry.render import RenderRegistry
+   from foundry.render import registry
 
-   def register_my_renderers(registry: RenderRegistry) -> None:
+   @registry.renders(
+       RouteHandler,
+       when=lambda cfg: getattr(cfg, "use_async_retry", False),
+   )
+   def render_retry_handler(handler, ctx):
+       # custom Jinja template that wraps the body in a retry loop
+       return ctx.env.get_template(
+           "my_pkg/retry_handler.j2",
+       ).render(h=handler)
 
-       @registry.renders(
-           RouteHandler,
-           when=lambda cfg: getattr(cfg, "use_async_retry", False),
-       )
-       def render_retry_handler(handler, ctx):
-           # custom Jinja template that wraps the body in a retry loop
-           return ctx.env.get_template(
-               "my_pkg/retry_handler.j2",
-           ).render(h=handler)
-
-Register the predicate-guarded renderer *first* (before the default
-unguarded one) if you want it to win when the flag is on.
-
-To plug new renderers in, write your own equivalent of
-:func:`kiln.renderers.fastapi.create_registry` and wire it into your
-own ``generate()`` entry point.  There is no entry-point group for
-renderers because there can only be one registry per generation run.
+Import the module where this decorator runs from one of your
+operations (or from the package's ``__init__``) so it registers when
+foundry discovers operations via the ``foundry.operations``
+entry-point group.  Register the predicate-guarded renderer *before*
+the default unguarded one if you want it to win when the flag is on.
 
 Adding a new output type
 ------------------------
@@ -305,18 +305,23 @@ that introduces a new type is also responsible for extending the
 assembler (or shipping its own) so the renderer output ends up in
 the right file.
 
-Building on ``foundry`` directly
------------------------------------
+Shipping a new target
+---------------------
 
-If you are generating code for a target that has nothing to do with
-FastAPI (a Go CLI, a Terraform module, a gRPC service), skip the
-``kiln`` package entirely and use ``foundry``:
+If you are generating code for something that has nothing to do with
+FastAPI (a Go CLI, a Terraform module, a gRPC service), you can ship
+your own plugin that registers as a ``foundry`` target.  Install it
+alongside ``foundry`` and the ``foundry`` CLI will discover and
+dispatch to it the same way it does for kiln.
+
+Step 1 -- write the generator
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
    from foundry.engine import Engine
-   from foundry.render import RenderCtx, RenderRegistry
    from foundry.env import create_jinja_env
+   from foundry.render import RenderCtx, RenderRegistry
 
    def generate_my_thing(config):
        engine = Engine(operations=[...])
@@ -334,7 +339,38 @@ FastAPI (a Go CLI, a Terraform module, a gRPC service), skip the
            files.append(GeneratedFile(path=..., content=content))
        return files
 
-You need:
+Step 2 -- register a :class:`~foundry.target.Target`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   # my_pkg/target.py
+   from pathlib import Path
+
+   from foundry.target import Target
+   from my_pkg.config import load_my_config
+   from my_pkg.generate import generate_my_thing
+
+   target = Target(
+       name="mytarget",
+       load_config=load_my_config,
+       generate=generate_my_thing,
+       default_out=lambda cfg: Path(cfg.out_dir or "."),
+   )
+
+Step 3 -- expose it via the entry-point group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: toml
+
+   [project.entry-points."foundry.targets"]
+   mytarget = "my_pkg.target:target"
+
+Install your package and ``foundry generate --target mytarget --config
+...`` works.  Raise subclasses of :class:`foundry.errors.CLIError` for
+user-facing mistakes; anything else will propagate with a traceback.
+
+You still need, as with kiln:
 
 * A Pydantic config schema for your target.
 * Your own operations.
@@ -384,7 +420,7 @@ Run your operations through the engine directly -- no CLI needed:
 
 .. code-block:: python
 
-   from kiln.config.schema import KilnConfig, ResourceConfig
+   from kiln.config.schema import ProjectConfig
    from foundry.engine import Engine
    from foundry.outputs import RouteHandler
 
@@ -392,14 +428,11 @@ Run your operations through the engine directly -- no CLI needed:
 
 
    def test_bulk_create_produces_handler():
-       cfg = KilnConfig(
-           resources=[
-               ResourceConfig(
-                   model="myapp.Article",
-                   operations=["bulk_create"],
-               ),
+       cfg = ProjectConfig.model_validate({
+           "resources": [
+               {"model": "myapp.Article", "operations": ["bulk_create"]},
            ],
-       )
+       })
        engine = Engine(operations=[BulkCreate])
        store = engine.build(cfg)
 
@@ -407,6 +440,6 @@ Run your operations through the engine directly -- no CLI needed:
        assert any(h.path == "/bulk" for h in handlers)
 
 For full end-to-end coverage, load a fixture config via
-:func:`kiln.config.loader.load` and pass it through
-:func:`kiln.renderers.generate.generate` to get back the full list of
+:func:`foundry.config.load_config` and pass it through
+:func:`foundry.pipeline.generate` to get back the full list of
 :class:`~foundry.spec.GeneratedFile` objects.

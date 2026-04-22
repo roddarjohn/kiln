@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from foundry.engine import BuildContext
     from foundry.render import BuildStore
-    from kiln.config.schema import AppRef, KilnConfig, ResourceConfig
+    from kiln.config.schema import App, ProjectConfig, ResourceConfig
 
 
 @operation("router", scope="app", after_children=True)
@@ -31,13 +31,13 @@ class Router:
 
     def build(
         self,
-        ctx: BuildContext[AppRef],
+        ctx: BuildContext[App],
         _options: BaseModel,
     ) -> Iterable[RouterMount | StaticFile]:
         """Produce this app's router mount and aggregation file.
 
         Args:
-            ctx: Build context for one :class:`AppRef`; ``store``
+            ctx: Build context for one :class:`App`; ``store``
                 is fully populated with resource-scope output
                 because ``after_children=True``.
             _options: Unused.
@@ -49,8 +49,8 @@ class Router:
             app produced a :class:`RouteHandler`.
 
         """
-        app_ref = ctx.instance
-        app_config = app_ref.config
+        app = ctx.instance
+        app_config = app.config
         module = app_config.module
 
         resource_ids = _resource_instance_ids_with_handlers(
@@ -89,17 +89,17 @@ class ProjectRouter:
 
     def build(
         self,
-        ctx: BuildContext[KilnConfig],
+        ctx: BuildContext[ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce the project-level router file.
 
         Only produces output for configs that have an ``apps``
-        list.  After :func:`kiln.config.schema.normalize_config`,
-        every project config routed through :func:`generate` has
-        at least one app (bare top-level resources are wrapped in
-        an implicit single app with ``prefix=""``), so this op
-        runs unconditionally in the normal pipeline.
+        list.  :class:`~kiln.config.schema.ProjectConfig` wraps a
+        single-app shorthand into an implicit app with
+        ``prefix=""`` at validation time, so every project config
+        routed through :func:`generate` has at least one app and
+        this op runs unconditionally in the normal pipeline.
 
         Args:
             ctx: Build context; instance is the project config.
@@ -127,14 +127,14 @@ class ProjectRouter:
                 "apps": [
                     {
                         "module": (
-                            f"{package_prefix}.{app_ref.config.module}"
+                            f"{package_prefix}.{app.config.module}"
                             if package_prefix
-                            else app_ref.config.module
+                            else app.config.module
                         ),
-                        "alias": app_ref.config.module,
-                        "prefix": app_ref.prefix,
+                        "alias": app.config.module,
+                        "prefix": app.prefix,
                     }
-                    for app_ref in config.apps
+                    for app in config.apps
                 ],
             },
         )

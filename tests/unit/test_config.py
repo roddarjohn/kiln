@@ -5,11 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from foundry.config import load_config
+from foundry.errors import ConfigError
 from kiln.config.schema import (
+    AppConfig,
     AuthConfig,
+    DatabaseConfig,
     FieldSpec,
-    KilnConfig,
     OperationConfig,
+    ProjectConfig,
     ResourceConfig,
 )
 
@@ -18,13 +22,49 @@ from kiln.config.schema import (
 # ---------------------------------------------------------------------------
 
 
-def test_kiln_config_defaults():
-    cfg = KilnConfig()
+def test_project_config_defaults():
+    cfg = ProjectConfig(databases=[DatabaseConfig(key="primary", default=True)])
     assert cfg.version == "1"
-    assert cfg.module == "app"
     assert cfg.auth is None
+    assert cfg.apps == []
+
+
+def test_app_config_defaults():
+    cfg = AppConfig()
+    assert cfg.module == "app"
     assert cfg.resources == []
     assert cfg.operations is None
+
+
+def test_project_config_shorthand_wraps_single_app():
+    cfg = ProjectConfig.model_validate(
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [{"model": "myapp.models.Post"}],
+            "operations": ["get", "list"],
+        }
+    )
+    assert len(cfg.apps) == 1
+    app = cfg.apps[0]
+    assert app.prefix == ""
+    assert app.config.module == "myapp"
+    assert app.config.resources[0].model == "myapp.models.Post"
+    assert app.config.operations == ["get", "list"]
+
+
+def test_project_config_apps_mode_untouched():
+    cfg = ProjectConfig.model_validate(
+        {
+            "databases": [{"key": "primary", "default": True}],
+            "apps": [
+                {"config": {"module": "blog"}, "prefix": "/blog"},
+            ],
+        }
+    )
+    assert len(cfg.apps) == 1
+    assert cfg.apps[0].prefix == "/blog"
+    assert cfg.apps[0].config.module == "blog"
 
 
 def test_auth_config_defaults():
@@ -47,6 +87,44 @@ def test_auth_config_verify_not_required_with_custom_auth():
         get_current_user_fn="myapp.auth.get_user",
     )
     assert auth.verify_credentials_fn is None
+
+
+def test_database_config_session_names():
+    db = DatabaseConfig(key="primary")
+    assert db.session_module == "db.primary_session"
+    assert db.get_db_fn == "get_primary_db"
+
+
+def test_project_config_resolve_database_by_default():
+    cfg = ProjectConfig(
+        databases=[
+            DatabaseConfig(key="primary", default=True),
+            DatabaseConfig(key="reports", default=False),
+        ]
+    )
+    assert cfg.resolve_database(None).key == "primary"
+
+
+def test_project_config_resolve_database_by_key():
+    cfg = ProjectConfig(
+        databases=[
+            DatabaseConfig(key="primary", default=True),
+            DatabaseConfig(key="reports", default=False),
+        ]
+    )
+    assert cfg.resolve_database("reports").key == "reports"
+
+
+def test_project_config_resolve_database_no_default_raises():
+    cfg = ProjectConfig(databases=[DatabaseConfig(key="primary")])
+    with pytest.raises(ValueError, match="default=True"):
+        cfg.resolve_database(None)
+
+
+def test_project_config_resolve_database_unknown_key_raises():
+    cfg = ProjectConfig(databases=[DatabaseConfig(key="primary", default=True)])
+    with pytest.raises(ValueError, match="No database with key"):
+        cfg.resolve_database("missing")
 
 
 def test_resource_config_defaults():
@@ -148,8 +226,8 @@ def test_operation_config_options_excludes_known_fields():
     assert "fields" in oc.options
 
 
-def test_kiln_config_with_operations():
-    cfg = KilnConfig(
+def test_app_config_with_operations():
+    cfg = AppConfig(
         operations=["get", "list", "create"],
     )
     assert len(cfg.operations) == 3
@@ -166,10 +244,24 @@ def test_field_spec():
 # ---------------------------------------------------------------------------
 
 
+def _load(path: Path) -> ProjectConfig:
+    from kiln.target import target as kiln_target
+
+    stdlibs = (
+        {kiln_target.name: kiln_target.jsonnet_stdlib_dir}
+        if kiln_target.jsonnet_stdlib_dir is not None
+        else {}
+    )
+    cfg = load_config(path, ProjectConfig, stdlibs)
+    assert isinstance(cfg, ProjectConfig)
+    return cfg
+
+
 def test_load_json(tmp_path: Path):
     data = {
         "version": "1",
         "module": "myapp",
+        "databases": [{"key": "primary", "default": True}],
         "resources": [
             {
                 "model": "myapp.models.Widget",
@@ -179,65 +271,61 @@ def test_load_json(tmp_path: Path):
     }
     cfg_file = tmp_path / "kiln.json"
     cfg_file.write_text(json.dumps(data))
-    from kiln.config.loader import load
 
-    cfg = load(cfg_file)
-    assert cfg.module == "myapp"
-    assert len(cfg.resources) == 1
-    assert cfg.resources[0].model == "myapp.models.Widget"
+    cfg = _load(cfg_file)
+    app = cfg.apps[0]
+    assert app.config.module == "myapp"
+    assert len(app.config.resources) == 1
+    assert app.config.resources[0].model == "myapp.models.Widget"
 
 
 def test_load_unsupported_extension(tmp_path: Path):
-    from kiln.config.loader import load
-
     bad = tmp_path / "kiln.yaml"
     bad.write_text("version: '1'")
-    with pytest.raises(ValueError, match="Unsupported"):
-        load(bad)
+    with pytest.raises(ConfigError, match="Unsupported"):
+        _load(bad)
 
 
 def test_load_jsonnet(tmp_path: Path):
-    from kiln.config.loader import load
-
-    jsonnet_src = '{ module: "jsonnet_app", resources: [] }'
+    jsonnet_src = (
+        '{ module: "jsonnet_app", resources: [], '
+        'databases: [{ key: "primary", default: true }] }'
+    )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
-    cfg = load(cfg_file)
-    assert cfg.module == "jsonnet_app"
+    cfg = _load(cfg_file)
+    assert cfg.apps[0].config.module == "jsonnet_app"
 
 
 def test_load_jsonnet_relative_import(tmp_path: Path):
-    from kiln.config.loader import load
-
     helper = tmp_path / "helper.libsonnet"
     helper.write_text('{ mod: "helper_app" }')
-    jsonnet_src = 'local h = import "helper.libsonnet"; { module: h.mod }'
+    jsonnet_src = (
+        'local h = import "helper.libsonnet"; '
+        '{ module: h.mod, databases: [{ key: "primary", default: true }] }'
+    )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
-    cfg = load(cfg_file)
-    assert cfg.module == "helper_app"
+    cfg = _load(cfg_file)
+    assert cfg.apps[0].config.module == "helper_app"
 
 
 def test_load_validation_error(tmp_path: Path):
-    from kiln.config.loader import load
-
     # model is required in ResourceConfig
     data = {"resources": [{"operations": ["get"]}]}
     cfg_file = tmp_path / "bad.json"
     cfg_file.write_text(json.dumps(data))
-    from pydantic import ValidationError
 
-    with pytest.raises(ValidationError):
-        load(cfg_file)
+    with pytest.raises(ConfigError):
+        _load(cfg_file)
 
 
 def test_load_jsonnet_stdlib_resources(tmp_path: Path):
-    from kiln.config.loader import load
-
     src = """
     local resource = import "kiln/resources/presets.libsonnet";
     {
       module: "blog",
+      databases: [{ key: "primary", default: true }],
       resources: [
         {
           model: "blog.models.Article",
@@ -253,11 +341,12 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     """
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(src)
-    cfg = load(cfg_file)
-    assert cfg.module == "blog"
-    assert len(cfg.resources) == 1
-    assert cfg.resources[0].model == "blog.models.Article"
-    operations = cfg.resources[0].operations
+    cfg = _load(cfg_file)
+    app = cfg.apps[0]
+    assert app.config.module == "blog"
+    assert len(app.config.resources) == 1
+    assert app.config.resources[0].model == "blog.models.Article"
+    operations = app.config.resources[0].operations
     assert operations is not None
     assert len(operations) == 1
     op = operations[0]

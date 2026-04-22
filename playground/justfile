@@ -9,7 +9,7 @@ default:
 
 # Generate everything from the project config (wipes output first)
 generate:
-    uv run --project .. kiln generate --config {{ config }} --out {{ out }} --clean
+    uv run --project .. foundry generate --config {{ config }} --out {{ out }} --clean
 
 alias g := generate
 

@@ -6,6 +6,12 @@ output path; union their imports; concatenate list-valued
 shell-context entries (first-seen wins for scalars); then render
 the shell template.  All framework- or file-specific knowledge
 lives in the renderers, not here.
+
+For each store entry, the assembler looks up the scope instance
+that produced it (via :meth:`BuildStore.get_instance`) and
+exposes it on ``RenderCtx.extras`` under the scope name.  Kiln
+renderers read e.g. ``ctx.extras["resource"]`` to derive paths
+and imports from the resource config.
 """
 
 from __future__ import annotations
@@ -14,12 +20,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from foundry.imports import ImportCollector
-from foundry.naming import Name
 from foundry.spec import GeneratedFile
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from foundry.render import (
         BuildStore,
         Fragment,
@@ -52,7 +55,7 @@ def assemble(
     """
     fragments: list[Fragment] = []
     for scope_name, instance_id, _op_name, items in store.entries():
-        scoped = _scoped_ctx(ctx, scope_name, instance_id)
+        scoped = _scoped_ctx(ctx, store, scope_name, instance_id)
         for item in items:
             if not registry.has_renderer(type(item)):
                 continue
@@ -62,77 +65,21 @@ def assemble(
 
 def _scoped_ctx(
     ctx: RenderCtx,
+    store: BuildStore,
     scope_name: str,
     instance_id: str,
 ) -> RenderCtx:
     """Return a :class:`RenderCtx` carrying the current scope instance.
 
-    Renderers that care about scope-specific context read it from
-    ``ctx.extras``.  For the resource scope, this assembler looks
-    up the :class:`~kiln.config.schema.ResourceConfig` whose class
-    name matches *instance_id* and attaches it under the
-    ``"resource"`` key.  For other scopes (currently just
-    ``"project"``) the context is returned unchanged.
+    Looks up the scope instance object the engine recorded for
+    ``(scope_name, instance_id)`` and attaches it to
+    ``ctx.extras`` under ``scope_name`` so renderers can read the
+    originating config object without walking the full tree.
     """
-    if scope_name == "resource":
-        resource = _find_resource(ctx.config, instance_id)
-        if resource is not None:
-            return replace(ctx, extras={"resource": resource})
-    return ctx
-
-
-def _find_resource(
-    config: BaseModel,
-    instance_id: str,
-) -> BaseModel | None:
-    """Locate the :class:`ResourceConfig` matching *instance_id*.
-
-    Resource instance IDs are compounded with the enclosing
-    app's ID (e.g. ``"blog/article"``); we match against the
-    trailing segment, which the engine derives from the
-    resource's dotted ``model`` path (``class_name.lower()``).
-
-    Args:
-        config: The top-level config passed to the assembler.
-        instance_id: The engine's scope-instance identifier.
-
-    Returns:
-        Matching resource config, or ``None`` when not found.
-
-    """
-    base_id = instance_id.rsplit("/", 1)[-1]
-    for resource in _iter_all_resources(config):
-        model = getattr(resource, "model", "")
-        if "." not in model:
-            continue
-        _, name = Name.from_dotted(model)
-        if name.lower == base_id:
-            return resource
-    return None
-
-
-def _iter_all_resources(config: BaseModel) -> list[BaseModel]:
-    """Yield every :class:`ResourceConfig` in a project config.
-
-    After :func:`kiln.config.schema.normalize_config`, resources
-    always live under ``config.apps[*].config.resources`` — bare
-    top-level resources are wrapped in an implicit single app
-    during :func:`kiln.renderers.generate.generate`.
-
-    Args:
-        config: Top-level project config (post-normalization).
-
-    Returns:
-        Flat list of resource configs across all apps.
-
-    """
-    resources: list[BaseModel] = []
-    for app_ref in getattr(config, "apps", []):
-        app_cfg = getattr(app_ref, "config", None)
-        if app_cfg is None:
-            continue
-        resources.extend(getattr(app_cfg, "resources", []))
-    return resources
+    instance = store.get_instance(scope_name, instance_id)
+    if instance is None:
+        return ctx
+    return replace(ctx, extras={**ctx.extras, scope_name: instance})
 
 
 def _merge_fragments(

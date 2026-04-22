@@ -4,38 +4,53 @@ API reference
 Most of the public API is covered in :doc:`reference`.  The symbols
 below round out the surface for tool authors and contributors.
 
-kiln CLI
---------
+foundry CLI
+-----------
 
-.. automodule:: kiln.cli
+.. automodule:: foundry.cli
    :members:
 
-kiln.config.loader
-------------------
+kiln target
+-----------
 
-.. automodule:: kiln.config.loader
+.. automodule:: kiln.target
    :members:
 
-kiln.renderers.generate
------------------------
+foundry.config
+--------------
 
-.. automodule:: kiln.renderers.generate
+.. automodule:: foundry.config
    :members:
 
-kiln.renderers.assembler
-------------------------
+foundry.jsonnet
+---------------
 
-.. automodule:: kiln.renderers.assembler
+.. automodule:: foundry.jsonnet
    :members:
 
-kiln.renderers.fastapi
-----------------------
+foundry.pipeline
+----------------
 
-.. automodule:: kiln.renderers.fastapi
+.. automodule:: foundry.pipeline
+   :members:
+
+foundry.assembler
+-----------------
+
+.. automodule:: foundry.assembler
+   :members:
+
+foundry.render
+--------------
+
+.. automodule:: foundry.render
    :members:
 
 kiln.operations
 ---------------
+
+.. automodule:: kiln.operations._render
+   :members:
 
 .. automodule:: kiln.operations.get
    :members:

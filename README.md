@@ -18,8 +18,12 @@ pip install kiln            # or: uv add kiln
 
 ## Quick start
 
+kiln registers itself as a target for the generic ``foundry`` CLI
+(shipped in this same package):
+
 ```bash
-kiln --help
+foundry --help
+foundry generate --config app.jsonnet
 ```
 
 ## Documentation
