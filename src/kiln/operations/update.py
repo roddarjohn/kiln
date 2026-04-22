@@ -75,7 +75,8 @@ class Update:
                 RouteParam(
                     name=resource.pk,
                     annotation=PYTHON_TYPES[resource.pk_type],
-                )
+                ),
+                RouteParam(name="body", annotation=request_schema),
             ],
             doc=f"Update a {model.pascal} by {resource.pk}.",
             request_schema=request_schema,

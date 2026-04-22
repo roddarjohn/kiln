@@ -1,15 +1,9 @@
-@router.get("/{{ '{' }}{{ pk_name }}{{ '}' }}", response_model={{ response_schema }})
-async def get_{{ model_lower }}(
-    {{ pk_name }}: {{ pk_py_type }},
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% for dep in extra_deps|default([]) %}
-    {{ dep }}
-{% endfor %}
-) -> {{ response_schema }}:
-    """Get a {{ model_name }} by {{ pk_name }}."""
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
     obj = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
     return {{ serializer_fn }}(obj)
+{% endblock %}
