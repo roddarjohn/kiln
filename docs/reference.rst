@@ -314,7 +314,7 @@ Jinja environment
 
 .. autofunction:: foundry.env.create_jinja_env
 
-.. autofunction:: foundry.env.render_snippet
+.. autofunction:: foundry.env.render_template
 
 Stdlib reference
 ----------------

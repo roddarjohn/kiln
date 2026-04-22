@@ -57,16 +57,6 @@ def test_schema_class_defaults():
     assert s.doc is None
 
 
-def test_schema_class_add_field():
-    s = SchemaClass(name="UserResource")
-    s.add_field("email", "str")
-    s.add_field("age", "int", optional=True)
-    assert len(s.fields) == 2
-    assert s.fields[0].name == "email"
-    assert s.fields[0].optional is False
-    assert s.fields[1].optional is True
-
-
 # -------------------------------------------------------------------
 # EnumClass
 # -------------------------------------------------------------------
@@ -103,35 +93,6 @@ def test_route_handler_defaults():
     assert h.status_code is None
     assert h.body_lines == []
     assert h.decorators == []
-
-
-def test_route_handler_add_decorator():
-    h = RouteHandler(method="get", path="/", function_name="list_users")
-    h.add_decorator("@cache(ttl=60)")
-    assert h.decorators == ["@cache(ttl=60)"]
-
-
-def test_route_handler_prepend_body():
-    h = RouteHandler(
-        method="get",
-        path="/",
-        function_name="list_users",
-        body_lines=["return result"],
-    )
-    h.prepend_body("result = db.execute(stmt)")
-    assert h.body_lines[0] == "result = db.execute(stmt)"
-    assert h.body_lines[1] == "return result"
-
-
-def test_route_handler_append_body():
-    h = RouteHandler(
-        method="get",
-        path="/",
-        function_name="list_users",
-        body_lines=["stmt = select(User)"],
-    )
-    h.append_body("return result")
-    assert h.body_lines[-1] == "return result"
 
 
 # -------------------------------------------------------------------

@@ -35,7 +35,7 @@ Issues = "https://github.com/roddarjohn/kiln/issues"
 foundry = "foundry.cli:cli_main"
 
 [project.entry-points."foundry.import_formatters"]
-python = "foundry._python_imports:format_python"
+python = "foundry.formatters.python:format_python"
 
 [project.entry-points."foundry.targets"]
 kiln = "kiln.target:target"

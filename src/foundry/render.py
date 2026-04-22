@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from foundry.env import render_template
 from foundry.imports import ImportCollector
 from foundry.store import BuildStore
 
@@ -158,7 +159,11 @@ class SnippetFragment:
         otherwise passes :attr:`value` through unchanged.
         """
         if self.template is not None:
-            return env.get_template(self.template).render(**self.context)
+            return render_template(
+                env=env,
+                template_name=self.template,
+                **self.context,
+            )
 
         return self.value
 

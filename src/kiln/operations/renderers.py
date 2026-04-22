@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from foundry.env import render_snippet
+from foundry.env import render_template
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import (
@@ -397,13 +397,13 @@ def render_schema_class(schema: SchemaClass, env: jinja2.Environment) -> str:
         {"name": f.name, "py_type": f.py_type, "optional": f.optional}
         for f in schema.fields
     ]
-    return render_snippet(
-        env,
-        "fastapi/schema_parts/schema_class.py.j2",
+    return render_template(
+        env=env,
+        template_name="fastapi/schema_parts/schema_class.py.j2",
         class_name=schema.name,
         doc=schema.doc,
         fields=fields,
-    )
+    ).strip()
 
 
 def render_enum_class(enum: EnumClass) -> str:
@@ -417,14 +417,14 @@ def render_enum_class(enum: EnumClass) -> str:
 def render_serializer(ser: SerializerFn, env: jinja2.Environment) -> str:
     """Render a single serializer function as a standalone string."""
     fields = [{"name": f.name} for f in ser.fields]
-    return render_snippet(
-        env,
-        "fastapi/serializer_fn.py.j2",
+    return render_template(
+        env=env,
+        template_name="fastapi/serializer_fn.py.j2",
         function_name=ser.function_name,
         model_name=ser.model_name,
         schema_name=ser.schema_name,
         fields=fields,
-    )
+    ).strip()
 
 
 def _render_handler_string(handler: RouteHandler) -> str:

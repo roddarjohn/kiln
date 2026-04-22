@@ -1,9 +1,4 @@
-"""Jinja2 environment creation and snippet rendering.
-
-Provides a factory for creating Jinja2 environments configured
-for code generation, and a helper for rendering template
-snippets.
-"""
+"""Jinja2 environment creation and template rendering."""
 
 from __future__ import annotations
 
@@ -45,26 +40,30 @@ def create_jinja_env(
     )
 
 
-def render_snippet(
+def render_template(
     env: jinja2.Environment,
     template_name: str,
-    **ctx: object,
+    **context: object,
 ) -> str:
-    """Render a template snippet and return it as a string.
+    r"""Render *template_name* against *context* and return the raw result.
 
-    Useful for rendering per-operation fragments (route handlers,
-    schema classes) that are later assembled into an outer file
-    template.
+    Every jinja call in foundry/kiln flows through this helper so
+    whitespace policy lives at the call site, not hidden inside a
+    render wrapper.  Callers handle trimming themselves:
+
+    * Inline code snippets typically want ``.strip()``.
+    * Whole-file output wants ``.rstrip() + "\n"``.
+    * Slot contributions that the outer template controls
+      typically want the raw output, unmodified.
 
     Args:
         env: The Jinja2 environment to use.
-        template_name: Template path relative to the template
-            directory, e.g. ``"fastapi/ops/get.py.j2"``.
-        **ctx: Template context variables.
+        template_name: Template path relative to the environment's
+            template directories.
+        **context: Template context variables.
 
     Returns:
-        Rendered template string with leading/trailing whitespace
-        stripped.
+        The rendered template, exactly as jinja produced it.
 
     """
-    return env.get_template(template_name).render(**ctx).strip()
+    return env.get_template(template_name).render(**context)

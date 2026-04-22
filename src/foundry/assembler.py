@@ -18,6 +18,7 @@ from itertools import groupby
 from operator import attrgetter, or_
 from typing import TYPE_CHECKING, Any
 
+from foundry.env import render_template
 from foundry.imports import format_imports
 from foundry.render import FileFragment, SnippetFragment
 from foundry.spec import GeneratedFile
@@ -135,7 +136,9 @@ def _render_file(
         ),
     }
 
-    template = ctx.env.get_template(file.template)
-    content = template.render(**context).rstrip() + "\n"
-
-    return GeneratedFile(path=file.path, content=content)
+    rendered = render_template(
+        env=ctx.env,
+        template_name=file.template,
+        **context,
+    )
+    return GeneratedFile(path=file.path, content=rendered.rstrip() + "\n")
