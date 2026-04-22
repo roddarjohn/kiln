@@ -260,7 +260,6 @@ def test_assemble_static_files():
     store = BuildStore()
     store.add(
         "project",
-        "project",
         "scaffold",
         StaticFile(
             path="main.py",
@@ -296,7 +295,6 @@ def test_assemble_empty_template_static_file():
     """Static files with empty templates produce empty content."""
     store = BuildStore()
     store.add(
-        "project",
         "project",
         "scaffold",
         StaticFile(path="pkg/__init__.py", template="", context={}),

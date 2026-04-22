@@ -209,6 +209,7 @@ def _run_ops(
     for meta, op_cls in ops:
         if meta.after_children != after_children:
             continue
+
         # dispatch_on: fire only on the instance whose discriminator
         # matches this op's name (e.g. OperationConfig.name == "get").
         if (
@@ -216,11 +217,14 @@ def _run_ops(
             and getattr(ctx.instance, meta.dispatch_on, None) != meta.name
         ):
             continue
+
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
         if callable(when_method) and not when_method(ctx):
             continue
+
         options = _resolve_options(op_cls, ctx.instance)
+
         ctx.store.add(
             ctx.instance_id,
             meta.name,

@@ -54,12 +54,16 @@ def assemble(
 
     """
     fragments: list[Fragment] = []
-    for instance_id, _op_name, items in store.entries():
+
+    for instance_id, _, items in store.entries():
         scoped = _scoped_ctx(ctx, store, instance_id)
+
         for item in items:
-            if not registry.has_renderer(type(item)):
-                continue
+            # Missing renderer = silent data loss.  Let
+            # registry.render raise :class:`LookupError`; the
+            # pipeline wraps it in :class:`GenerationError`.
             fragments.extend(registry.render(item, scoped))
+
     return _merge_fragments(fragments, ctx)
 
 
