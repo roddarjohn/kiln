@@ -18,7 +18,7 @@ from foundry.outputs import (
     TestCase,
 )
 from foundry.render import BuildStore
-from foundry.scope import PROJECT, Scope
+from foundry.scope import PROJECT, Scope, ScopeTree
 from kiln.config.schema import (
     App,
     AppConfig,
@@ -224,7 +224,9 @@ _ROUTER_RESOURCE_SCOPE = Scope(
     config_key="resources",
     parent=_ROUTER_APP_SCOPE,
 )
-_ROUTER_SCOPES = [PROJECT, _ROUTER_APP_SCOPE, _ROUTER_RESOURCE_SCOPE]
+_ROUTER_SCOPE_TREE = ScopeTree(
+    [PROJECT, _ROUTER_APP_SCOPE, _ROUTER_RESOURCE_SCOPE]
+)
 
 
 def _app_id(app_index: int) -> str:
@@ -312,7 +314,7 @@ class TestRouter:
 
     def test_mounts_resources_from_store(self):
         """One RouterMount per resource with a RouteHandler in the store."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         post, comment = self._res("Post"), self._res("Comment")
         ctx = self._ctx("blog", [post, comment], store)
         self._add_handler(store, ctx.instance_id, 0, post)
@@ -332,7 +334,7 @@ class TestRouter:
 
     def test_router_static_context(self):
         """Static file context has correct route entries."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         user = self._res("User")
         ctx = self._ctx("api", [user], store)
         self._add_handler(store, ctx.instance_id, 0, user)
@@ -346,7 +348,7 @@ class TestRouter:
 
     def test_deduplicates_iid_across_ops(self):
         """One resource with multiple route-emitting ops mounts once."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         user = self._res("User")
         ctx = self._ctx("api", [user], store)
         iid = self._add_resource(store, ctx.instance_id, 0, user)
@@ -368,7 +370,7 @@ class TestRouter:
 
     def test_skips_resources_without_handlers(self):
         """A resource with no RouteHandler entries is not mounted."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         silent, loud = self._res("Silent"), self._res("Loud")
         ctx = self._ctx("api", [silent, loud], store)
         silent_iid = self._add_resource(store, ctx.instance_id, 0, silent)
@@ -386,7 +388,7 @@ class TestRouter:
 
     def test_ignores_non_resource_scope(self):
         """RouteHandlers outside resource scope are not mounted."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         store.add(
             "project",
             "whatever",
@@ -402,14 +404,14 @@ class TestRouter:
         ctx = self._ctx(
             "app",
             [self._res("User")],
-            BuildStore(scopes=_ROUTER_SCOPES),
+            BuildStore(scope_tree=_ROUTER_SCOPE_TREE),
         )
         result = list(Router().build(ctx, _Empty()))
         assert result == []
 
     def test_per_app_invocation_emits_its_own_router(self):
         """Each app-scope invocation emits only its own app's router."""
-        store = BuildStore(scopes=_ROUTER_SCOPES)
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         post, product = self._res("Post"), self._res("Product")
         blog_ctx = self._ctx("blog", [post], store, app_index=0)
         shop_ctx = self._ctx("shop", [product], store, app_index=1)

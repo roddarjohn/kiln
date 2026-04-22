@@ -95,56 +95,77 @@ class Scope:
 PROJECT = Scope(name="project", config_key="")
 
 
-def scope_for(instance_id: str, scopes: list[Scope]) -> Scope:
-    """Return the :class:`Scope` for a dot-path ``instance_id``.
+class ScopeTree(tuple[Scope, ...]):
+    """Flat collection of scopes with convenience lookups.
 
-    Instance ids produced by the engine are dot-joined paths of
-    the form ``"project.<config_key>.<index>..."``.  Each
-    ``config_key`` maps to exactly one child scope at the current
-    level, so the scope can be recovered by walking the tree from
-    :data:`PROJECT` using segment pairs.
+    Subclassing :class:`tuple` gives callers the usual
+    iteration/index/`len` ergonomics for free, while the two
+    methods below handle the recurring "children of X" and
+    "scope for id Y" patterns so the engine, store, and
+    assembler don't each reinvent the search.
 
-    Args:
-        instance_id: A dot-path instance id (e.g.
-            ``"project.apps.0.resources.2"``).
-        scopes: The flat list returned by :func:`discover_scopes`
-            for the config model in use.
+    Construct from :func:`discover_scopes` output::
 
-    Returns:
-        The :class:`Scope` the id terminates at.
-
-    Raises:
-        ValueError: If the id doesn't start with ``"project"`` or
-            references a ``config_key`` not present in *scopes*.
+        tree = ScopeTree(discover_scopes(MyConfig))
 
     """
-    segments = instance_id.split(".")
-    if segments[0] != "project":
-        msg = f"Instance id {instance_id!r} must start with 'project'"
-        raise ValueError(msg)
 
-    current = PROJECT
-    for i in range(1, len(segments), 2):
-        config_key = segments[i]
-        try:
-            current = next(
-                scope
-                for scope in scopes
-                if scope.parent is current and scope.config_key == config_key
-            )
-        except StopIteration as exc:
-            msg = (
-                f"Instance id {instance_id!r} references config_key "
-                f"{config_key!r}, which is not a child of "
-                f"{current.name!r}"
-            )
-            raise ValueError(msg) from exc
-    return current
+    __slots__ = ()
+
+    def children_of(self, parent: Scope) -> list[Scope]:
+        """Return direct children of *parent*, in discovery order."""
+        return [scope for scope in self if scope.parent is parent]
+
+    def scope_for(self, instance_id: str) -> Scope:
+        """Return the :class:`Scope` an ``instance_id`` belongs to.
+
+        Instance ids produced by the engine are dot-joined paths
+        of the form ``"project.<config_key>.<index>..."``.  Each
+        ``config_key`` maps to exactly one child scope at the
+        current level, so the scope is recovered by walking the
+        tree from :data:`PROJECT` using segment pairs.
+
+        Args:
+            instance_id: A dot-path instance id (e.g.
+                ``"project.apps.0.resources.2"``).
+
+        Returns:
+            The :class:`Scope` the id terminates at.
+
+        Raises:
+            ValueError: If the id doesn't start with ``"project"``
+                or references a ``config_key`` not present in
+                this tree.
+
+        """
+        segments = instance_id.split(".")
+        if segments[0] != "project":
+            msg = f"Instance id {instance_id!r} must start with 'project'"
+            raise ValueError(msg)
+
+        current = PROJECT
+        for i in range(1, len(segments), 2):
+            config_key = segments[i]
+            try:
+                current = next(
+                    scope
+                    for scope in self
+                    if scope.parent is current
+                    and scope.config_key == config_key
+                )
+            except StopIteration as exc:
+                msg = (
+                    f"Instance id {instance_id!r} references config_key "
+                    f"{config_key!r}, which is not a child of "
+                    f"{current.name!r}"
+                )
+                raise ValueError(msg) from exc
+        return current
 
 
 def discover_scopes(
     config_cls: type[BaseModel],
-) -> list[Scope]:
+) -> ScopeTree:
     """Derive scopes from a Pydantic model's :class:`Scoped` markers.
 
     The top-level config is always the ``"project"`` scope.  Each
@@ -167,11 +188,11 @@ def discover_scopes(
         config_cls: The Pydantic model class to inspect.
 
     Returns:
-        Flat list of all discovered scopes, project first,
-        followed by every discovered scope.
+        :class:`ScopeTree` containing every discovered scope,
+        project first.
 
     """
-    return [PROJECT, *_discover(config_cls, PROJECT, (), set())]
+    return ScopeTree((PROJECT, *_discover(config_cls, PROJECT, (), set())))
 
 
 def _discover(

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from foundry.render import BuildStore, Fragment, RenderCtx, RenderRegistry
-from foundry.scope import PROJECT, Scope
+from foundry.scope import PROJECT, Scope, ScopeTree
 
 # -------------------------------------------------------------------
 # RenderRegistry
@@ -132,11 +132,11 @@ _RESOURCE_SCOPE = Scope(
 _DATABASE_SCOPE = Scope(
     name="database", config_key="databases", parent=_APP_SCOPE
 )
-_SCOPES = [PROJECT, _APP_SCOPE, _RESOURCE_SCOPE, _DATABASE_SCOPE]
+_SCOPE_TREE = ScopeTree([PROJECT, _APP_SCOPE, _RESOURCE_SCOPE, _DATABASE_SCOPE])
 
 
 def test_store_children_returns_registered_children_in_order():
-    store = BuildStore(scopes=_SCOPES)
+    store = BuildStore(scope_tree=_SCOPE_TREE)
     app_id = "project.apps.0"
     store.register_instance(app_id, "blog_app")
     store.register_instance(
@@ -157,7 +157,7 @@ def test_store_children_returns_registered_children_in_order():
 
 
 def test_store_children_filters_by_scope():
-    store = BuildStore(scopes=_SCOPES)
+    store = BuildStore(scope_tree=_SCOPE_TREE)
     app_id = "project.apps.0"
     store.register_instance(app_id, "blog_app")
     store.register_instance(
@@ -177,7 +177,7 @@ def test_store_children_filters_by_scope():
 
 def test_store_children_dedupes_repeat_registration():
     """Registering the same instance twice doesn't duplicate the edge."""
-    store = BuildStore(scopes=_SCOPES)
+    store = BuildStore(scope_tree=_SCOPE_TREE)
     app_id = "project.apps.0"
     store.register_instance(app_id, "blog_app")
     store.register_instance(
@@ -195,7 +195,7 @@ def test_store_children_dedupes_repeat_registration():
 
 
 def test_store_descendants_of_type_filters_and_returns_items():
-    store = BuildStore(scopes=_SCOPES)
+    store = BuildStore(scope_tree=_SCOPE_TREE)
     app_id = "project.apps.0"
     res_a = f"{app_id}.resources.0"
     res_b = f"{app_id}.resources.1"

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from foundry.imports import ImportCollector
-from foundry.scope import Scope, scope_for
+from foundry.scope import Scope, ScopeTree
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -183,10 +183,10 @@ class BuildStore:
     tree without callers reconstructing store keys.
 
     Attributes:
-        scopes: Flat list of all scopes discovered for the build's
-            config.  Required for the :meth:`scope_of` derivation
-            (and therefore for ``child_scope=`` filtering on
-            :meth:`children`).  Empty by default so ad-hoc
+        scope_tree: :class:`ScopeTree` for the build's config.
+            Required for the :meth:`scope_of` derivation (and
+            therefore for ``child_scope=`` filtering on
+            :meth:`children`).  Defaults to empty so ad-hoc
             store-level tests can skip it when they don't care.
         _items: Internal storage mapping ``(instance_id, op_name)``
             keys to object lists.
@@ -197,7 +197,7 @@ class BuildStore:
 
     """
 
-    scopes: list[Scope] = field(default_factory=list)
+    scope_tree: ScopeTree = field(default_factory=ScopeTree)
     _items: dict[tuple[str, str], list[object]] = field(default_factory=dict)
     _instances: dict[str, object] = field(default_factory=dict)
     _children: dict[str, list[str]] = field(default_factory=dict)
@@ -249,7 +249,7 @@ class BuildStore:
 
     def scope_of(self, instance_id: str) -> Scope:
         """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
-        return scope_for(instance_id, self.scopes)
+        return self.scope_tree.scope_for(instance_id)
 
     def children(
         self,

@@ -18,7 +18,7 @@ to framework-specific assemblers in the ``kiln`` package.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -30,7 +30,7 @@ from foundry.operation import (
     load_default_registry,
 )
 from foundry.render import BuildStore
-from foundry.scope import PROJECT, Scope, discover_scopes
+from foundry.scope import PROJECT, Scope, ScopeTree, discover_scopes
 
 
 @dataclass
@@ -101,18 +101,20 @@ class Engine:
             all objects produced by operations.
 
         """
-        scopes = discover_scopes(type(config))
-        self.registry.validate_scopes({scope.name for scope in scopes})
+        scope_tree = discover_scopes(type(config))
+        self.registry.validate_scopes({scope.name for scope in scope_tree})
 
         state = _WalkState(
             config=config,
-            store=BuildStore(scopes=scopes),
+            store=BuildStore(scope_tree=scope_tree),
             ops=self.registry.sorted_by_scope(),
-            scopes=scopes,
+            scope_tree=scope_tree,
             package_prefix=self.package_prefix,
         )
 
-        _visit(PROJECT, config, state, _ROOT_ANCESTRY)
+        # Bootstrap the project root; every descendant flows
+        # through _visit recursively.
+        _visit(PROJECT, config, "project", parent_id=None, state=state)
 
         return state.store
 
@@ -124,75 +126,68 @@ class _WalkState:
     config: BaseModel
     store: BuildStore
     ops: dict[str, list[OperationEntry]]
-    scopes: list[Scope]
+    scope_tree: ScopeTree
     package_prefix: str
-
-
-class _Ancestry(NamedTuple):
-    """Position of the current recursion in the scope tree.
-
-    Attributes:
-        path: Compounded instance-id path from the project root,
-            e.g. ``"project.apps.0"``.  Empty string only at the
-            very root before the project scope is visited.  Joined
-            with the current ``own_id`` (via ``.``) to form the
-            full ``instance_id`` — which in turn becomes the
-            enclosing path for the scope's children.
-        parent_id: Id of the enclosing scope instance, forwarded
-            to :meth:`BuildStore.register_instance` so
-            :meth:`BuildStore.children` surfaces the tree.  ``None``
-            before the project scope is visited.
-
-    """
-
-    path: str
-    parent_id: str | None
-
-
-_ROOT_ANCESTRY = _Ancestry(path="", parent_id=None)
 
 
 def _visit(
     scope: Scope,
-    config: BaseModel,
+    scope_config: BaseModel,
+    instance_id: str,
+    parent_id: str | None,
     state: _WalkState,
-    ancestry: _Ancestry,
 ) -> None:
-    """Recursively walk *scope* and its descendants.
+    """Register one scope instance and recurse into its child scopes.
 
     Instance IDs are dot-joined paths that mirror the config
-    structure — root, then ``config_key.index`` pairs for each
-    level.  A resource at index 2 under app at index 0 lands at
-    ``"project.apps.0.resources.2"``.  The scope tree is
+    structure — ``"project"`` at the root, then ``config_key.index``
+    segments for each descendant level.  A resource at index 2
+    under app at index 0 lands at
+    ``"project.apps.0.resources.2"``, so the scope tree is
     recoverable from the id by matching each config_key back to
     its :class:`~foundry.scope.Scope`.
+
+    Args:
+        scope: The scope this instance belongs to.
+        scope_config: The pydantic config object for this instance.
+        instance_id: Pre-compounded dot-path id for this instance.
+        parent_id: Id of the enclosing scope instance, or ``None``
+            for the project root.
+        state: Walk state shared across the recursion.
+
     """
+    state.store.register_instance(
+        instance_id,
+        scope_config,
+        parent=parent_id,
+    )
+
+    ctx = BuildContext(
+        config=state.config,
+        scope=scope,
+        instance=scope_config,
+        instance_id=instance_id,
+        store=state.store,
+        package_prefix=state.package_prefix,
+    )
+
     ops = state.ops.get(scope.name, [])
-    for own_id, scope_config in _resolve_instances(scope, config):
-        instance_id = f"{ancestry.path}.{own_id}" if ancestry.path else own_id
-        state.store.register_instance(
-            instance_id,
+    _run_ops(ops, ctx, after_children=False)
+
+    for child_scope in state.scope_tree.children_of(scope):
+        for own_id, child_config in _resolve_instances(
+            child_scope,
             scope_config,
-            parent=ancestry.parent_id,
-        )
+        ):
+            _visit(
+                child_scope,
+                child_config,
+                instance_id=f"{instance_id}.{own_id}",
+                parent_id=instance_id,
+                state=state,
+            )
 
-        ctx = BuildContext(
-            config=state.config,
-            scope=scope,
-            instance=scope_config,
-            instance_id=instance_id,
-            store=state.store,
-            package_prefix=state.package_prefix,
-        )
-
-        _run_ops(ops, ctx, after_children=False)
-
-        child_ancestry = _Ancestry(path=instance_id, parent_id=instance_id)
-        for child_scope in state.scopes:
-            if child_scope.parent is scope:
-                _visit(child_scope, scope_config, state, child_ancestry)
-
-        _run_ops(ops, ctx, after_children=True)
+    _run_ops(ops, ctx, after_children=True)
 
 
 def _run_ops(
@@ -236,37 +231,31 @@ def _run_ops(
 
 def _resolve_instances(
     scope: Scope,
-    config: BaseModel,
+    parent_config: BaseModel,
 ) -> list[tuple[str, BaseModel]]:
-    """Yield ``(instance_id, scope_config)`` pairs for *scope*.
+    """Yield ``(own_id, scope_config)`` pairs for child *scope*.
 
-    The root (project) scope always returns a single entry with
-    the config itself.  Child scopes walk
-    :attr:`Scope.resolve_path` from *config* to locate the list of
-    items, then emit one entry per item.
+    Walks :attr:`Scope.resolve_path` from *parent_config* to the
+    scoped ``list[BaseModel]`` field and emits one entry per item.
+    Never called with the project scope — :func:`_visit` handles
+    that root case directly.
 
     Args:
         scope: The scope to enumerate.
-        config: The enclosing scope's config instance from which
+        parent_config: The enclosing scope's config from which
             to resolve this scope's items.
 
     Returns:
-        List of ``(id, scope_config)`` tuples.
+        List of ``(own_id, scope_config)`` tuples, where
+        ``own_id`` is the ``"{config_key}.{index}"`` segment that
+        :func:`_visit` compounds onto the parent's id.
 
     """
-    if scope is PROJECT:
-        return [("project", config)]
-
-    attr_value: object = config
+    attr_value: object = parent_config
     for attr in scope.resolve_path:
         attr_value = getattr(attr_value, attr)
     scope_configs = cast("list[BaseModel]", attr_value)
 
-    # Own-id segment is ``{config_key}.{index}`` — paired so the
-    # full compounded instance id tracks config structure (e.g.
-    # ``"project.apps.0.resources.2"``).  Ops that need a human
-    # identifier derive it from the scope instance directly
-    # rather than parsing this id.
     return [
         (f"{scope.config_key}.{index}", scope_config)
         for index, scope_config in enumerate(scope_configs)
