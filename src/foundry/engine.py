@@ -212,11 +212,14 @@ def _validate_ops(operations: list[type], scopes: list[Scope]) -> None:
 
     """
     names = {s.name for s in scopes}
+
     for op_cls in operations:
         meta = get_operation_meta(op_cls)
+
         if meta is None:
             msg = f"{op_cls} has no @operation metadata"
             raise ValueError(msg)
+
         if meta.scope not in names:
             msg = (
                 f"Operation '{meta.name}' targets "
