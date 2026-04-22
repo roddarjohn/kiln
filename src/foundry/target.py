@@ -43,8 +43,8 @@ class Target:
             (e.g. ``"python"``).  Passed to
             :func:`foundry.imports.format_imports` so the
             assembler renders import blocks in the right syntax.
-            Targets register their formatter with
-            :func:`foundry.imports.register_formatter`.
+            Targets declare their formatter under the
+            ``foundry.import_formatters`` entry-point group.
         schema: :class:`~foundry.config.FoundryConfig` subclass the
             target's config files validate against.  Foundry's
             loader instantiates this.

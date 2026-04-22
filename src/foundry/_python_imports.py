@@ -9,11 +9,10 @@ Imports are rendered following :pep:`8` / isort conventions:
 Blank lines separate the groups.  Long ``from`` lines are
 wrapped with parentheses to stay within 80 characters.
 
-Registered under the ``"python"`` language identifier at
-:mod:`foundry.imports` load time.  Override by registering your
-own formatter under the same language, either directly via
-:func:`foundry.imports.register_formatter` or through the
-``foundry.import_formatters`` entry-point group.
+Registered under the ``"python"`` language identifier via the
+``foundry.import_formatters`` entry-point group declared in
+foundry's ``pyproject.toml``.  Override by declaring your own
+entry point with the same language name.
 """
 
 from __future__ import annotations
@@ -38,8 +37,10 @@ def format_python(collector: ImportCollector) -> str:
     or the empty string when the collector has no imports.
     """
     import_lines = _python_lines(collector)
+
     if not import_lines:
         return ""
+
     return "\n".join(import_lines) + "\n"
 
 
@@ -77,10 +78,12 @@ def _python_lines(collector: ImportCollector) -> list[str]:
 
     groups = [group for group in (future, stdlib, third) if group]
     result: list[str] = []
+
     for index, group in enumerate(groups):
         if index > 0:
             result.append("")
         result.extend(group)
+
     return result
 
 
@@ -91,7 +94,10 @@ def _format_from_import(module: str, names: list[str]) -> str:
     with parentheses otherwise.
     """
     single = f"from {module} import {', '.join(names)}"
+
     if len(single) <= _MAX_LINE:
         return single
+
     joined = ",\n    ".join(names)
+
     return f"from {module} import (\n    {joined},\n)"

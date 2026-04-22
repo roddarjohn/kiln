@@ -2,10 +2,10 @@
 
 :class:`ImportCollector` accumulates ``(module, name)`` pairs
 produced by build operations.  Formatting is language-specific:
-callers register a formatter via :func:`register_formatter` for
-their target language (e.g. ``"python"``), then request output
-via :meth:`ImportCollector.format` or :func:`format_imports`
-with a language selector.
+each language declares a formatter under the
+``foundry.import_formatters`` entry-point group, then
+:func:`format_imports` / :meth:`ImportCollector.format` resolves
+it by language identifier.
 
 The collector stores data only; it has no knowledge of PEP 8,
 TypeScript ``from`` clauses, Go ``import`` blocks, or any other
@@ -15,6 +15,7 @@ the package that owns the language.
 
 from __future__ import annotations
 
+import functools
 import importlib.metadata
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -47,56 +48,49 @@ class ImportCollector:
         collector.format("python")
         # "import uuid\nfrom datetime import date, datetime\n"
 
-    Rendering is delegated to a registered formatter — see
-    :func:`register_formatter`.
+    Rendering is delegated to a language formatter looked up via
+    the ``foundry.import_formatters`` entry-point group.
 
     """
 
-    def __init__(self) -> None:  # noqa: D107
+    def __init__(self, *others: ImportCollector) -> None:
+        """Build an empty collector, or seed it from *others*.
+
+        Args:
+            *others: Collectors whose imports are unioned into
+                the new instance.
+
+        """
         self._bare: dict[str, None] = {}
         self._from: dict[str, dict[str, None]] = defaultdict(dict)
 
+        for other in others:
+            self.update(other=other)
+
     def add(self, module: str) -> None:
-        """Register a bare ``<module>`` import.
-
-        Args:
-            module: Module name, e.g. ``"uuid"``.
-
-        """
+        """Register a bare ``<module>`` import."""
         self._bare[module] = None
 
     def add_from(self, module: str, *names: str) -> None:
         """Register an import of *names* from *module*.
 
         Multiple calls with the same *module* are merged.
-
-        Args:
-            module: Module to import from, e.g. ``"datetime"``.
-            *names: Names to import, e.g. ``"datetime"``,
-                ``"date"``.
-
         """
         for name in names:
             self._from[module][name] = None
 
     def update(self, other: ImportCollector) -> None:
-        """Merge imports from *other* into this collector.
-
-        Bare imports and from-imports are both unioned; duplicates
-        are deduplicated.
-        """
+        """Merge imports from *other* into this collector."""
         for module in other._bare:
             self._bare[module] = None
+
         for module, names in other._from.items():
             for name in names:
                 self._from[module][name] = None
 
     def __or__(self, other: ImportCollector) -> ImportCollector:
         """Return a new collector with imports from both operands."""
-        combined = ImportCollector()
-        combined.update(other=self)
-        combined.update(other=other)
-        return combined
+        return ImportCollector(self, other)
 
     @property
     def bare_modules(self) -> list[str]:
@@ -111,44 +105,11 @@ class ImportCollector:
     def format(self, language: str) -> str:
         """Render the imports as a string in *language*'s syntax.
 
-        Args:
-            language: Identifier of a registered formatter,
-                e.g. ``"python"``.
-
-        Returns:
-            The formatted import block (may be empty).
-
         Raises:
             KeyError: No formatter registered for *language*.
 
         """
         return format_imports(collector=self, language=language)
-
-
-#: Language → formatter.  Populated by :func:`register_formatter`,
-#: which built-in registration and entry-point discovery both
-#: call at module load.  Third-party plugins can override
-#: built-ins by calling :func:`register_formatter` (or declaring
-#: an entry point) with the same language name.
-_FORMATTERS: dict[str, Callable[[ImportCollector], str]] = {}
-
-
-def register_formatter(
-    language: str,
-    formatter: Callable[[ImportCollector], str],
-) -> None:
-    """Register an import-block formatter for *language*.
-
-    Targets call this at import time so the assembler can render
-    imports for their language.
-
-    Args:
-        language: Language identifier, e.g. ``"python"``.
-        formatter: Callable that turns a collector into a
-            language-appropriate import block string.
-
-    """
-    _FORMATTERS[language] = formatter
 
 
 def format_imports(collector: ImportCollector, language: str) -> str:
@@ -159,38 +120,25 @@ def format_imports(collector: ImportCollector, language: str) -> str:
     """
     if not language:
         return ""
-
-    formatter = _FORMATTERS.get(language)
-
-    if formatter is None:
-        registered = sorted(_FORMATTERS)
-        msg = (
-            f"No import formatter registered for language {language!r}; "
-            f"registered: {registered}"
-        )
-        raise KeyError(msg)
-
-    return formatter(collector)
+    return _get_formatter(language=language)(collector)
 
 
-def _register_entry_point_formatters() -> None:
-    """Load every ``foundry.import_formatters`` entry point.
+@functools.cache
+def _get_formatter(language: str) -> Callable[[ImportCollector], str]:
+    """Resolve *language*'s formatter from the entry-point group.
 
-    Includes foundry's own Python formatter (declared in
-    foundry's ``pyproject.toml``) and any third-party formatters
-    installed alongside.  Entries with the same language name
-    override one another in discovery order.
+    Cached per language after the first successful lookup;
+    failed lookups are not cached, so a later plugin install is
+    picked up on retry.
     """
-    entry_points = importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP)
-    for entry_point in entry_points:
-        register_formatter(
-            language=entry_point.name,
-            formatter=entry_point.load(),
-        )
+    available = list(importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP))
+    for entry_point in available:
+        if entry_point.name == language:
+            return entry_point.load()
 
-
-# Every formatter — including foundry's own Python one — is
-# registered via the ``foundry.import_formatters`` entry-point
-# group declared in ``pyproject.toml``.  See
-# :data:`_ENTRY_POINT_GROUP`.
-_register_entry_point_formatters()
+    registered = sorted(entry_point.name for entry_point in available)
+    msg = (
+        f"No import formatter registered for language {language!r}; "
+        f"registered: {registered}"
+    )
+    raise KeyError(msg)

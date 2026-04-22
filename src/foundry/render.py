@@ -31,9 +31,8 @@ class RenderCtx:
             e.g. ``"_generated"``.
         language: Target language identifier used to render
             import blocks (e.g. ``"python"``).  Must match a
-            formatter registered with
-            :func:`foundry.imports.register_formatter` or via
-            the ``foundry.import_formatters`` entry-point group.
+            formatter declared in the ``foundry.import_formatters``
+            entry-point group.
         store: The build store.  Renderers reach ancestor scope
             instances through it (e.g. a handler rendered at
             operation scope looks up its resource via
