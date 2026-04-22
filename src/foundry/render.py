@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from foundry.imports import ImportCollector
+from foundry.scope import Scope, scope_for
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -165,48 +166,44 @@ class RenderRegistry:
 registry = RenderRegistry()
 
 
-#: Store key for a scope instance — ``(scope_name, instance_id)``.
-InstanceKey = tuple[str, str]
-
-
 @dataclass
 class BuildStore:
     """Accumulator for objects produced during the build phase.
 
-    Objects are keyed by ``(scope_name, instance_id, op_name)``
-    so the engine and later operations can query earlier output.
-    The store also retains a map from ``(scope, instance_id)`` to
-    the scope instance object that produced the entries, so the
-    assembler can attach scope-specific context to ``RenderCtx``
-    without target-specific lookups.
+    Objects are keyed by ``(instance_id, op_name)``.  Instance ids
+    are dot-path strings produced by the engine (e.g.
+    ``"project.apps.0.resources.2"``) — the leaf scope, the
+    ancestor chain, and every index are all recoverable from the
+    id via :func:`foundry.scope.scope_for`, so the store never
+    needs a separate scope field.
 
-    Scope-instance ancestry is tracked independently: when the
-    engine registers an instance it may pass the parent
-    :data:`InstanceKey`, and :meth:`children` /
-    :meth:`descendants_of_type` let ops walk the tree without
-    knowing how ``instance_id`` strings are derived.
+    Ancestry is tracked in :attr:`_children` — the engine records
+    each instance's parent id on registration so
+    :meth:`children` / :meth:`descendants_of_type` can walk the
+    tree without callers reconstructing store keys.
 
     Attributes:
-        _items: Internal storage mapping keys to object lists.
-        _instances: Map from ``(scope, instance_id)`` to the scope
-            instance object (populated by the engine).
-        _children: Map from a parent :data:`InstanceKey` to its
-            registered child keys, in insertion order.  Populated
-            by :meth:`register_instance` when a parent is provided.
+        scopes: Flat list of all scopes discovered for the build's
+            config.  Required for the :meth:`scope_of` derivation
+            (and therefore for ``child_scope=`` filtering on
+            :meth:`children`).  Empty by default so ad-hoc
+            store-level tests can skip it when they don't care.
+        _items: Internal storage mapping ``(instance_id, op_name)``
+            keys to object lists.
+        _instances: Map from ``instance_id`` to the scope-instance
+            config object.
+        _children: Map from a parent instance id to its registered
+            child instance ids, in insertion order.
 
     """
 
-    _items: dict[tuple[str, str, str], list[object]] = field(
-        default_factory=dict
-    )
-    _instances: dict[InstanceKey, object] = field(default_factory=dict)
-    _children: dict[InstanceKey, list[InstanceKey]] = field(
-        default_factory=dict
-    )
+    scopes: list[Scope] = field(default_factory=list)
+    _items: dict[tuple[str, str], list[object]] = field(default_factory=dict)
+    _instances: dict[str, object] = field(default_factory=dict)
+    _children: dict[str, list[str]] = field(default_factory=dict)
 
     def add(
         self,
-        scope: str,
         instance_id: str,
         op_name: str,
         *objects: object,
@@ -214,24 +211,21 @@ class BuildStore:
         """Store build outputs for a build step.
 
         Args:
-            scope: Scope name (e.g. ``"resource"``).
-            instance_id: Instance identifier within the scope.
+            instance_id: Dot-path id produced by the engine.
             op_name: Operation name that produced these objects.
             *objects: The build outputs to store.
 
         """
-        key = (scope, instance_id, op_name)
-        self._items.setdefault(key, []).extend(objects)
+        self._items.setdefault((instance_id, op_name), []).extend(objects)
 
     def register_instance(
         self,
-        scope: str,
         instance_id: str,
         instance: object,
         *,
-        parent: InstanceKey | None = None,
+        parent: str | None = None,
     ) -> None:
-        """Remember the scope instance object for a ``(scope, iid)``.
+        """Remember the scope-instance object for *instance_id*.
 
         Called by the engine before operations run at each scope
         instance.  The assembler looks instances up via
@@ -240,153 +234,111 @@ class BuildStore:
         build entry.
 
         Args:
-            scope: Scope name.
-            instance_id: Instance identifier.
+            instance_id: Dot-path id.
             instance: The scope-instance config object.
-            parent: When given, record this instance as a child of
-                ``parent`` so it surfaces via :meth:`children`.
-                Omit for root-scope instances.
+            parent: Id of the enclosing scope instance.  When
+                given, :meth:`children` will surface this instance
+                under *parent*.  Omit for the project root.
 
         """
-        self._instances[scope, instance_id] = instance
+        self._instances[instance_id] = instance
         if parent is not None:
             siblings = self._children.setdefault(parent, [])
-            child_key = (scope, instance_id)
-            if child_key not in siblings:
-                siblings.append(child_key)
+            if instance_id not in siblings:
+                siblings.append(instance_id)
+
+    def scope_of(self, instance_id: str) -> Scope:
+        """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
+        return scope_for(instance_id, self.scopes)
 
     def children(
         self,
-        parent_scope: str,
         parent_id: str,
         *,
         child_scope: str | None = None,
-    ) -> list[tuple[InstanceKey, object]]:
-        """Return child instances of ``(parent_scope, parent_id)``.
+    ) -> list[tuple[str, object]]:
+        """Return child instances of *parent_id*.
 
         Children come back in registration (config) order.  When
         *child_scope* is given, only children in that scope are
-        returned.
+        returned (requires :attr:`scopes` to be populated).
 
         Args:
-            parent_scope: Parent scope name.
             parent_id: Parent instance id.
             child_scope: Optional scope-name filter.
 
         Returns:
-            List of ``((child_scope, child_id), child_instance)``.
+            List of ``(child_id, child_instance)`` pairs.
 
         """
-        out: list[tuple[InstanceKey, object]] = []
-        for child_key in self._children.get((parent_scope, parent_id), []):
-            if child_scope is not None and child_key[0] != child_scope:
+        out: list[tuple[str, object]] = []
+        for child_id in self._children.get(parent_id, []):
+            if (
+                child_scope is not None
+                and self.scope_of(child_id).name != child_scope
+            ):
                 continue
-            out.append((child_key, self._instances[child_key]))
+            out.append((child_id, self._instances[child_id]))
         return out
 
     def descendants_of_type(
         self,
-        parent_scope: str,
         parent_id: str,
         output_type: type,
         *,
         child_scope: str | None = None,
-    ) -> list[tuple[InstanceKey, object, list[object]]]:
+    ) -> list[tuple[str, object, list[object]]]:
         """Return children whose scope produced outputs of *output_type*.
 
-        Walks the direct children of ``(parent_scope, parent_id)``
-        and returns, for each child with at least one matching
-        output, the child's key, its instance object, and the
-        matching items.  Used by aggregator ops (e.g. the app-scope
-        router) to find which children contributed to a build step
-        without reconstructing store keys.
+        Walks the direct children of *parent_id* and returns, for
+        each child with at least one matching output, its id,
+        instance object, and matching items.  Used by aggregator
+        ops (e.g. the app-scope router) to find which children
+        contributed to a build step without reconstructing store
+        keys.
 
         Args:
-            parent_scope: Parent scope name.
             parent_id: Parent instance id.
             output_type: Class of outputs to filter by.
             child_scope: Optional scope-name filter on children.
 
         Returns:
-            List of ``((child_scope, child_id), child_instance,
-            items)`` for every child with at least one matching
-            output.
+            List of ``(child_id, child_instance, items)`` for
+            every child with at least one matching output.
 
         """
-        out: list[tuple[InstanceKey, object, list[object]]] = []
-        for child_key, child_inst in self.children(
-            parent_scope,
+        out: list[tuple[str, object, list[object]]] = []
+        for child_id, child_inst in self.children(
             parent_id,
             child_scope=child_scope,
         ):
             items = [
                 item
-                for item in self.get_by_scope(*child_key)
+                for item in self.get_by_instance(child_id)
                 if isinstance(item, output_type)
             ]
             if items:
-                out.append((child_key, child_inst, items))
+                out.append((child_id, child_inst, items))
         return out
 
-    def get_instance(
-        self,
-        scope: str,
-        instance_id: str,
-    ) -> object | None:
-        """Return the instance registered for ``(scope, iid)``, if any."""
-        return self._instances.get((scope, instance_id))
+    def get_instance(self, instance_id: str) -> object | None:
+        """Return the instance registered for *instance_id*, if any."""
+        return self._instances.get(instance_id)
 
-    def get(
-        self,
-        scope: str,
-        instance_id: str,
-        op_name: str,
-    ) -> list[object]:
-        """Retrieve build outputs for a specific build step.
+    def get(self, instance_id: str, op_name: str) -> list[object]:
+        """Retrieve build outputs for a specific ``(instance, op)``."""
+        return list(self._items.get((instance_id, op_name), []))
 
-        Args:
-            scope: Scope name.
-            instance_id: Instance identifier.
-            op_name: Operation name.
-
-        Returns:
-            List of build outputs, empty if none stored.
-
-        """
-        return list(self._items.get((scope, instance_id, op_name), []))
-
-    def get_by_scope(
-        self,
-        scope: str,
-        instance_id: str,
-    ) -> list[object]:
-        """Retrieve all build outputs for a scope instance.
-
-        Args:
-            scope: Scope name.
-            instance_id: Instance identifier.
-
-        Returns:
-            All build outputs across all operations for this
-            scope instance.
-
-        """
+    def get_by_instance(self, instance_id: str) -> list[object]:
+        """Retrieve all outputs for *instance_id* across every operation."""
         result: list[object] = []
-        for (stored_scope, stored_id, _), items in self._items.items():
-            if stored_scope == scope and stored_id == instance_id:
+        for (stored_id, _), items in self._items.items():
+            if stored_id == instance_id:
                 result.extend(items)
         return result
 
     def get_by_type(self, output_type: type) -> list[object]:
-        """Retrieve all build outputs of a given type.
-
-        Args:
-            output_type: The output class to filter by.
-
-        Returns:
-            All matching build outputs across all keys.
-
-        """
+        """Retrieve all build outputs of a given type."""
         result: list[object] = []
         for items in self._items.values():
             result.extend(
@@ -403,11 +355,11 @@ class BuildStore:
 
     def entries(
         self,
-    ) -> Iterator[tuple[str, str, str, list[object]]]:
-        """Iterate stored entries as ``(scope, instance_id, op_name, items)``.
+    ) -> Iterator[tuple[str, str, list[object]]]:
+        """Iterate stored entries as ``(instance_id, op_name, items)``.
 
-        Used by the assembler to walk the store and dispatch
-        each item to the correct renderer with scope-aware context.
+        Used by the assembler to walk the store and dispatch each
+        item to the correct renderer.
         """
-        for (scope, instance_id, op_name), items in self._items.items():
-            yield scope, instance_id, op_name, items
+        for (instance_id, op_name), items in self._items.items():
+            yield instance_id, op_name, items

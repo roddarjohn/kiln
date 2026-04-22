@@ -1,46 +1,53 @@
-"""Tests for the operation protocol and decorator."""
+"""Tests for the operation protocol, decorator, and registry."""
 
 import pytest
 from pydantic import BaseModel
 
-from foundry import (
-    EmptyOptions,
-    OperationMeta,
-    get_operation_meta,
-    operation,
-    topological_sort,
-)
+from foundry import EmptyOptions, OperationMeta, operation
+from foundry.operation import OperationRegistry
 
 # -------------------------------------------------------------------
 # @operation decorator
 # -------------------------------------------------------------------
 
 
-def test_operation_decorator_attaches_meta():
-    @operation("get", scope="resource")
+def test_operation_decorator_registers_meta():
+    registry = OperationRegistry()
+
+    @operation("get", scope="resource", registry=registry)
     class Get:
         def build(self, _ctx, _options):
             return []
 
-    meta = get_operation_meta(Get)
-    assert meta is not None
+    assert len(registry.entries) == 1
+    meta, cls = registry.entries[0]
     assert meta.name == "get"
     assert meta.scope == "resource"
     assert meta.requires == ()
+    assert cls is Get
 
 
 def test_operation_decorator_with_requires():
-    @operation("router", scope="app", requires=["get", "list"])
+    registry = OperationRegistry()
+
+    @operation(
+        "router",
+        scope="app",
+        requires=["get", "list"],
+        registry=registry,
+    )
     class Router:
         def build(self, _ctx, _options):
             return []
 
-    meta = get_operation_meta(Router)
+    meta, _ = registry.entries[0]
     assert meta.requires == ("get", "list")
 
 
 def test_operation_decorator_adds_empty_options():
-    @operation("scaffold", scope="project")
+    registry = OperationRegistry()
+
+    @operation("scaffold", scope="project", registry=registry)
     class Scaffold:
         def build(self, _ctx, _options):
             return []
@@ -49,7 +56,9 @@ def test_operation_decorator_adds_empty_options():
 
 
 def test_operation_decorator_preserves_custom_options():
-    @operation("create", scope="resource")
+    registry = OperationRegistry()
+
+    @operation("create", scope="resource", registry=registry)
     class Create:
         class Options(BaseModel):
             fields: list[str] | None = None
@@ -59,14 +68,6 @@ def test_operation_decorator_preserves_custom_options():
 
     assert Create.Options is not EmptyOptions
     assert issubclass(Create.Options, BaseModel)
-
-
-def test_get_operation_meta_raises_for_plain_class():
-    class Plain:
-        pass
-
-    with pytest.raises(ValueError, match="no @operation"):
-        get_operation_meta(Plain)
 
 
 # -------------------------------------------------------------------
@@ -81,112 +82,158 @@ def test_operation_meta_frozen():
 
 
 def test_operation_after_children_default_false():
-    @operation("get", scope="resource")
+    registry = OperationRegistry()
+
+    @operation("get", scope="resource", registry=registry)
     class Get:
         def build(self, _ctx, _options):
             return []
 
-    meta = get_operation_meta(Get)
+    meta, _ = registry.entries[0]
     assert meta.after_children is False
 
 
 def test_operation_after_children_flag():
-    @operation("router", scope="project", after_children=True)
+    registry = OperationRegistry()
+
+    @operation(
+        "router",
+        scope="project",
+        after_children=True,
+        registry=registry,
+    )
     class Router:
         def build(self, _ctx, _options):
             return []
 
-    meta = get_operation_meta(Router)
+    meta, _ = registry.entries[0]
     assert meta.after_children is True
 
 
 # -------------------------------------------------------------------
-# Topological sort
+# OperationRegistry
 # -------------------------------------------------------------------
 
 
-def test_topo_sort_no_deps():
-    @operation("a", scope="resource")
-    class A:
-        def build(self, _ctx, _options):
-            return []
+def _names_for_scope(
+    registry: OperationRegistry,
+    scope: str,
+) -> list[str]:
+    """Names of the sorted entries in *scope*, for test assertions."""
+    return [entry.meta.name for entry in registry.sorted_by_scope()[scope]]
 
-    @operation("b", scope="resource")
+
+def test_registry_sorted_by_scope_no_deps():
+    registry = OperationRegistry()
+
+    @operation("b", scope="resource", registry=registry)
     class B:
         def build(self, _ctx, _options):
             return []
 
-    result = topological_sort([B, A])
-    names = [get_operation_meta(c).name for c in result]
-    assert "a" in names
-    assert "b" in names
-
-
-def test_topo_sort_respects_deps():
-    @operation("first", scope="resource")
-    class First:
+    @operation("a", scope="resource", registry=registry)
+    class A:
         def build(self, _ctx, _options):
             return []
 
-    @operation("second", scope="resource", requires=["first"])
+    assert _names_for_scope(registry, "resource") == ["a", "b"]
+
+
+def test_registry_sorted_by_scope_respects_deps():
+    registry = OperationRegistry()
+
+    @operation(
+        "second", scope="resource", requires=["first"], registry=registry
+    )
     class Second:
         def build(self, _ctx, _options):
             return []
 
-    result = topological_sort([Second, First])
-    names = [get_operation_meta(c).name for c in result]
+    @operation("first", scope="resource", registry=registry)
+    class First:
+        def build(self, _ctx, _options):
+            return []
+
+    names = _names_for_scope(registry, "resource")
     assert names.index("first") < names.index("second")
 
 
-def test_topo_sort_chain():
-    @operation("a", scope="resource")
-    class A:
-        def build(self, _ctx, _options):
-            return []
+def test_registry_sorted_by_scope_chain():
+    registry = OperationRegistry()
 
-    @operation("b", scope="resource", requires=["a"])
-    class B:
-        def build(self, _ctx, _options):
-            return []
-
-    @operation("c", scope="resource", requires=["b"])
+    @operation("c", scope="resource", requires=["b"], registry=registry)
     class C:
         def build(self, _ctx, _options):
             return []
 
-    result = topological_sort([C, A, B])
-    names = [get_operation_meta(c).name for c in result]
-    assert names == ["a", "b", "c"]
+    @operation("a", scope="resource", registry=registry)
+    class A:
+        def build(self, _ctx, _options):
+            return []
+
+    @operation("b", scope="resource", requires=["a"], registry=registry)
+    class B:
+        def build(self, _ctx, _options):
+            return []
+
+    assert _names_for_scope(registry, "resource") == ["a", "b", "c"]
 
 
-def test_topo_sort_missing_dep_raises():
-    @operation("x", scope="resource", requires=["missing"])
+def test_registry_sorted_by_scope_missing_dep_raises():
+    registry = OperationRegistry()
+
+    @operation("x", scope="resource", requires=["missing"], registry=registry)
     class X:
         def build(self, _ctx, _options):
             return []
 
     with pytest.raises(ValueError, match="missing"):
-        topological_sort([X])
+        registry.sorted_by_scope()
 
 
-def test_topo_sort_cycle_raises():
-    @operation("p", scope="resource", requires=["q"])
+def test_registry_sorted_by_scope_cycle_raises():
+    registry = OperationRegistry()
+
+    @operation("p", scope="resource", requires=["q"], registry=registry)
     class P:
         def build(self, _ctx, _options):
             return []
 
-    @operation("q", scope="resource", requires=["p"])
+    @operation("q", scope="resource", requires=["p"], registry=registry)
     class Q:
         def build(self, _ctx, _options):
             return []
 
     with pytest.raises(ValueError, match="Cycle"):
-        topological_sort([P, Q])
+        registry.sorted_by_scope()
 
 
-def test_topo_sort_no_meta_raises():
-    class NoMeta:
-        pass
+def test_registry_validate_scopes_raises_for_unknown():
+    registry = OperationRegistry()
 
-    with pytest.raises(ValueError, match="no @operation"):
-        topological_sort([NoMeta])
+    @operation("weird", scope="nonexistent", registry=registry)
+    class W:
+        def build(self, _ctx, _options):
+            return []
+
+    with pytest.raises(ValueError, match="nonexistent"):
+        registry.validate_scopes({"project", "resource"})
+
+
+def test_registry_sorted_by_scope_groups_per_scope():
+    registry = OperationRegistry()
+
+    @operation("r_op", scope="resource", registry=registry)
+    class ResourceOp:
+        def build(self, _ctx, _options):
+            return []
+
+    @operation("p_op", scope="project", registry=registry)
+    class ProjectOp:
+        def build(self, _ctx, _options):
+            return []
+
+    sorted_by_scope = registry.sorted_by_scope()
+
+    assert [e.meta.name for e in sorted_by_scope["resource"]] == ["r_op"]
+    assert [e.meta.name for e in sorted_by_scope["project"]] == ["p_op"]

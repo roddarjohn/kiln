@@ -9,10 +9,9 @@ from foundry import Engine, Scoped, operation
 from foundry.engine import (
     _allowed_ops,
     _find_op_options,
-    _instance_id,
     _resolve_options,
 )
-from foundry.operation import EmptyOptions
+from foundry.operation import EmptyOptions, OperationMeta, OperationRegistry
 from foundry.outputs import RouteHandler, StaticFile
 
 # -------------------------------------------------------------------
@@ -42,51 +41,47 @@ class ProjectConfig(BaseModel):
 
 
 # -------------------------------------------------------------------
-# Test operations
+# Test-op builders
+#
+# Each test constructs an isolated OperationRegistry and registers
+# just the ops it cares about — keeps ops from leaking across tests
+# and from bleeding into the process-wide default registry.
 # -------------------------------------------------------------------
 
 
-@operation("scaffold", scope="project")
-class Scaffold:
-    def build(self, _ctx, _options):
-        return [StaticFile(path="main.py", template="main.j2")]
+def _register_scaffold(registry: OperationRegistry) -> None:
+    @operation("scaffold", scope="project", registry=registry)
+    class _Scaffold:
+        def build(self, _ctx, _options):
+            return [StaticFile(path="main.py", template="main.j2")]
 
 
-@operation("get", scope="resource")
-class Get:
-    def build(self, ctx, _options):
-        name = ctx.instance.name
-        return [
-            RouteHandler(
-                method="GET",
-                path=f"/{name}/{{id}}",
-                function_name=f"get_{name}",
-            )
-        ]
+def _register_get(registry: OperationRegistry) -> None:
+    @operation("get", scope="resource", registry=registry)
+    class _Get:
+        def build(self, ctx, _options):
+            name = ctx.instance.name
+            return [
+                RouteHandler(
+                    method="GET",
+                    path=f"/{name}/{{id}}",
+                    function_name=f"get_{name}",
+                )
+            ]
 
 
-@operation("list", scope="resource")
-class List:
-    def build(self, ctx, _options):
-        name = ctx.instance.name
-        return [
-            RouteHandler(
-                method="GET",
-                path=f"/{name}",
-                function_name=f"list_{name}",
-            )
-        ]
-
-
-@operation("router", scope="app", requires=["get", "list"])
-class AppRouter:
-    def build(self, ctx, _options):
-        return [
-            StaticFile(
-                path=f"{ctx.instance.name}/router.py",
-                template="router.j2",
-            )
-        ]
+def _register_list(registry: OperationRegistry) -> None:
+    @operation("list", scope="resource", registry=registry)
+    class _List:
+        def build(self, ctx, _options):
+            name = ctx.instance.name
+            return [
+                RouteHandler(
+                    method="GET",
+                    path=f"/{name}",
+                    function_name=f"list_{name}",
+                )
+            ]
 
 
 # -------------------------------------------------------------------
@@ -95,41 +90,34 @@ class AppRouter:
 
 
 def test_resolve_options_default():
-    @operation("test_op", scope="resource")
     class Op:
-        def build(self, _ctx, _options):
-            return []
+        pass
 
-    opts = _resolve_options(Op, object())
+    meta = OperationMeta(name="test_op", scope="resource")
+    opts = _resolve_options(meta, Op, object())
     assert isinstance(opts, EmptyOptions)
 
 
 def test_resolve_options_custom():
-    @operation("test_op2", scope="resource")
     class Op:
         class Options(BaseModel):
             count: int = 5
 
-        def build(self, _ctx, _options):
-            return []
-
-    opts = _resolve_options(Op, object())
+    meta = OperationMeta(name="test_op2", scope="resource")
+    opts = _resolve_options(meta, Op, object())
     assert opts.count == 5
 
 
 def test_resolve_options_from_instance():
-    @operation("test_op3", scope="resource")
     class Op:
         class Options(BaseModel):
             count: int = 5
 
-        def build(self, _ctx, _options):
-            return []
-
     class Inst(BaseModel):
         options: dict = {"count": 10}
 
-    opts = _resolve_options(Op, Inst())
+    meta = OperationMeta(name="test_op3", scope="resource")
+    opts = _resolve_options(meta, Op, Inst())
     assert opts.count == 10
 
 
@@ -139,72 +127,69 @@ def test_resolve_options_from_instance():
 
 
 def test_engine_build_project_scope():
-    engine = Engine(operations=[Scaffold])
-    config = ProjectConfig()
-    store = engine.build(config)
-    items = store.get("project", "project", "scaffold")
+    registry = OperationRegistry()
+    _register_scaffold(registry)
+
+    store = Engine(registry=registry).build(ProjectConfig())
+    items = store.get("project", "scaffold")
     assert len(items) == 1
     assert isinstance(items[0], StaticFile)
 
 
 def test_engine_build_resource_scope():
+    registry = OperationRegistry()
+    _register_get(registry)
     config = ProjectConfig(
         resources=[
             ResourceConfig(name="user"),
             ResourceConfig(name="post"),
         ]
     )
-    engine = Engine(operations=[Get])
-    store = engine.build(config)
 
+    store = Engine(registry=registry).build(config)
     handlers = store.get_by_type(RouteHandler)
     names = {h.function_name for h in handlers}
     assert names == {"get_user", "get_post"}
 
 
 def test_engine_build_multiple_scopes():
+    registry = OperationRegistry()
+    _register_scaffold(registry)
+    _register_get(registry)
     config = ProjectConfig(resources=[ResourceConfig(name="user")])
-    engine = Engine(operations=[Scaffold, Get])
-    store = engine.build(config)
 
+    store = Engine(registry=registry).build(config)
     assert len(store.get_by_type(StaticFile)) == 1
     assert len(store.get_by_type(RouteHandler)) == 1
 
 
 def test_engine_empty_operations():
-    engine = Engine(operations=[])
+    engine = Engine(registry=OperationRegistry())
     config = ProjectConfig()
     store = engine.build(config)
     assert store.all_items() == []
 
 
 def test_engine_unknown_scope_raises():
-    @operation("bad_op", scope="nonexistent")
+    registry = OperationRegistry()
+
+    @operation("bad_op", scope="nonexistent", registry=registry)
     class Bad:
         def build(self, _ctx, _options):
             return []
 
-    engine = Engine(operations=[Bad])
+    engine = Engine(registry=registry)
     config = ProjectConfig()
     with pytest.raises(ValueError, match="nonexistent"):
-        engine.build(config)
-
-
-def test_engine_no_meta_raises():
-    class Plain:
-        pass
-
-    engine = Engine(operations=[Plain])
-    config = ProjectConfig()
-    with pytest.raises(ValueError, match="no @operation"):
         engine.build(config)
 
 
 def test_engine_respects_dependency_order():
     """Operations run in topo order within a scope."""
     call_order: list[str] = []
+    registry = OperationRegistry()
 
-    @operation("first", scope="resource")
+    @operation("first", scope="resource", registry=registry)
     class First:
         def build(self, _ctx, _options):
             call_order.append("first")
@@ -216,49 +201,49 @@ def test_engine_respects_dependency_order():
                 )
             ]
 
-    @operation("second", scope="resource", requires=["first"])
+    @operation(
+        "second",
+        scope="resource",
+        requires=["first"],
+        registry=registry,
+    )
     class Second:
         def build(self, ctx, _options):
             call_order.append("second")
-            # Can see first's output in the store
-            earlier = ctx.store.get("resource", ctx.instance_id, "first")
+            # Can see first's output in the store.
+            earlier = ctx.store.get(ctx.instance_id, "first")
             assert len(earlier) == 1
             return []
 
     config = ProjectConfig(resources=[ResourceConfig(name="user")])
-    engine = Engine(operations=[Second, First])
-    engine.build(config)
+    Engine(registry=registry).build(config)
     assert call_order == ["first", "second"]
 
 
 def test_engine_build_returns_empty_for_empty_scope():
     """No items in a scope means no operations run."""
-    config = ProjectConfig(resources=[])
-    engine = Engine(operations=[Get])
-    store = engine.build(config)
+    registry = OperationRegistry()
+    _register_get(registry)
+
+    store = Engine(registry=registry).build(ProjectConfig(resources=[]))
     assert store.all_items() == []
 
 
-def test_engine_auto_discovers_scopes():
-    engine = Engine(operations=[Scaffold])
-    config = ProjectConfig()
-    engine.build(config)
-    scope_names = [s.name for s in engine.scopes]
-    assert "project" in scope_names
-    assert "app" in scope_names
-    assert "resource" in scope_names
+def test_engine_build_accepts_ops_across_all_discovered_scopes():
+    """Engine discovers scopes from the config so ops at every level
+    (project, resource) are accepted without an explicit list."""
+    registry = OperationRegistry()
+    _register_scaffold(registry)
+    _register_get(registry)
+    config = ProjectConfig(
+        apps=[AppConfig(name="blog", resources=[ResourceConfig(name="post")])],
+    )
 
-
-# -------------------------------------------------------------------
-# _instance_id
-# -------------------------------------------------------------------
-
-
-def test_instance_id_is_opaque_and_positional():
-    """Ids are derived from scope + index, not item fields."""
-    assert _instance_id("resource", 0) == "resource-0"
-    assert _instance_id("resource", 1) == "resource-1"
-    assert _instance_id("thing", 3) == "thing-3"
+    # Builds without validate_scopes raising, proving "project" and
+    # "resource" scopes were both discovered from the config tree.
+    store = Engine(registry=registry).build(config)
+    assert len(store.get_by_type(StaticFile)) == 1
+    assert len(store.get_by_type(RouteHandler)) == 1
 
 
 # -------------------------------------------------------------------
@@ -336,8 +321,9 @@ def test_find_op_options_no_operations():
 def test_engine_after_children_sees_child_output():
     """after_children=True defers a project op until child scopes run."""
     call_order: list[str] = []
+    registry = OperationRegistry()
 
-    @operation("child_op", scope="resource")
+    @operation("child_op", scope="resource", registry=registry)
     class ChildOp:
         def build(self, ctx, _options):
             call_order.append(f"child:{ctx.instance.name}")
@@ -349,7 +335,12 @@ def test_engine_after_children_sees_child_output():
                 )
             ]
 
-    @operation("aggregator", scope="project", after_children=True)
+    @operation(
+        "aggregator",
+        scope="project",
+        after_children=True,
+        registry=registry,
+    )
     class Aggregator:
         def build(self, ctx, _options):
             call_order.append("aggregator")
@@ -369,14 +360,13 @@ def test_engine_after_children_sees_child_output():
             ResourceConfig(name="post"),
         ]
     )
-    engine = Engine(operations=[Aggregator, ChildOp])
-    store = engine.build(config)
+    store = Engine(registry=registry).build(config)
 
     # Aggregator ran after every resource, not before them.
     assert call_order[-1] == "aggregator"
     assert {"child:user", "child:post"}.issubset(call_order[:-1])
 
-    agg_items = store.get("project", "project", "aggregator")
+    agg_items = store.get("project", "aggregator")
     assert len(agg_items) == 1
     assert agg_items[0].context["handlers"] == ["handler_post", "handler_user"]
 
@@ -388,22 +378,27 @@ def test_engine_after_children_at_any_scope():
     instance's pre-phase ops.
     """
     call_order: list[str] = []
+    registry = OperationRegistry()
 
-    @operation("pre_resource", scope="resource")
+    @operation("pre_resource", scope="resource", registry=registry)
     class Pre:
         def build(self, ctx, _options):
             call_order.append(f"pre:{ctx.instance.name}")
             return []
 
-    @operation("post_resource", scope="resource", after_children=True)
+    @operation(
+        "post_resource",
+        scope="resource",
+        after_children=True,
+        registry=registry,
+    )
     class Post:
         def build(self, ctx, _options):
             call_order.append(f"post:{ctx.instance.name}")
             return []
 
     config = ProjectConfig(resources=[ResourceConfig(name="x")])
-    engine = Engine(operations=[Pre, Post])
-    engine.build(config)
+    Engine(registry=registry).build(config)
     assert call_order == ["pre:x", "post:x"]
 
 
@@ -427,18 +422,21 @@ def test_engine_filters_by_allowed_ops():
             )
         ]
     )
-    engine = Engine(operations=[Get, List])
-    store = engine.build(config)
+    registry = OperationRegistry()
+    _register_get(registry)
+    _register_list(registry)
+
+    store = Engine(registry=registry).build(config)
 
     get_handlers = [
         item
-        for _scope, _iid, op, items in store.entries()
+        for _iid, op, items in store.entries()
         if op == "get"
         for item in items
     ]
     list_handlers = [
         item
-        for _scope, _iid, op, items in store.entries()
+        for _iid, op, items in store.entries()
         if op == "list"
         for item in items
     ]

@@ -53,7 +53,6 @@ class Router:
         module = app_config.module
 
         mounted = ctx.store.descendants_of_type(
-            ctx.scope.name,
             ctx.instance_id,
             RouteHandler,
             child_scope="resource",

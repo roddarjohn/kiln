@@ -53,6 +53,7 @@ def generate(config: FoundryConfig, target: Target) -> list[GeneratedFile]:
     try:
         engine = Engine(package_prefix=config.package_prefix)
         store = engine.build(config)
+
         ctx = RenderCtx(
             env=env,
             config=config,

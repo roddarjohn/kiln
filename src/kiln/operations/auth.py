@@ -83,7 +83,7 @@ class Auth:
         dep_line = "current_user: Annotated[dict, Depends(get_current_user)],"
         import_pair = (auth_mod, "get_current_user")
 
-        items = ctx.store.get_by_scope(ctx.scope.name, ctx.instance_id)
+        items = ctx.store.get_by_instance(ctx.instance_id)
         for item in items:
             if isinstance(item, RouteHandler):
                 item.extra_deps.append(dep_line)

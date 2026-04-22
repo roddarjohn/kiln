@@ -54,8 +54,8 @@ def assemble(
 
     """
     fragments: list[Fragment] = []
-    for scope_name, instance_id, _op_name, items in store.entries():
-        scoped = _scoped_ctx(ctx, store, scope_name, instance_id)
+    for instance_id, _op_name, items in store.entries():
+        scoped = _scoped_ctx(ctx, store, instance_id)
         for item in items:
             if not registry.has_renderer(type(item)):
                 continue
@@ -66,19 +66,19 @@ def assemble(
 def _scoped_ctx(
     ctx: RenderCtx,
     store: BuildStore,
-    scope_name: str,
     instance_id: str,
 ) -> RenderCtx:
     """Return a :class:`RenderCtx` carrying the current scope instance.
 
-    Looks up the scope instance object the engine recorded for
-    ``(scope_name, instance_id)`` and attaches it to
-    ``ctx.extras`` under ``scope_name`` so renderers can read the
-    originating config object without walking the full tree.
+    Looks up the scope-instance object and attaches it to
+    ``ctx.extras`` under the scope name (derived from the id) so
+    renderers can read the originating config object without
+    walking the full tree.
     """
-    instance = store.get_instance(scope_name, instance_id)
+    instance = store.get_instance(instance_id)
     if instance is None:
         return ctx
+    scope_name = store.scope_of(instance_id).name
     return replace(ctx, extras={**ctx.extras, scope_name: instance})
 
 
