@@ -7,11 +7,11 @@ shell-context entries (first-seen wins for scalars); then render
 the shell template.  All framework- or file-specific knowledge
 lives in the renderers, not here.
 
-For each store entry, the assembler looks up the scope instance
-that produced it (via :meth:`BuildStore.get_instance`) and
-exposes it on ``RenderCtx.extras`` under the scope name.  Kiln
-renderers read e.g. ``ctx.extras["resource"]`` to derive paths
-and imports from the resource config.
+Each dispatched render gets a :class:`RenderCtx` with ``store``
+and ``instance_id`` set to the current entry.  Renderers that
+need a higher scope's config (e.g. the resource a handler
+belongs to) reach for ``ctx.store.ancestor_of(ctx.instance_id,
+"resource")``.
 """
 
 from __future__ import annotations
@@ -54,45 +54,18 @@ def assemble(
 
     """
     fragments: list[Fragment] = []
+    ctx = replace(ctx, store=store)
 
     for instance_id, _, items in store.entries():
-        scoped = _scoped_ctx(ctx, store, instance_id)
+        dispatch_ctx = replace(ctx, instance_id=instance_id)
 
         for item in items:
             # Missing renderer = silent data loss.  Let
             # registry.render raise :class:`LookupError`; the
             # pipeline wraps it in :class:`GenerationError`.
-            fragments.extend(registry.render(item, scoped))
+            fragments.extend(registry.render(item, dispatch_ctx))
 
     return _merge_fragments(fragments, ctx)
-
-
-def _scoped_ctx(
-    ctx: RenderCtx,
-    store: BuildStore,
-    instance_id: str,
-) -> RenderCtx:
-    """Return a :class:`RenderCtx` carrying every ancestor instance.
-
-    Attaches the current scope instance and every ancestor (keyed
-    by scope name) to ``ctx.extras``, so a renderer at
-    ``operation`` scope can read ``ctx.extras["resource"]``,
-    ``ctx.extras["app"]`` etc. without walking the store itself.
-    """
-    extras = dict(ctx.extras)
-
-    instance = store.get_instance(instance_id)
-    if instance is not None:
-        extras[store.scope_of(instance_id).name] = instance
-
-    for scope in store.scope_tree:
-        if scope.name in extras or scope.name == "project":
-            continue
-        ancestor = store.ancestor_of(instance_id, scope.name)
-        if ancestor is not None:
-            extras[scope.name] = ancestor
-
-    return replace(ctx, extras=extras)
 
 
 def _merge_fragments(

@@ -17,8 +17,6 @@ from foundry.imports import ImportCollector
 from foundry.scope import Scope, ScopeTree
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import jinja2
 
 
@@ -31,18 +29,23 @@ class RenderCtx:
         config: The full project config dict (or model).
         package_prefix: Dotted prefix for generated imports,
             e.g. ``"_generated"``.
-        extras: Per-dispatch extras supplied by the assembler,
-            typically the current scope instance (e.g.
-            ``{"resource": <ResourceConfig>}``) so that renderers
-            can derive paths and imports without the assembler
-            having to know per-type details.
+        store: The build store.  Renderers reach ancestor scope
+            instances through it (e.g. a handler rendered at
+            operation scope looks up its resource via
+            ``store.ancestor_of(instance_id, "resource")``).
+        instance_id: Id of the scope instance whose output is
+            being rendered.  Paired with :attr:`store` for
+            ancestor and self lookups.
 
     """
 
     env: jinja2.Environment
     config: Any
     package_prefix: str = ""
-    extras: Mapping[str, Any] = field(default_factory=dict)
+    # Lambda defers the lookup -- BuildStore is defined later in
+    # this module, so ``default_factory=BuildStore`` would NameError.
+    store: BuildStore = field(default_factory=lambda: BuildStore())  # noqa: PLW0108
+    instance_id: str = ""
 
 
 @dataclass
@@ -253,6 +256,10 @@ class BuildStore:
         """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
         return self.scope_tree.scope_for(instance_id)
 
+    def parent_of(self, instance_id: str) -> str | None:
+        """Return the parent instance id, or ``None`` for the root."""
+        return self._parent_of.get(instance_id)
+
     def ancestor_of(
         self,
         instance_id: str,
@@ -260,11 +267,11 @@ class BuildStore:
     ) -> object | None:
         """Return the enclosing instance at *scope_name*, if any.
 
-        Walks ``_parent_of`` edges from *instance_id* toward the
-        root and returns the first instance whose scope name
-        matches.  Used by descendant ops that need data from a
-        higher scope (e.g. an operation-scope op reading its
-        enclosing resource's ``model``).
+        Walks parent edges from *instance_id* toward the root and
+        returns the first instance whose scope name matches.  Used
+        by descendant ops that need data from a higher scope (e.g.
+        an operation-scope op reading its enclosing resource's
+        ``model``).
 
         Args:
             instance_id: Id whose ancestor to find.
@@ -275,11 +282,11 @@ class BuildStore:
             that scope is registered.
 
         """
-        current = self._parent_of.get(instance_id)
+        current = self.parent_of(instance_id)
         while current is not None:
             if self.scope_of(current).name == scope_name:
                 return self._instances.get(current)
-            current = self._parent_of.get(current)
+            current = self.parent_of(current)
         return None
 
     def children(

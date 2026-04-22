@@ -11,7 +11,6 @@ from foundry.engine import BuildContext
 from foundry.outputs import (
     Field,
     RouteHandler,
-    RouterMount,
     SchemaClass,
     SerializerFn,
     StaticFile,
@@ -346,7 +345,7 @@ class TestRouter:
         return iid
 
     def test_mounts_resources_from_store(self):
-        """One RouterMount per resource with a RouteHandler in the store."""
+        """One route entry per resource with a RouteHandler in the store."""
         store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
         post, comment = self._res("Post"), self._res("Comment")
         ctx = self._ctx("blog", [post, comment], store)
@@ -354,16 +353,15 @@ class TestRouter:
         self._add_handler(store, ctx.instance_id, 1, comment)
 
         result = list(Router().build(ctx, _Empty()))
-        mounts = [r for r in result if isinstance(r, RouterMount)]
         statics = [r for r in result if isinstance(r, StaticFile)]
 
-        assert len(mounts) == 2
-        assert mounts[0].module == "blog.routes.post"
-        assert mounts[0].alias == "post_router"
-        assert mounts[1].module == "blog.routes.comment"
-        assert mounts[1].alias == "comment_router"
         assert len(statics) == 1
         assert statics[0].path == "blog/routes/__init__.py"
+        routes = statics[0].context["routes"]
+        aliases = [r["alias"] for r in routes]
+        modules = [r["module_name"] for r in routes]
+        assert aliases == ["post_router", "comment_router"]
+        assert modules == ["post", "comment"]
 
     def test_router_static_context(self):
         """Static file context has correct route entries."""
@@ -397,9 +395,9 @@ class TestRouter:
         )
 
         result = list(Router().build(ctx, _Empty()))
-        mounts = [r for r in result if isinstance(r, RouterMount)]
-        assert len(mounts) == 1
-        assert mounts[0].alias == "user_router"
+        static = next(r for r in result if isinstance(r, StaticFile))
+        routes = static.context["routes"]
+        assert [r["alias"] for r in routes] == ["user_router"]
 
     def test_skips_resources_without_handlers(self):
         """A resource with no RouteHandler entries is not mounted."""
@@ -415,9 +413,9 @@ class TestRouter:
         self._add_handler(store, ctx.instance_id, 1, loud)
 
         result = list(Router().build(ctx, _Empty()))
-        mounts = [r for r in result if isinstance(r, RouterMount)]
-        aliases = [m.alias for m in mounts]
-        assert aliases == ["loud_router"]
+        static = next(r for r in result if isinstance(r, StaticFile))
+        routes = static.context["routes"]
+        assert [r["alias"] for r in routes] == ["loud_router"]
 
     def test_ignores_non_resource_scope(self):
         """RouteHandlers outside resource scope are not mounted."""

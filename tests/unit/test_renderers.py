@@ -19,6 +19,7 @@ from foundry.outputs import (
 )
 from foundry.render import BuildStore, RenderCtx
 from foundry.render import registry as shared_registry
+from foundry.scope import discover_scopes
 from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
 from kiln.operations._render import (
     _render_handler_string,
@@ -341,12 +342,35 @@ def _rctx(
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }
     )
+    store = _store_with_resource(resource, config)
     return RenderCtx(
         env=jinja_env,
         config=config,
         package_prefix="_generated",
-        extras={"resource": resource},
+        store=store,
+        instance_id="project.resources.0.operations.0",
     )
+
+
+def _store_with_resource(
+    resource: ResourceConfig, config: ProjectConfig
+) -> BuildStore:
+    """Register a project→resource→operation chain for renderer tests.
+
+    Renderers look up the enclosing resource via
+    ``ctx.store.ancestor_of(ctx.instance_id, "resource")``, so the
+    store must carry that ancestry.  A dummy operation instance
+    gives renderers a concrete ``instance_id`` to dispatch on.
+    """
+    store = BuildStore(scope_tree=discover_scopes(ProjectConfig))
+    store.register_instance("project", config)
+    store.register_instance("project.resources.0", resource, parent="project")
+    store.register_instance(
+        "project.resources.0.operations.0",
+        object(),
+        parent="project.resources.0",
+    )
+    return store
 
 
 def test_enum_fragment(registry):
@@ -565,10 +589,11 @@ def test_action_route_dispatches_via_registry(registry):
     tmpl.render.return_value = "def publish_action(): ..."
     env = MagicMock()
     env.get_template.return_value = tmpl
+    resource = _resource()
     config = ProjectConfig.model_validate(
         {
             "module": "myapp",
-            "resources": [_resource().model_dump()],
+            "resources": [resource.model_dump()],
             "databases": [{"key": "primary", "default": True}],
         }
     )
@@ -576,7 +601,8 @@ def test_action_route_dispatches_via_registry(registry):
         env=env,
         config=config,
         package_prefix="_generated",
-        extras={"resource": _resource()},
+        store=_store_with_resource(resource, config),
+        instance_id="project.resources.0.operations.0",
     )
 
     handler = ActionRoute(

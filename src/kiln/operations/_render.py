@@ -20,7 +20,7 @@ registered subclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.env import render_snippet
 from foundry.imports import ImportCollector
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     import jinja2
 
     from foundry.render import RenderCtx
+    from kiln.config.schema import ResourceConfig
 
 
 # -------------------------------------------------------------------
@@ -71,12 +72,15 @@ class _ResourceInfo:
 def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     """Build a :class:`_ResourceInfo` from the renderer context.
 
-    Expects ``ctx.extras["resource"]`` to be the
-    :class:`~kiln.config.schema.ResourceConfig` for the current
-    scope instance.  The assembler sets this when dispatching
-    resource-scoped outputs.
+    Walks ``ctx.store`` up from ``ctx.instance_id`` to the
+    enclosing resource.  Every renderer that calls this handles
+    an output produced at operation scope (below resource), so
+    :meth:`BuildStore.ancestor_of` always finds the resource.
     """
-    resource = ctx.extras["resource"]
+    resource = cast(
+        "ResourceConfig",
+        ctx.store.ancestor_of(ctx.instance_id, "resource"),
+    )
     config = ctx.config
     package_prefix = ctx.package_prefix
 

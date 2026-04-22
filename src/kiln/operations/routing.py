@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, RouterMount, StaticFile
+from foundry.outputs import RouteHandler, StaticFile
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -32,8 +32,8 @@ class Router:
         self,
         ctx: BuildContext[App],
         _options: BaseModel,
-    ) -> Iterable[RouterMount | StaticFile]:
-        """Produce this app's router mount and aggregation file.
+    ) -> Iterable[StaticFile]:
+        """Produce this app's router-aggregation file.
 
         Args:
             ctx: Build context for one :class:`App`; ``store``
@@ -42,10 +42,11 @@ class Router:
             _options: Unused.
 
         Yields:
-            One :class:`RouterMount` per mounted resource plus a
-            single :class:`StaticFile` for the app's routes
-            package.  Nothing is yielded when no resource in the
-            app produced a :class:`RouteHandler`.
+            A single :class:`StaticFile` for the app's routes
+            package, carrying one ``routes`` entry per resource
+            that produced a :class:`RouteHandler`.  Nothing is
+            yielded when no resource in the app produced a
+            handler.
 
         """
         app = ctx.instance
@@ -67,13 +68,6 @@ class Router:
             return
 
         slugs = [_resource_module_slug(resource) for resource in mounted]
-
-        for slug in slugs:
-            yield RouterMount(
-                module=f"{module}.routes.{slug}",
-                alias=f"{slug}_router",
-            )
-
         yield StaticFile(
             path=f"{module}/routes/__init__.py",
             template="fastapi/router.py.j2",

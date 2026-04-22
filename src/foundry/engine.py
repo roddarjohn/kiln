@@ -113,7 +113,13 @@ class Engine:
 
         # Bootstrap the project root; every descendant flows
         # through _visit recursively.
-        _visit(PROJECT, config, "project", parent_id=None, state=state)
+        _visit(
+            scope=PROJECT,
+            instance_config=config,
+            instance_id="project",
+            parent_id=None,
+            state=state,
+        )
 
         return state.store
 
@@ -131,7 +137,7 @@ class _WalkState:
 
 def _visit(
     scope: Scope,
-    scope_config: BaseModel,
+    instance_config: BaseModel,
     instance_id: str,
     parent_id: str | None,
     state: _WalkState,
@@ -148,7 +154,7 @@ def _visit(
 
     Args:
         scope: The scope this instance belongs to.
-        scope_config: The pydantic config object for this instance.
+        instance_config: The pydantic config object for this instance.
         instance_id: Pre-compounded dot-path id for this instance.
         parent_id: Id of the enclosing scope instance, or ``None``
             for the project root.
@@ -157,14 +163,14 @@ def _visit(
     """
     state.store.register_instance(
         instance_id,
-        scope_config,
+        instance_config,
         parent=parent_id,
     )
 
     ctx = BuildContext(
         config=state.config,
         scope=scope,
-        instance=scope_config,
+        instance=instance_config,
         instance_id=instance_id,
         store=state.store,
         package_prefix=state.package_prefix,
@@ -176,11 +182,11 @@ def _visit(
     for child_scope in state.scope_tree.children_of(scope):
         for own_id, child_config in _configs_for_scope(
             scope=child_scope,
-            parent_config=scope_config,
+            parent_config=instance_config,
         ):
             _visit(
-                child_scope,
-                child_config,
+                scope=child_scope,
+                instance_config=child_config,
                 instance_id=f"{instance_id}.{own_id}",
                 parent_id=instance_id,
                 state=state,
