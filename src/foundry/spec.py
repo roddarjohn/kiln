@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from foundry.imports import format_imports
+
 if TYPE_CHECKING:
     import jinja2
 
@@ -80,24 +82,29 @@ class FileSpec:
             return f"{self.package_prefix}.{stem}"
         return stem
 
-    def render(self, env: jinja2.Environment) -> GeneratedFile:
+    def render(
+        self,
+        env: jinja2.Environment,
+        *,
+        language: str = "python",
+    ) -> GeneratedFile:
         """Render the template and return a :class:`GeneratedFile`.
 
         Injects ``import_block`` into the template context -- a
-        pre-rendered string of all accumulated import statements.
+        pre-rendered string of all accumulated import statements
+        formatted in *language*'s syntax.
 
         Args:
             env: The Jinja2 environment to use for template
                 lookup and rendering.
+            language: Identifier of the import formatter to use;
+                defaults to ``"python"``.
 
         Returns:
             A :class:`GeneratedFile` with the rendered content.
 
         """
-        import_lines = self.imports.lines()
-        import_block = "\n".join(import_lines)
-        if import_lines:
-            import_block += "\n"
+        import_block = format_imports(collector=self.imports, language=language)
         ctx = {**self.context, "import_block": import_block}
         tmpl = env.get_template(self.template)
         content = tmpl.render(**ctx).rstrip() + "\n"

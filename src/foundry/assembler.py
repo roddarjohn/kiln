@@ -18,6 +18,7 @@ from itertools import groupby
 from operator import attrgetter, or_
 from typing import TYPE_CHECKING, Any
 
+from foundry.imports import format_imports
 from foundry.render import FileFragment, SnippetFragment
 from foundry.spec import GeneratedFile
 
@@ -129,7 +130,9 @@ def _render_file(
     context: dict[str, Any] = {
         **file.context,
         **slots,
-        "import_block": imports.block(),
+        "import_block": format_imports(
+            collector=imports, language=ctx.language
+        ),
     }
 
     template = ctx.env.get_template(file.template)

@@ -20,6 +20,7 @@ _HERE = Path(__file__).parent
 
 target = Target(
     name="kiln",
+    language="python",
     schema=ProjectConfig,
     template_dir=_HERE / "templates",
     jsonnet_stdlib_dir=_HERE / "jsonnet",

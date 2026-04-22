@@ -36,20 +36,24 @@ def test_generated_file_is_frozen():
 def test_import_collector_bare():
     c = ImportCollector()
     c.add("uuid")
-    assert c.lines() == ["import uuid"]
+    assert c.format("python").rstrip("\n").splitlines() == ["import uuid"]
 
 
 def test_import_collector_from():
     c = ImportCollector()
     c.add_from("datetime", "datetime", "date")
-    assert c.lines() == ["from datetime import date, datetime"]
+    assert c.format("python").rstrip("\n").splitlines() == [
+        "from datetime import date, datetime"
+    ]
 
 
 def test_import_collector_merges():
     c = ImportCollector()
     c.add_from("datetime", "datetime")
     c.add_from("datetime", "date")
-    assert c.lines() == ["from datetime import date, datetime"]
+    assert c.format("python").rstrip("\n").splitlines() == [
+        "from datetime import date, datetime"
+    ]
 
 
 def test_import_collector_deduplicates():
@@ -58,7 +62,7 @@ def test_import_collector_deduplicates():
     c.add("uuid")
     c.add_from("datetime", "date")
     c.add_from("datetime", "date")
-    assert c.lines() == [
+    assert c.format("python").rstrip("\n").splitlines() == [
         "import uuid",
         "from datetime import date",
     ]
@@ -66,13 +70,13 @@ def test_import_collector_deduplicates():
 
 def test_import_collector_block_empty():
     c = ImportCollector()
-    assert c.block() == ""
+    assert c.format("python") == ""
 
 
 def test_import_collector_block_nonempty():
     c = ImportCollector()
     c.add("uuid")
-    result = c.block()
+    result = c.format("python")
     assert result == "import uuid\n"
 
 
@@ -81,7 +85,7 @@ def test_import_collector_groups():
     c.add_from("__future__", "annotations")
     c.add("uuid")
     c.add_from("pydantic", "BaseModel")
-    lines = c.lines()
+    lines = c.format("python").rstrip("\n").splitlines()
     assert lines[0] == "from __future__ import annotations"
     assert "" in lines  # blank separator
     assert "import uuid" in lines
@@ -267,7 +271,7 @@ def test_wire_exports_imports_referenced_name():
         context={"handlers": "body: UserCreateRequest"},
     )
     wire_exports({"schema": schema, "route": route})
-    lines = route.imports.lines()
+    lines = route.imports.format("python").rstrip("\n").splitlines()
     assert any("UserCreateRequest" in ln for ln in lines)
     assert not any("UserResource" in ln for ln in lines)
 
@@ -286,7 +290,7 @@ def test_wire_exports_skips_unreferenced():
         context={"handlers": "no references here"},
     )
     wire_exports({"schema": schema, "route": route})
-    assert route.imports.lines() == []
+    assert route.imports.format("python").rstrip("\n").splitlines() == []
 
 
 def test_wire_exports_respects_insertion_order():
@@ -306,10 +310,13 @@ def test_wire_exports_respects_insertion_order():
     )
     wire_exports({"first": first, "second": second})
     # second references Foo (from first) → imported
-    assert any("Foo" in ln for ln in second.imports.lines())
+    assert any(
+        "Foo" in ln
+        for ln in second.imports.format("python").rstrip("\n").splitlines()
+    )
     # first references Bar (from second) but second comes
     # after first so it is NOT wired
-    assert first.imports.lines() == []
+    assert first.imports.format("python").rstrip("\n").splitlines() == []
 
 
 def test_wire_exports_nested_context():
@@ -326,4 +333,7 @@ def test_wire_exports_nested_context():
         context={"nested": [{"deep": "uses MyModel here"}]},
     )
     wire_exports({"schema": schema, "route": route})
-    assert any("MyModel" in ln for ln in route.imports.lines())
+    assert any(
+        "MyModel" in ln
+        for ln in route.imports.format("python").rstrip("\n").splitlines()
+    )

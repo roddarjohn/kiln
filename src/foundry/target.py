@@ -39,6 +39,12 @@ class Target:
         name: Short identifier, used for ``--target`` dispatch
             when multiple targets are installed and as the jsonnet
             stdlib import prefix.
+        language: Language-identifier the target generates for
+            (e.g. ``"python"``).  Passed to
+            :func:`foundry.imports.format_imports` so the
+            assembler renders import blocks in the right syntax.
+            Targets register their formatter with
+            :func:`foundry.imports.register_formatter`.
         schema: :class:`~foundry.config.FoundryConfig` subclass the
             target's config files validate against.  Foundry's
             loader instantiates this.
@@ -53,6 +59,7 @@ class Target:
     """
 
     name: str
+    language: str
     schema: type[FoundryConfig]
     template_dir: Path
     jsonnet_stdlib_dir: Path | None = None

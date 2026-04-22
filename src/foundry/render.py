@@ -29,6 +29,11 @@ class RenderCtx:
         config: The full project config dict (or model).
         package_prefix: Dotted prefix for generated imports,
             e.g. ``"_generated"``.
+        language: Target language identifier used to render
+            import blocks (e.g. ``"python"``).  Must match a
+            formatter registered with
+            :func:`foundry.imports.register_formatter` or via
+            the ``foundry.import_formatters`` entry-point group.
         store: The build store.  Renderers reach ancestor scope
             instances through it (e.g. a handler rendered at
             operation scope looks up its resource via
@@ -42,6 +47,7 @@ class RenderCtx:
     env: jinja2.Environment
     config: Any
     package_prefix: str = ""
+    language: str = ""
     store: BuildStore = field(default_factory=BuildStore)
     instance_id: str = ""
 

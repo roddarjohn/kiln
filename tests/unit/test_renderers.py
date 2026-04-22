@@ -336,6 +336,7 @@ def _rctx(
         env=jinja_env,
         config=config,
         package_prefix="_generated",
+        language="python",
         store=_store_with_resource(resource, config),
         instance_id=_OP_ID,
     )
@@ -389,7 +390,7 @@ def test_enum_fragment(registry):
     snippets = _snippets(fragments, path, "schema_classes")
     assert len(snippets) == 1
     assert "class PostSortField(str, Enum):" in snippets[0].value
-    assert "from enum import Enum" in snippets[0].imports.block()
+    assert "from enum import Enum" in snippets[0].imports.format("python")
 
 
 def test_serializer_fragment_without_tests(registry):
@@ -455,7 +456,7 @@ def test_testcase_fragment_no_auth(registry):
     shell = _file(fragments, "tests/test_myapp_post.py")
     assert shell.context["has_auth"] is False
     assert shell.context["get_current_user_fn"] is None
-    assert "auth.dependencies" not in shell.imports.block()
+    assert "auth.dependencies" not in shell.imports.format("python")
 
 
 def test_testcase_fragment_with_tests(registry):
@@ -482,7 +483,7 @@ def test_testcase_fragment_with_tests(registry):
     assert len(cases) == 1
     assert cases[0]["op_name"] == "get"
     assert cases[0]["status_not_found"] == 404
-    assert "from _generated.auth.dependencies" in shell.imports.block()
+    assert "from _generated.auth.dependencies" in shell.imports.format("python")
 
 
 def _unioned_imports(fragments):
@@ -504,7 +505,7 @@ def test_schema_fragment_field_imports(registry):
         ],
     )
     fragments = registry.render(schema, _rctx(_resource()))
-    block = _unioned_imports(fragments).block()
+    block = _unioned_imports(fragments).format("python")
     assert "import uuid" in block
     assert "from datetime import date, datetime" in block
     assert "from typing import Any" in block
@@ -521,7 +522,7 @@ def test_handler_fragment_datetime_pk(registry):
     )
     handler.params.append(RouteParam(name="id", annotation="datetime"))
     fragments = registry.render(handler, _rctx(_resource(pk_type="datetime")))
-    block = _unioned_imports(fragments).block()
+    block = _unioned_imports(fragments).format("python")
     assert "from datetime import datetime" in block
     assert "from _generated.myapp.serializers.post" in block
     assert "from _generated.myapp.schemas.post" in block
@@ -534,7 +535,7 @@ def test_handler_fragment_date_pk(registry):
         function_name="get_post",
     )
     fragments = registry.render(handler, _rctx(_resource(pk_type="date")))
-    block = _unioned_imports(fragments).block()
+    block = _unioned_imports(fragments).format("python")
     assert "from datetime import date" in block
 
 
@@ -548,7 +549,7 @@ def test_handler_fragment_unknown_op_no_db_verb(registry):
         extra_imports=[("myapp.actions", "publish")],
     )
     fragments = registry.render(handler, _rctx(_resource()))
-    block = _unioned_imports(fragments).block()
+    block = _unioned_imports(fragments).format("python")
     assert "from sqlalchemy import" not in block
     assert "from myapp.actions import publish" in block
 
@@ -599,6 +600,7 @@ def test_handler_with_body_template_propagates_context(registry):
         env=MagicMock(),
         config=config,
         package_prefix="_generated",
+        language="python",
         store=_store_with_resource(resource, config),
         instance_id=_OP_ID,
     )
