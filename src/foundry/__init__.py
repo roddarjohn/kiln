@@ -28,7 +28,6 @@ from foundry.operation import EmptyOptions, OperationMeta, operation
 from foundry.output import write_files
 from foundry.outputs import (
     EnumClass,
-    ExtensionSchema,
     Field,
     RouteHandler,
     RouteParam,
@@ -54,7 +53,6 @@ __all__ = [
     "EmptyOptions",
     "Engine",
     "EnumClass",
-    "ExtensionSchema",
     "Field",
     "FoundryConfig",
     "GeneratedFile",

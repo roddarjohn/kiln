@@ -10,9 +10,9 @@ from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import (
     EnumClass,
-    ExtensionSchema,
     RouteHandler,
     RouteParam,
+    SchemaClass,
     TestCase,
 )
 from kiln.config.schema import FieldSpec  # noqa: TC001
@@ -109,7 +109,7 @@ class List:
         search_request_name: str | None = None
         if has_extensions:
             search_request_name = model.suffixed("SearchRequest")
-            yield ExtensionSchema(
+            yield SchemaClass(
                 name=search_request_name,
                 body_template="fastapi/schema_parts/search_request.py.j2",
                 body_context={
@@ -128,7 +128,7 @@ class List:
         response_model = f"list[{list_item_schema.name}]"
         if pagination_mode is not None:
             page_name = model.suffixed("Page")
-            yield ExtensionSchema(
+            yield SchemaClass(
                 name=page_name,
                 body_template="fastapi/schema_parts/page.py.j2",
                 body_context={
@@ -202,7 +202,7 @@ def _filter_schemas(
 ) -> Iterable[object]:
     """Emit FilterCondition and FilterExpression schemas."""
     allowed = filters.fields or field_names
-    yield ExtensionSchema(
+    yield SchemaClass(
         name=model.suffixed("FilterCondition"),
         body_template="fastapi/schema_parts/filter_node.py.j2",
         body_context={
@@ -229,7 +229,7 @@ def _sort_schemas(
         members=[(f.upper(), f) for f in ordering.fields],
         base="str, Enum",
     )
-    yield ExtensionSchema(
+    yield SchemaClass(
         name=model.suffixed("SortClause"),
         body_template="fastapi/schema_parts/sort_clause.py.j2",
         body_context={"model_name": model.pascal},

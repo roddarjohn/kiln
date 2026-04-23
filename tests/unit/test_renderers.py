@@ -9,7 +9,6 @@ from foundry.env import create_jinja_env, render_template
 from foundry.imports import ImportCollector
 from foundry.outputs import (
     EnumClass,
-    ExtensionSchema,
     Field,
     RouteHandler,
     RouteParam,
@@ -561,7 +560,7 @@ def _render_snippet(snippet):
 
 
 def test_extension_schema_filter_node_renders(registry):
-    schema = ExtensionSchema(
+    schema = SchemaClass(
         name="PostFilterCondition",
         body_template="fastapi/schema_parts/filter_node.py.j2",
         body_context={
@@ -582,7 +581,7 @@ def test_extension_schema_filter_node_renders(registry):
 
 
 def test_extension_schema_sort_clause_renders(registry):
-    schema = ExtensionSchema(
+    schema = SchemaClass(
         name="PostSortClause",
         body_template="fastapi/schema_parts/sort_clause.py.j2",
         body_context={"model_name": "Post"},
@@ -596,7 +595,7 @@ def test_extension_schema_sort_clause_renders(registry):
 
 
 def test_extension_schema_search_request_omits_filter_when_disabled(registry):
-    schema = ExtensionSchema(
+    schema = SchemaClass(
         name="PostSearchRequest",
         body_template="fastapi/schema_parts/search_request.py.j2",
         body_context={
@@ -618,7 +617,7 @@ def test_extension_schema_search_request_omits_filter_when_disabled(registry):
 
 
 def test_extension_schema_page_keyset_vs_offset(registry):
-    keyset = ExtensionSchema(
+    keyset = SchemaClass(
         name="PostPage",
         body_template="fastapi/schema_parts/page.py.j2",
         body_context={
@@ -627,7 +626,7 @@ def test_extension_schema_page_keyset_vs_offset(registry):
             "mode": "keyset",
         },
     )
-    offset = ExtensionSchema(
+    offset = SchemaClass(
         name="PostPage",
         body_template="fastapi/schema_parts/page.py.j2",
         body_context={

@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from foundry.engine import BuildContext
 from foundry.outputs import (
     EnumClass,
-    ExtensionSchema,
     Field,
     RouteHandler,
     SchemaClass,
@@ -610,6 +609,15 @@ class TestGet:
 # -------------------------------------------------------------------
 
 
+def _templated_schemas(result: list[object]) -> list[SchemaClass]:
+    """Filter to SchemaClass entries rendered via a custom template."""
+    return [
+        r
+        for r in result
+        if isinstance(r, SchemaClass) and r.body_template is not None
+    ]
+
+
 class TestList:
     """Tests for List operation."""
 
@@ -658,7 +666,7 @@ class TestList:
         assert handlers[0].path == "/search"
         assert handlers[0].params == []
         assert handlers[0].request_schema is None
-        assert not any(isinstance(r, ExtensionSchema) for r in result)
+        assert _templated_schemas(result) == []
         assert not any(isinstance(r, EnumClass) for r in result)
 
     def test_list_with_filters_emits_filter_schemas(self):
@@ -670,7 +678,7 @@ class TestList:
         )
         result = list(List().build(ctx, opts))
 
-        ext_names = [r.name for r in result if isinstance(r, ExtensionSchema)]
+        ext_names = [r.name for r in _templated_schemas(result)]
         assert "UserFilterCondition" in ext_names
         assert "UserSearchRequest" in ext_names
         assert "UserPage" not in ext_names  # no pagination configured
@@ -689,7 +697,7 @@ class TestList:
         assert enums[0].name == "UserSortField"
         assert enums[0].members == [("NAME", "name"), ("AGE", "age")]
 
-        ext_names = [r.name for r in result if isinstance(r, ExtensionSchema)]
+        ext_names = [r.name for r in _templated_schemas(result)]
         assert "UserSortClause" in ext_names
         assert "UserSearchRequest" in ext_names
 
@@ -702,7 +710,7 @@ class TestList:
         )
         result = list(List().build(ctx, opts))
 
-        ext_names = [r.name for r in result if isinstance(r, ExtensionSchema)]
+        ext_names = [r.name for r in _templated_schemas(result)]
         assert "UserPage" in ext_names
         assert "UserSearchRequest" in ext_names
 
@@ -745,7 +753,7 @@ class TestList:
         )
         result = list(List().build(ctx, opts))
 
-        ext_names = {r.name for r in result if isinstance(r, ExtensionSchema)}
+        ext_names = {r.name for r in _templated_schemas(result)}
         assert ext_names == {
             "UserFilterCondition",
             "UserSortClause",
@@ -781,9 +789,8 @@ class TestList:
 
         filter_schema = next(
             r
-            for r in result
-            if isinstance(r, ExtensionSchema)
-            and r.name == "UserFilterCondition"
+            for r in _templated_schemas(result)
+            if r.name == "UserFilterCondition"
         )
         assert filter_schema.body_context["allowed_fields"] == ["name", "age"]
 

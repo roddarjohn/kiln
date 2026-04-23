@@ -43,9 +43,18 @@ class RouteParam:
 class SchemaClass:
     """A Pydantic model class to be rendered in a schema file.
 
-    Covers response schemas (``UserResource``), request schemas
-    (``UserCreateRequest``), and extension schemas (filter nodes,
-    sort clauses, page wrappers).
+    Two rendering modes, analogous to :class:`RouteHandler`:
+
+    - **Flat-field mode** (default): ``fields`` + ``validators``
+      are rendered through the default schema-class template.
+      Used for response/request schemas with a regular
+      ``name: type`` list (``UserResource``, ``UserCreateRequest``).
+    - **Templated mode**: when ``body_template`` is set, the
+      renderer dispatches to that template with ``body_context``
+      and ignores ``fields`` / ``validators``.  Used for schemas
+      with conditional fields, aliases, or trailing boilerplate
+      that the flat path can't express — e.g. list-op filter
+      nodes, sort clauses, search requests, paged responses.
     """
 
     name: str
@@ -53,6 +62,9 @@ class SchemaClass:
     base: str = "BaseModel"
     validators: list[str] = field(default_factory=list)
     doc: str | None = None
+    body_template: str | None = None
+    body_context: dict[str, Any] = field(default_factory=dict)
+    extra_imports: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -62,24 +74,6 @@ class EnumClass:
     name: str
     members: list[tuple[str, str]] = field(default_factory=list)
     base: str = "str, Enum"
-
-
-@dataclass
-class ExtensionSchema:
-    """A schema fragment rendered via a custom Jinja template.
-
-    Used for the filter / sort / search-request / page schemas
-    emitted by list operations when their extension configs are
-    set.  The renderer contributes a snippet into the same
-    ``schema_classes`` slot as :class:`SchemaClass`, but lets the
-    op carry its own template and context instead of going
-    through the flat-field path.
-    """
-
-    name: str
-    body_template: str
-    body_context: dict[str, Any] = field(default_factory=dict)
-    extra_imports: list[tuple[str, str]] = field(default_factory=list)
 
 
 # -------------------------------------------------------------------
