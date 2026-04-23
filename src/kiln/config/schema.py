@@ -297,3 +297,40 @@ class ProjectConfig(FoundryConfig):
             raise ValueError(msg)
 
         return matched
+
+
+# -------------------------------------------------------------------
+# List-extension option shapes.  These are read by the Filter / Order
+# / Paginate ops, which run at operation scope with ``type: "filter"``
+# / ``type: "order"`` / ``type: "paginate"`` and mutate the List op's
+# SearchRequest schema and search RouteHandler.
+# -------------------------------------------------------------------
+
+
+class FilterConfig(BaseModel):
+    """Configuration for list filtering.
+
+    When ``fields`` is empty or omitted, all of the list op's
+    ``fields`` become filterable; otherwise only the named fields
+    are filterable.
+    """
+
+    fields: list[str] | None = None
+
+
+class OrderConfig(BaseModel):
+    """Configuration for list ordering."""
+
+    fields: list[str]
+    default: str | None = None
+    default_dir: Literal["asc", "desc"] = "asc"
+
+
+class PaginateConfig(BaseModel):
+    """Configuration for list pagination."""
+
+    mode: Literal["keyset", "offset"] = "keyset"
+    cursor_field: str = "id"
+    cursor_type: FieldType = "uuid"
+    max_page_size: int = 100
+    default_page_size: int = 20

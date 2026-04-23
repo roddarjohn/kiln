@@ -27,11 +27,9 @@ class IntrospectedAction:
     """Result of inspecting a consumer's action function.
 
     Attributes:
-        is_object_action: ``True`` when the function takes a model
-            instance (path ``/{pk}/{slug}``); ``False`` for a
-            collection action (path ``/{slug}``).
         model_param_name: Name of the parameter holding the model
-            instance (object actions only).
+            instance, or ``None`` if the function doesn't take one
+            (collection action).
         request_class: Name of the Pydantic request-body class, if
             any.
         request_module: Module containing ``request_class``.
@@ -40,12 +38,21 @@ class IntrospectedAction:
 
     """
 
-    is_object_action: bool
     model_param_name: str | None
     request_class: str | None
     request_module: str | None
     response_class: str
     response_module: str
+
+    @property
+    def is_object_action(self) -> bool:
+        """``True`` when the action takes a model instance.
+
+        Object actions map to ``/{pk}/{slug}`` paths and fetch the
+        row by primary key; collection actions map to ``/{slug}``
+        and operate on the whole table.
+        """
+        return bool(self.model_param_name)
 
 
 def introspect_action_fn(
@@ -75,7 +82,6 @@ def introspect_action_fn(
     hints = _resolve_hints(fn, fn_dotted)
     sig = inspect.signature(fn)
 
-    is_object_action = False
     model_param_name: str | None = None
     request_class: str | None = None
     request_module: str | None = None
@@ -87,28 +93,25 @@ def introspect_action_fn(
             continue
 
         if hint is model_cls:
-            is_object_action = True
             model_param_name = param_name
+            continue
 
-        elif _is_pydantic_model(hint):
-            if request_class is not None:
-                msg = (
-                    f"Action '{fn_dotted}' has multiple "
-                    f"BaseModel parameters. Only one "
-                    f"request body is allowed."
-                )
-                raise ValueError(msg)
+        if not _is_pydantic_model(hint):
+            continue
 
-            request_class = hint.__name__
-            request_module = hint.__module__
+        if request_class is not None:
+            msg = (
+                f"Action '{fn_dotted}' has multiple BaseModel "
+                f"parameters. Only one request body is allowed."
+            )
+            raise ValueError(msg)
 
-    response_class, response_module = _validate_return_type(
-        hints,
-        fn_dotted,
-    )
+        request_class = hint.__name__
+        request_module = hint.__module__
+
+    response_class, response_module = _validate_return_type(hints, fn_dotted)
 
     return IntrospectedAction(
-        is_object_action=is_object_action,
         model_param_name=model_param_name,
         request_class=request_class,
         request_module=request_module,
@@ -118,24 +121,27 @@ def introspect_action_fn(
 
 
 def _import_callable(dotted: str) -> Callable[..., object]:
-    """Import a name from a dotted path."""
+    """Import a named attribute from a dotted path."""
     module_path, _, attr = dotted.rpartition(".")
     if not module_path:
         msg = f"'{dotted}' is not a valid dotted path."
         raise ValueError(msg)
+
     try:
         module = importlib.import_module(module_path)
+
     except ModuleNotFoundError as exc:
         msg = (
-            f"Cannot import module '{module_path}' for "
-            f"'{dotted}'. Ensure the consumer code is "
-            f"on sys.path."
+            f"Cannot import module '{module_path}' for '{dotted}'. "
+            f"Ensure the consumer code is on sys.path."
         )
         raise ValueError(msg) from exc
+
     attribute = getattr(module, attr, None)
     if attribute is None:
         msg = f"'{attr}' not found in module '{module_path}'."
         raise ValueError(msg)
+
     return attribute
 
 
@@ -143,21 +149,27 @@ def _resolve_hints(
     fn: object,
     fn_dotted: str,
 ) -> dict[str, type]:
-    """Resolve type hints for a callable."""
+    """Resolve type hints for a callable, wrapping failures."""
     try:
         return typing.get_type_hints(fn)
+
     except Exception as exc:
         msg = f"Cannot resolve type annotations for '{fn_dotted}': {exc}"
         raise ValueError(msg) from exc
 
 
 def _is_async_session(hint: object) -> bool:
-    """Check whether *hint* is ``AsyncSession``."""
+    """Return ``True`` when *hint* is SQLAlchemy's ``AsyncSession``.
+
+    Compared by class name to avoid importing SQLAlchemy from this
+    module; consumer code may have its own ``AsyncSession`` alias
+    that we still want to skip.
+    """
     return isinstance(hint, type) and hint.__name__ == "AsyncSession"
 
 
 def _is_pydantic_model(hint: object) -> bool:
-    """Check whether *hint* is a ``BaseModel`` subclass."""
+    """Return ``True`` when *hint* is a ``BaseModel`` subclass."""
     return isinstance(hint, type) and issubclass(hint, BaseModel)
 
 
@@ -178,17 +190,17 @@ def _validate_return_type(
     return_hint = hints.get("return")
     if return_hint is None:
         msg = (
-            f"Action '{fn_dotted}' has no return type "
-            f"annotation. A BaseModel return type is "
-            f"required."
+            f"Action '{fn_dotted}' has no return type annotation. "
+            f"A BaseModel return type is required."
         )
         raise TypeError(msg)
+
     if not _is_pydantic_model(return_hint):
         msg = (
-            f"Action '{fn_dotted}' return type "
-            f"'{return_hint}' is not a BaseModel "
-            f"subclass. A BaseModel return type is "
+            f"Action '{fn_dotted}' return type '{return_hint}' is "
+            f"not a BaseModel subclass. A BaseModel return type is "
             f"required."
         )
         raise TypeError(msg)
+
     return return_hint.__name__, return_hint.__module__

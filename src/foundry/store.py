@@ -126,11 +126,28 @@ class BuildStore:
             that scope is registered.
 
         """
+        ancestor_id = self.ancestor_id_of(instance_id, scope_name)
+        if ancestor_id is None:
+            return None
+        return self._instances.get(ancestor_id)
+
+    def ancestor_id_of(
+        self,
+        instance_id: str,
+        scope_name: str,
+    ) -> str | None:
+        """Return the enclosing instance id at *scope_name*, if any.
+
+        Mirrors :meth:`ancestor_of` but returns the ancestor's id
+        instead of its instance.  Ops that need to scan outputs
+        under a higher scope use this to get the id
+        :meth:`outputs_under` wants.
+        """
         current = self._parent_of.get(instance_id)
 
         while current is not None:
             if self.scope_of(current).name == scope_name:
-                return self._instances.get(current)
+                return current
 
             current = self._parent_of.get(current)
 

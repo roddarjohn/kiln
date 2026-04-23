@@ -25,10 +25,10 @@ class Action:
     """Custom action endpoint via function introspection.
 
     Dispatches on :attr:`~kiln.config.schema.OperationConfig.type`
-    ``== "action"``.  Every action config declares ``type:
-    "action"`` explicitly (typically via the
-    ``kiln/resources/presets.libsonnet`` helper), with a
-    user-defined ``name`` and the ``fn`` import path to introspect.
+    ``== "action"``.  Every action config declares ``type: "action"``
+    explicitly (typically via ``kiln/resources/presets.libsonnet``),
+    with a user-defined ``name`` and the ``fn`` import path to
+    introspect.
     """
 
     class Options(BaseModel):
@@ -45,7 +45,7 @@ class Action:
 
         Args:
             ctx: Build context for the action's operation entry.
-            options: Parsed Action.Options with ``fn`` path.
+            options: Parsed ``Options`` with the ``fn`` dotted path.
 
         Yields:
             The route handler and a test case.
@@ -57,38 +57,36 @@ class Action:
         )
         action_name = Name(ctx.instance.name)
         info = introspect_action_fn(options.fn, resource.model)
+        fn_module, fn_name = options.fn.rsplit(".", 1)
 
         if info.is_object_action:
             path = f"/{{{resource.pk}}}/{action_name.slug}"
-
-        else:
-            path = f"/{action_name.slug}"
-
-        function_name = f"{action_name.raw}_action"
-        fn_module, fn_name = options.fn.rsplit(".", 1)
-
-        params: list[RouteParam] = []
-        if info.is_object_action:
-            params.append(
+            params = [
                 RouteParam(
                     name=resource.pk,
                     annotation=PYTHON_TYPES[resource.pk_type],
-                )
-            )
+                ),
+            ]
+            extra_imports = [
+                (fn_module, fn_name),
+                ("sqlalchemy", "select"),
+                *utils_imports(),
+            ]
 
-        if info.request_class:
+        else:
+            path = f"/{action_name.slug}"
+            params = []
+            extra_imports = [(fn_module, fn_name)]
+
+        if info.request_class is not None:
             params.append(
-                RouteParam(name="body", annotation=info.request_class)
+                RouteParam(name="body", annotation=info.request_class),
             )
-
-        extra_imports: list[tuple[str, str]] = [(fn_module, fn_name)]
-        if info.is_object_action:
-            extra_imports.extend([("sqlalchemy", "select"), *utils_imports()])
 
         yield RouteHandler(
             method="POST",
             path=path,
-            function_name=function_name,
+            function_name=f"{action_name.raw}_action",
             params=params,
             response_model=info.response_class,
             return_type=info.response_class,
@@ -98,8 +96,8 @@ class Action:
             body_context={
                 "is_object_action": info.is_object_action,
                 "fn_name": fn_name,
-                "model_param_name": info.model_param_name or "obj",
-                "has_request_body": bool(info.request_class),
+                "model_param_name": info.model_param_name,
+                "has_request_body": info.request_class is not None,
             },
             extra_imports=extra_imports,
         )
@@ -109,8 +107,8 @@ class Action:
             method="post",
             path=path,
             status_success=200,
-            status_not_found=(404 if info.is_object_action else None),
-            has_request_body=bool(info.request_class),
+            status_not_found=404 if info.is_object_action else None,
+            has_request_body=info.request_class is not None,
             request_schema=info.request_class,
             action_name=action_name.raw,
         )

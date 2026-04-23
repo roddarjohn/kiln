@@ -81,12 +81,12 @@ class Auth:
             "auth",
             "dependencies",
         )
-        dep_line = "current_user: Annotated[dict, Depends(get_current_user)],"
-        import_pair = (auth_mod, "get_current_user")
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
-            handler.extra_deps.append(dep_line)
-            handler.extra_imports.append(import_pair)
+            handler.extra_deps.append(
+                "current_user: Annotated[dict, Depends(get_current_user)],"
+            )
+            handler.extra_imports.append((auth_mod, "get_current_user"))
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
             test.requires_auth = True
