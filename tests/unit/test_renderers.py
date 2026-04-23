@@ -7,16 +7,7 @@ import pytest
 from foundry.assembler import assemble
 from foundry.env import create_jinja_env, render_template
 from foundry.imports import ImportCollector
-from foundry.outputs import (
-    EnumClass,
-    Field,
-    RouteHandler,
-    RouteParam,
-    SchemaClass,
-    SerializerFn,
-    StaticFile,
-    TestCase,
-)
+from foundry.outputs import StaticFile
 from foundry.render import FileFragment, RenderCtx, SnippetFragment
 from foundry.render import registry as shared_registry
 from foundry.scope import discover_scopes
@@ -26,6 +17,15 @@ from kiln.operations.renderers import (
     _response_schema_name,
     _status_suffix,
     render_enum_class,
+)
+from kiln.operations.types import (
+    EnumClass,
+    Field,
+    RouteHandler,
+    RouteParam,
+    SchemaClass,
+    SerializerFn,
+    TestCase,
 )
 from kiln.target import target as kiln_target
 

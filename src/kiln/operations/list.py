@@ -8,13 +8,6 @@ from pydantic import BaseModel
 
 from foundry.naming import Name
 from foundry.operation import operation
-from foundry.outputs import (
-    EnumClass,
-    RouteHandler,
-    RouteParam,
-    SchemaClass,
-    TestCase,
-)
 from kiln.config.schema import FieldSpec  # noqa: TC001
 from kiln.operations._list_config import (  # noqa: TC001
     FilterConfig,
@@ -24,6 +17,13 @@ from kiln.operations._list_config import (  # noqa: TC001
 from kiln.operations._shared import (
     _construct_response_schema,
     _construct_serializer,
+)
+from kiln.operations.types import (
+    EnumClass,
+    RouteHandler,
+    RouteParam,
+    SchemaClass,
+    TestCase,
 )
 
 if TYPE_CHECKING:

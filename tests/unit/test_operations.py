@@ -8,15 +8,7 @@ from unittest.mock import patch
 from pydantic import BaseModel
 
 from foundry.engine import BuildContext
-from foundry.outputs import (
-    EnumClass,
-    Field,
-    RouteHandler,
-    SchemaClass,
-    SerializerFn,
-    StaticFile,
-    TestCase,
-)
+from foundry.outputs import StaticFile
 from foundry.scope import PROJECT, Scope, ScopeTree
 from foundry.store import BuildStore
 from kiln.config.schema import (
@@ -41,6 +33,14 @@ from kiln.operations.get import Get
 from kiln.operations.list import List
 from kiln.operations.routing import ProjectRouter, Router
 from kiln.operations.scaffold import AuthScaffold, Scaffold
+from kiln.operations.types import (
+    EnumClass,
+    Field,
+    RouteHandler,
+    SchemaClass,
+    SerializerFn,
+    TestCase,
+)
 from kiln.operations.update import Update
 
 # -------------------------------------------------------------------

@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, StaticFile
+from foundry.outputs import StaticFile
+from kiln.operations.types import RouteHandler
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

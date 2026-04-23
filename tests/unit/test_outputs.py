@@ -1,6 +1,7 @@
-"""Tests for foundry output types."""
+"""Tests for build-output dataclasses."""
 
-from foundry import (
+from foundry import StaticFile
+from kiln.operations.types import (
     EnumClass,
     Field,
     RouteHandler,
@@ -8,7 +9,6 @@ from foundry import (
     RouterMount,
     SchemaClass,
     SerializerFn,
-    StaticFile,
     TestCase,
 )
 

@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from foundry.outputs import Field, SchemaClass, SerializerFn
 from kiln._helpers import PYTHON_TYPES
 from kiln.config.schema import FieldSpec  # noqa: TC001
+from kiln.operations.types import Field, SchemaClass, SerializerFn
 
 if TYPE_CHECKING:
     from foundry.naming import Name

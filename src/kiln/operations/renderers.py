@@ -25,16 +25,16 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
-from foundry.outputs import (
+from foundry.outputs import StaticFile
+from foundry.render import FileFragment, Fragment, SnippetFragment, registry
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations.types import (
     EnumClass,
     RouteHandler,
     SchemaClass,
     SerializerFn,
-    StaticFile,
     TestCase,
 )
-from foundry.render import FileFragment, Fragment, SnippetFragment, registry
-from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

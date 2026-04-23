@@ -8,10 +8,10 @@ from pydantic import BaseModel
 
 from foundry.naming import Name
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, RouteParam, TestCase
 from kiln._helpers import PYTHON_TYPES
 from kiln.operations._introspect import introspect_action_fn
 from kiln.operations.renderers import utils_imports
+from kiln.operations.types import RouteHandler, RouteParam, TestCase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
