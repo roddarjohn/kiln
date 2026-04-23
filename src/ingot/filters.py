@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, or_
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
     from sqlalchemy import Select
+    from sqlalchemy.sql.elements import ColumnElement
 
 _FILTER_OPS: dict[str, str] = {
     "eq": "__eq__",
@@ -21,6 +22,8 @@ _FILTER_OPS: dict[str, str] = {
     "starts_with": "startswith",
     "in": "in_",
 }
+
+_COMBINERS = {"and_": and_, "or_": or_}
 
 
 def apply_filters(
@@ -58,7 +61,7 @@ def apply_filters(
 def _build_filter_clause(
     node: BaseModel,
     model: type,
-) -> Any:
+) -> ColumnElement[bool] | None:
     """Recursively build a SQLAlchemy clause from a filter node.
 
     Args:
@@ -70,28 +73,22 @@ def _build_filter_clause(
         combiner lists.
 
     """
-    and_nodes = getattr(node, "and_", None)
-    if and_nodes is not None:
-        children = [_build_filter_clause(child, model) for child in and_nodes]
-        children = [c for c in children if c is not None]
-        if not children:
-            return None
-        return and_(*children)
-
-    or_nodes = getattr(node, "or_", None)
-    if or_nodes is not None:
-        children = [_build_filter_clause(child, model) for child in or_nodes]
-        children = [c for c in children if c is not None]
-        if not children:
-            return None
-        return or_(*children)
+    for attr, combiner in _COMBINERS.items():
+        children = getattr(node, attr, None)
+        if children is None:
+            continue
+        clauses = [
+            c
+            for c in (_build_filter_clause(n, model) for n in children)
+            if c is not None
+        ]
+        return combiner(*clauses) if clauses else None
 
     field_name = getattr(node, "field", None)
     if field_name is None:
         return None
 
     op = getattr(node, "op", "eq")
-    value = getattr(node, "value", None)
     col = getattr(model, field_name)
     op_method = _FILTER_OPS[op]
-    return getattr(col, op_method)(value)
+    return getattr(col, op_method)(node.value)

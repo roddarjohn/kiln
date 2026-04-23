@@ -32,11 +32,13 @@ async def get_object_from_query_or_404(
     """
     result = await db.execute(stmt)
     row = result.scalars().one_or_none()
+
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=detail,
         )
+
     return row
 
 
