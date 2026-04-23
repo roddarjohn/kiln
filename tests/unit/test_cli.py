@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from foundry import GeneratedFile, write_files
 from foundry.cli import app, cli_main
-from foundry.errors import ConfigError
+from foundry.errors import CLIError, ConfigError
 
 runner = CliRunner()
 
@@ -295,6 +295,137 @@ def test_generate_clean_flag_removes_stale(tmp_path: Path):
     assert result.exit_code == 0
     assert not stale.exists()
     assert (out / "myapp" / "routes" / "post.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+
+def test_validate_accepts_good_config(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
+    result = runner.invoke(app, ["validate", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert "is valid" in result.output
+
+
+def test_validate_bad_config_raises_config_error(tmp_path: Path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("version: 1")
+    result = runner.invoke(app, ["validate", "--config", str(bad)])
+    assert isinstance(result.exception, ConfigError)
+
+
+def test_validate_does_not_write_files(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [
+                {
+                    "model": "myapp.models.Post",
+                    "operations": [
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["validate", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# targets list
+# ---------------------------------------------------------------------------
+
+
+def test_targets_list_shows_kiln():
+    result = runner.invoke(app, ["targets", "list"])
+    assert result.exit_code == 0
+    assert "kiln" in result.output
+    assert "python" in result.output
+
+
+# ---------------------------------------------------------------------------
+# generate --dry-run
+# ---------------------------------------------------------------------------
+
+
+def test_generate_dry_run_lists_files_without_writing(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [
+                {
+                    "model": "myapp.models.Post",
+                    "operations": [
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--config",
+            str(cfg),
+            "--out",
+            str(out),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Would generate" in result.output
+    assert str(out / "myapp" / "routes" / "post.py") in result.output
+    assert not out.exists()
+
+
+def test_generate_dry_run_rejects_clean(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--config",
+            str(cfg),
+            "--out",
+            str(out),
+            "--dry-run",
+            "--clean",
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CLIError)
 
 
 # ---------------------------------------------------------------------------
