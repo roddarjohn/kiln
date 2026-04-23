@@ -41,11 +41,11 @@ def apply_keyset_pagination(
         ``(modified_stmt, clamped_page_size)`` tuple.
 
     """
-    page_size = min(page_size, max_page_size)
+    effective_page_size = min(page_size, max_page_size)
     if cursor is not None:
-        col = getattr(model, cursor_field)
-        stmt = stmt.where(col > cursor)
-    return stmt.limit(page_size + 1), page_size
+        cursor_col = getattr(model, cursor_field)
+        stmt = stmt.where(cursor_col > cursor)
+    return stmt.limit(effective_page_size + 1), effective_page_size
 
 
 async def apply_offset_pagination(
@@ -72,8 +72,8 @@ async def apply_offset_pagination(
         ``(total, rows)`` tuple.
 
     """
-    limit = min(limit, max_page_size)
+    effective_limit = min(limit, max_page_size)
     count_result = await db.execute(stmt.with_only_columns(func.count()))
     total = count_result.scalar_one()
-    result = await db.execute(stmt.offset(offset).limit(limit))
-    return total, list(result.scalars())
+    page_result = await db.execute(stmt.offset(offset).limit(effective_limit))
+    return total, list(page_result.scalars())
