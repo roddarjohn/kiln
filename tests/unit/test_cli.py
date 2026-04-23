@@ -298,6 +298,112 @@ def test_generate_clean_flag_removes_stale(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+
+def test_validate_accepts_good_config(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
+    )
+    result = runner.invoke(app, ["validate", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert "is valid" in result.output
+
+
+def test_validate_bad_config_raises_config_error(tmp_path: Path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("version: 1")
+    result = runner.invoke(app, ["validate", "--config", str(bad)])
+    assert isinstance(result.exception, ConfigError)
+
+
+def test_validate_does_not_write_files(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [
+                {
+                    "model": "myapp.models.Post",
+                    "operations": [
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["validate", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# list-targets
+# ---------------------------------------------------------------------------
+
+
+def test_list_targets_shows_kiln():
+    result = runner.invoke(app, ["list-targets"])
+    assert result.exit_code == 0
+    assert "kiln" in result.output
+    assert "python" in result.output
+
+
+# ---------------------------------------------------------------------------
+# dry-run
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_lists_files_without_writing(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [
+                {
+                    "model": "myapp.models.Post",
+                    "operations": [
+                        {
+                            "name": "get",
+                            "fields": [{"name": "title", "type": "str"}],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app, ["dry-run", "--config", str(cfg), "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert "Would generate" in result.output
+    assert str(out / "myapp" / "routes" / "post.py") in result.output
+    assert not out.exists()
+
+
+def test_dry_run_bad_config_raises_config_error(tmp_path: Path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("version: 1")
+    result = runner.invoke(
+        app, ["dry-run", "--config", str(bad), "--out", str(tmp_path)]
+    )
+    assert isinstance(result.exception, ConfigError)
+
+
+# ---------------------------------------------------------------------------
 # write_files
 # ---------------------------------------------------------------------------
 

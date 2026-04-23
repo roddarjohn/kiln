@@ -28,6 +28,8 @@ app = typer.Typer(
         "registered under the foundry.targets entry-point group."
     ),
 )
+targets_app = typer.Typer(help="Inspect installed targets.")
+app.add_typer(targets_app, name="targets")
 
 
 ConfigOption = Annotated[
@@ -161,17 +163,71 @@ def generate_cmd(
             ),
         ),
     ] = False,
+    dry_run: Annotated[  # noqa: FBT002
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=(
+                "List the files that would be generated without "
+                "touching the filesystem.  Incompatible with "
+                "``--clean``."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Generate files from a config via the selected target."""
+    if dry_run and clean:
+        msg = "--dry-run cannot be combined with --clean"
+        raise CLIError(msg)
+
     if clean:
         clean_cmd(config=config, out=out, target_name=target_name)
 
     target = _resolve_target(target_name)
     cfg = load_config(config, target.schema, _stdlibs())
     files = generate(cfg, target)
-    written = write_files(files, out)
 
+    if dry_run:
+        for f in files:
+            typer.echo(str(out / f.path))
+        typer.echo(f"Would generate {len(files)} file(s).")
+        return
+
+    written = write_files(files, out)
     typer.echo(f"Generated {written} file(s).")
+
+
+@app.command("validate")
+def validate_cmd(
+    config: ConfigOption,
+    target_name: TargetOption = None,
+) -> None:
+    """Validate a config file without generating anything.
+
+    Parses and schema-checks ``--config`` using the selected
+    target, then exits.  Useful as a pre-commit check or for
+    editor integrations that want fast feedback without running
+    the full pipeline.
+    """
+    target = _resolve_target(target_name)
+    load_config(config, target.schema, _stdlibs())
+    typer.echo(f"{config} is valid for target {target.name!r}.")
+
+
+@targets_app.command("list")
+def targets_list_cmd() -> None:
+    """List every target registered under ``foundry.targets``.
+
+    Each line is formatted as ``<name> (<language>)`` so users can
+    see at a glance which target to pass to ``--target``.
+    """
+    targets = discover_targets()
+    if not targets:
+        typer.echo("No targets installed.")
+        return
+
+    for target in targets:
+        typer.echo(f"{target.name} ({target.language})")
 
 
 def cli_main() -> None:
