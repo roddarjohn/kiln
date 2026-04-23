@@ -64,6 +64,24 @@ class EnumClass:
     base: str = "str, Enum"
 
 
+@dataclass
+class ExtensionSchema:
+    """A schema fragment rendered via a custom Jinja template.
+
+    Used for the filter / sort / search-request / page schemas
+    emitted by list operations when their extension configs are
+    set.  The renderer contributes a snippet into the same
+    ``schema_classes`` slot as :class:`SchemaClass`, but lets the
+    op carry its own template and context instead of going
+    through the flat-field path.
+    """
+
+    name: str
+    body_template: str
+    body_context: dict[str, Any] = field(default_factory=dict)
+    extra_imports: list[tuple[str, str]] = field(default_factory=list)
+
+
 # -------------------------------------------------------------------
 # Route types
 # -------------------------------------------------------------------

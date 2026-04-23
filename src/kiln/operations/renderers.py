@@ -27,6 +27,7 @@ from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import (
     EnumClass,
+    ExtensionSchema,
     RouteHandler,
     SchemaClass,
     SerializerFn,
@@ -155,6 +156,42 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
                 for f in schema.fields
             ],
         },
+        imports=imports,
+    )
+
+
+@registry.renders(ExtensionSchema)
+def _extension_schema_fragment(
+    schema: ExtensionSchema, ctx: RenderCtx
+) -> Iterator[Fragment]:
+    """Render a list-extension schema via its own body template.
+
+    Contributes into the schemas file's ``schema_classes`` slot
+    alongside regular :class:`SchemaClass` output, but uses the
+    caller-supplied template + context so extension schemas (filter
+    nodes, sort clauses, search requests, paged responses) can
+    carry conditionals that the flat :class:`SchemaClass` path
+    doesn't express.
+    """
+    info = _resource_info(ctx)
+    path = f"{info.app}/schemas/{info.model.lower}.py"
+
+    imports = ImportCollector()
+    imports.add_from("__future__", "annotations")
+    imports.add_from("pydantic", "BaseModel")
+    for module, name in schema.extra_imports:
+        imports.add_from(module, name)
+
+    yield FileFragment(
+        path=path,
+        template="fastapi/schema_outer.py.j2",
+        context={"model_name": info.model.pascal},
+    )
+    yield SnippetFragment(
+        path=path,
+        slot="schema_classes",
+        template=schema.body_template,
+        context=schema.body_context,
         imports=imports,
     )
 
