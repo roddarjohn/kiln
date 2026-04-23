@@ -7,10 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import func
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from sqlalchemy import Select
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def apply_keyset_pagination(
@@ -38,42 +35,44 @@ def apply_keyset_pagination(
         max_page_size: Maximum allowed page size.
 
     Returns:
-        ``(modified_stmt, clamped_page_size)`` tuple.
+        ``(paginated_stmt, effective_page_size)`` tuple. The
+        caller is responsible for executing *paginated_stmt*.
 
     """
-    page_size = min(page_size, max_page_size)
+    effective_page_size = min(page_size, max_page_size)
+
     if cursor is not None:
-        col = getattr(model, cursor_field)
-        stmt = stmt.where(col > cursor)
-    return stmt.limit(page_size + 1), page_size
+        cursor_col = getattr(model, cursor_field)
+        stmt = stmt.where(cursor_col > cursor)
+
+    return stmt.limit(effective_page_size + 1), effective_page_size
 
 
-async def apply_offset_pagination(
-    db: AsyncSession,
+def apply_offset_pagination(
     stmt: Select,
     offset: int,
     limit: int,
     max_page_size: int,
-) -> tuple[int, Sequence[Any]]:
-    """Apply offset pagination and execute the query.
+) -> tuple[Select, Select, int]:
+    """Apply offset pagination to a SELECT.
 
-    Runs a ``COUNT(*)`` query for the total, then executes the
-    statement with ``OFFSET`` / ``LIMIT``.
+    Clamps *limit* to *max_page_size*, applies ``OFFSET`` /
+    ``LIMIT``, and builds a companion ``COUNT(*)`` statement so
+    the caller can fetch the total alongside the page.
 
     Args:
-        db: The async database session.
         stmt: The SQLAlchemy SELECT statement (without
             offset/limit applied).
         offset: Number of rows to skip.
-        limit: Maximum rows to return.
+        limit: Requested page size.
         max_page_size: Hard ceiling on *limit*.
 
     Returns:
-        ``(total, rows)`` tuple.
+        ``(paginated_stmt, count_stmt, effective_limit)`` tuple.
+        The caller is responsible for executing both statements.
 
     """
-    limit = min(limit, max_page_size)
-    count_result = await db.execute(stmt.with_only_columns(func.count()))
-    total = count_result.scalar_one()
-    result = await db.execute(stmt.offset(offset).limit(limit))
-    return total, list(result.scalars())
+    effective_limit = min(limit, max_page_size)
+    paginated_stmt = stmt.offset(offset).limit(effective_limit)
+    count_stmt = stmt.with_only_columns(func.count())
+    return paginated_stmt, count_stmt, effective_limit

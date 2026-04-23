@@ -8,14 +8,7 @@ from unittest.mock import patch
 from pydantic import BaseModel
 
 from foundry.engine import BuildContext
-from foundry.outputs import (
-    Field,
-    RouteHandler,
-    SchemaClass,
-    SerializerFn,
-    StaticFile,
-    TestCase,
-)
+from foundry.outputs import StaticFile
 from foundry.scope import PROJECT, Scope, ScopeTree
 from foundry.store import BuildStore
 from kiln.config.schema import (
@@ -28,6 +21,11 @@ from kiln.config.schema import (
     ProjectConfig,
     ResourceConfig,
 )
+from kiln.operations._list_config import (
+    FilterConfig,
+    OrderConfig,
+    PaginateConfig,
+)
 from kiln.operations._shared import _field_dicts
 from kiln.operations.create import Create
 from kiln.operations.delete import Delete
@@ -35,6 +33,14 @@ from kiln.operations.get import Get
 from kiln.operations.list import List
 from kiln.operations.routing import ProjectRouter, Router
 from kiln.operations.scaffold import AuthScaffold, Scaffold
+from kiln.operations.types import (
+    EnumClass,
+    Field,
+    RouteHandler,
+    SchemaClass,
+    SerializerFn,
+    TestCase,
+)
 from kiln.operations.update import Update
 
 # -------------------------------------------------------------------
@@ -603,6 +609,15 @@ class TestGet:
 # -------------------------------------------------------------------
 
 
+def _templated_schemas(result: list[object]) -> list[SchemaClass]:
+    """Filter to SchemaClass entries rendered via a custom template."""
+    return [
+        r
+        for r in result
+        if isinstance(r, SchemaClass) and r.body_template is not None
+    ]
+
+
 class TestList:
     """Tests for List operation."""
 
@@ -622,8 +637,8 @@ class TestList:
         assert sers[0].schema_name == "UserListItem"
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
-        assert handler.method == "GET"
-        assert handler.path == "/"
+        assert handler.method == "POST"
+        assert handler.path == "/search"
         assert handler.function_name == "list_users"
         assert handler.response_model == "list[UserListItem]"
         assert handler.return_type == "list[UserListItem]"
@@ -635,7 +650,149 @@ class TestList:
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].op_name == "list"
+        assert tests[0].method == "post"
+        assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
+
+    def test_list_without_extensions_has_single_bodyless_search(self):
+        """Bare list op emits only one POST /search with no body."""
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
+
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        assert len(handlers) == 1
+        assert handlers[0].method == "POST"
+        assert handlers[0].path == "/search"
+        assert handlers[0].params == []
+        assert handlers[0].request_schema is None
+        assert _templated_schemas(result) == []
+        assert not any(isinstance(r, EnumClass) for r in result)
+
+    def test_list_with_filters_emits_filter_schemas(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(
+            fields=_FIELDS,
+            filters=FilterConfig(fields=["name"]),
+        )
+        result = list(List().build(ctx, opts))
+
+        ext_names = [r.name for r in _templated_schemas(result)]
+        assert "UserFilterCondition" in ext_names
+        assert "UserSearchRequest" in ext_names
+        assert "UserPage" not in ext_names  # no pagination configured
+
+    def test_list_with_ordering_emits_sort_field_enum_and_clause(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(
+            fields=_FIELDS,
+            ordering=OrderConfig(fields=["name", "age"], default="name"),
+        )
+        result = list(List().build(ctx, opts))
+
+        enums = [r for r in result if isinstance(r, EnumClass)]
+        assert len(enums) == 1
+        assert enums[0].name == "UserSortField"
+        assert enums[0].members == [("NAME", "name"), ("AGE", "age")]
+
+        ext_names = [r.name for r in _templated_schemas(result)]
+        assert "UserSortClause" in ext_names
+        assert "UserSearchRequest" in ext_names
+
+    def test_list_with_keyset_pagination_emits_page_and_search_handler(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(
+            fields=_FIELDS,
+            pagination=PaginateConfig(mode="keyset", cursor_field="id"),
+        )
+        result = list(List().build(ctx, opts))
+
+        ext_names = [r.name for r in _templated_schemas(result)]
+        assert "UserPage" in ext_names
+        assert "UserSearchRequest" in ext_names
+
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        assert len(handlers) == 1
+        search = handlers[0]
+        assert search.method == "POST"
+        assert search.path == "/search"
+        assert search.function_name == "list_users"
+        assert search.response_model == "UserPage"
+        assert search.request_schema == "UserSearchRequest"
+        assert search.body_context["pagination_mode"] == "keyset"
+        assert search.body_context["cursor_field"] == "id"
+        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
+
+    def test_list_with_offset_pagination_uses_offset_helper(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(
+            fields=_FIELDS,
+            pagination=PaginateConfig(mode="offset"),
+        )
+        result = list(List().build(ctx, opts))
+
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        assert len(handlers) == 1
+        search = handlers[0]
+        assert search.body_context["pagination_mode"] == "offset"
+        assert ("ingot", "apply_offset_pagination") in search.extra_imports
+        assert ("ingot", "apply_keyset_pagination") not in search.extra_imports
+
+    def test_list_with_all_extensions_emits_everything(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(
+            fields=_FIELDS,
+            filters=FilterConfig(),
+            ordering=OrderConfig(fields=["name"]),
+            pagination=PaginateConfig(mode="keyset"),
+        )
+        result = list(List().build(ctx, opts))
+
+        ext_names = {r.name for r in _templated_schemas(result)}
+        assert ext_names == {
+            "UserFilterCondition",
+            "UserSortClause",
+            "UserSearchRequest",
+            "UserPage",
+        }
+
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        assert len(handlers) == 1
+        search = handlers[0]
+        assert search.body_context["has_filter"] is True
+        assert search.body_context["has_sort"] is True
+        assert search.body_context["pagination_mode"] == "keyset"
+        assert ("ingot", "apply_filters") in search.extra_imports
+        assert ("ingot", "apply_ordering") in search.extra_imports
+        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
+
+        tests = [r for r in result if isinstance(r, TestCase)]
+        assert len(tests) == 1
+        tc = tests[0]
+        assert tc.method == "post"
+        assert tc.path == "/search"
+        assert tc.has_request_body is True
+        assert tc.request_schema == "UserSearchRequest"
+        assert tc.is_list_response is False
+
+    def test_list_filters_default_to_all_list_fields(self):
+        """FilterConfig with no fields uses the list op's full field set."""
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        opts = List.Options(fields=_FIELDS, filters=FilterConfig())
+        result = list(List().build(ctx, opts))
+
+        filter_schema = next(
+            r
+            for r in _templated_schemas(result)
+            if r.name == "UserFilterCondition"
+        )
+        assert filter_schema.body_context["allowed_fields"] == ["name", "age"]
 
 
 # -------------------------------------------------------------------

@@ -6,9 +6,10 @@ Target-agnostic primitives for building code generators:
   runs operations, scope by scope.
 * :func:`~foundry.operation.operation` -- decorator that turns a
   class into a scoped build step.
-* :mod:`~foundry.outputs` -- typed, mutable dataclasses produced
-  by operations (``RouteHandler``, ``SchemaClass``, ``StaticFile``,
-  …).
+* :mod:`~foundry.outputs` -- :class:`StaticFile`, the one build
+  output that's target-neutral.  Python / FastAPI-specific
+  outputs (``RouteHandler``, ``SchemaClass``, …) live in
+  :mod:`kiln.operations.outputs`.
 * :class:`~foundry.render.RenderRegistry` -- maps output types to
   renderer functions.
 * :class:`~foundry.render.BuildStore` -- accumulator the engine
@@ -26,17 +27,7 @@ from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import, split_dotted_class
 from foundry.operation import EmptyOptions, OperationMeta, operation
 from foundry.output import write_files
-from foundry.outputs import (
-    EnumClass,
-    Field,
-    RouteHandler,
-    RouteParam,
-    RouterMount,
-    SchemaClass,
-    SerializerFn,
-    StaticFile,
-    TestCase,
-)
+from foundry.outputs import StaticFile
 from foundry.pipeline import generate
 from foundry.render import RenderCtx, RenderRegistry
 from foundry.scope import PROJECT, Scope, Scoped, discover_scopes
@@ -52,8 +43,6 @@ __all__ = [
     "ConfigError",
     "EmptyOptions",
     "Engine",
-    "EnumClass",
-    "Field",
     "FoundryConfig",
     "GeneratedFile",
     "GenerationError",
@@ -62,16 +51,10 @@ __all__ = [
     "OperationMeta",
     "RenderCtx",
     "RenderRegistry",
-    "RouteHandler",
-    "RouteParam",
-    "RouterMount",
-    "SchemaClass",
     "Scope",
     "Scoped",
-    "SerializerFn",
     "StaticFile",
     "Target",
-    "TestCase",
     "create_jinja_env",
     "discover_scopes",
     "discover_targets",

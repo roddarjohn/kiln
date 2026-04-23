@@ -7,16 +7,7 @@ import pytest
 from foundry.assembler import assemble
 from foundry.env import create_jinja_env, render_template
 from foundry.imports import ImportCollector
-from foundry.outputs import (
-    EnumClass,
-    Field,
-    RouteHandler,
-    RouteParam,
-    SchemaClass,
-    SerializerFn,
-    StaticFile,
-    TestCase,
-)
+from foundry.outputs import StaticFile
 from foundry.render import FileFragment, RenderCtx, SnippetFragment
 from foundry.render import registry as shared_registry
 from foundry.scope import discover_scopes
@@ -26,6 +17,15 @@ from kiln.operations.renderers import (
     _response_schema_name,
     _status_suffix,
     render_enum_class,
+)
+from kiln.operations.types import (
+    EnumClass,
+    Field,
+    RouteHandler,
+    RouteParam,
+    SchemaClass,
+    SerializerFn,
+    TestCase,
 )
 from kiln.target import target as kiln_target
 
@@ -548,6 +548,192 @@ def test_handler_fragment_unknown_op_no_db_verb(registry):
     block = _unioned_imports(fragments).format("python")
     assert "from sqlalchemy import" not in block
     assert "from myapp.actions import publish" in block
+
+
+def _render_snippet(snippet):
+    """Render a SnippetFragment's template with its context to a string."""
+    return render_template(
+        jinja_env,
+        snippet.template,
+        **snippet.context,
+    )
+
+
+def test_extension_schema_filter_node_renders(registry):
+    schema = SchemaClass(
+        name="PostFilterCondition",
+        body_template="fastapi/schema_parts/filter_node.py.j2",
+        body_context={
+            "model_name": "Post",
+            "allowed_fields": ["title", "author"],
+        },
+        extra_imports=[("typing", "Literal")],
+    )
+    fragments = registry.render(schema, _rctx(_resource()))
+    snippets = _snippets(fragments, "myapp/schemas/post.py", "schema_classes")
+    rendered = _render_snippet(snippets[0])
+    assert "class PostFilterCondition(BaseModel):" in rendered
+    assert 'field: Literal["title", "author"]' in rendered
+    assert "class PostFilterExpression(BaseModel):" in rendered
+    assert "PostFilterExpression.model_rebuild()" in rendered
+    block = _unioned_imports(fragments).format("python")
+    assert "from typing import Literal" in block
+
+
+def test_extension_schema_sort_clause_renders(registry):
+    schema = SchemaClass(
+        name="PostSortClause",
+        body_template="fastapi/schema_parts/sort_clause.py.j2",
+        body_context={"model_name": "Post"},
+    )
+    fragments = registry.render(schema, _rctx(_resource()))
+    snippets = _snippets(fragments, "myapp/schemas/post.py", "schema_classes")
+    rendered = _render_snippet(snippets[0])
+    assert "class PostSortClause(BaseModel):" in rendered
+    assert "field: PostSortField" in rendered
+    assert 'dir: Literal["asc", "desc"] = "asc"' in rendered
+
+
+def test_extension_schema_search_request_omits_filter_when_disabled(registry):
+    schema = SchemaClass(
+        name="PostSearchRequest",
+        body_template="fastapi/schema_parts/search_request.py.j2",
+        body_context={
+            "model_name": "Post",
+            "has_filter": False,
+            "has_sort": True,
+            "pagination_mode": "offset",
+            "default_page_size": 20,
+        },
+    )
+    fragments = registry.render(schema, _rctx(_resource()))
+    snippets = _snippets(fragments, "myapp/schemas/post.py", "schema_classes")
+    rendered = _render_snippet(snippets[0])
+    assert "class PostSearchRequest(BaseModel):" in rendered
+    assert "filter:" not in rendered
+    assert "sort: list[PostSortClause] | None = None" in rendered
+    assert "offset: int = 0" in rendered
+    assert "limit: int = 20" in rendered
+
+
+def test_extension_schema_page_keyset_vs_offset(registry):
+    keyset = SchemaClass(
+        name="PostPage",
+        body_template="fastapi/schema_parts/page.py.j2",
+        body_context={
+            "model_name": "Post",
+            "item_type": "PostListItem",
+            "mode": "keyset",
+        },
+    )
+    offset = SchemaClass(
+        name="PostPage",
+        body_template="fastapi/schema_parts/page.py.j2",
+        body_context={
+            "model_name": "Post",
+            "item_type": "PostListItem",
+            "mode": "offset",
+        },
+    )
+    keyset_out = _render_snippet(
+        _snippets(
+            registry.render(keyset, _rctx(_resource())),
+            "myapp/schemas/post.py",
+            "schema_classes",
+        )[0]
+    )
+    offset_out = _render_snippet(
+        _snippets(
+            registry.render(offset, _rctx(_resource())),
+            "myapp/schemas/post.py",
+            "schema_classes",
+        )[0]
+    )
+    assert "items: list[PostListItem]" in keyset_out
+    assert "next_cursor: str | None = None" in keyset_out
+    assert "total: int" not in keyset_out
+
+    assert "total: int" in offset_out
+    assert "next_cursor" not in offset_out
+
+
+def test_search_body_template_renders_keyset():
+    """Smoke-test the search handler body template end-to-end."""
+    rendered = render_template(
+        jinja_env,
+        "fastapi/ops/search.py.j2",
+        decorators=[],
+        method="post",
+        path="/search",
+        response_model="PostPage",
+        status_suffix=None,
+        status_code=None,
+        function_name="search_posts",
+        params=[
+            {
+                "name": "body",
+                "annotation": "PostSearchRequest",
+                "default": None,
+            }
+        ],
+        return_type="PostPage",
+        doc="Search Post records.",
+        body_lines=[],
+        serializer_fn="to_post_list_item",
+        request_schema="PostSearchRequest",
+        model_name="Post",
+        has_filter=True,
+        has_sort=True,
+        pagination_mode="keyset",
+        default_sort_field="id",
+        default_sort_dir="asc",
+        max_page_size=100,
+        cursor_field="id",
+    )
+    assert "stmt = select(Post)" in rendered
+    assert "apply_filters(stmt, body.filter, Post)" in rendered
+    assert "apply_ordering(" in rendered
+    assert "apply_keyset_pagination(" in rendered
+    assert "return PostPage(" in rendered
+    assert "next_cursor=next_cursor" in rendered
+
+
+def test_search_body_template_renders_offset():
+    rendered = render_template(
+        jinja_env,
+        "fastapi/ops/search.py.j2",
+        decorators=[],
+        method="post",
+        path="/search",
+        response_model="PostPage",
+        status_suffix=None,
+        status_code=None,
+        function_name="search_posts",
+        params=[
+            {
+                "name": "body",
+                "annotation": "PostSearchRequest",
+                "default": None,
+            }
+        ],
+        return_type="PostPage",
+        doc="Search Post records.",
+        body_lines=[],
+        serializer_fn="to_post_list_item",
+        request_schema="PostSearchRequest",
+        model_name="Post",
+        has_filter=False,
+        has_sort=False,
+        pagination_mode="offset",
+        default_sort_field="id",
+        default_sort_dir="asc",
+        max_page_size=100,
+        cursor_field="id",
+    )
+    assert "apply_offset_pagination(" in rendered
+    assert "total=total" in rendered
+    assert "apply_filters" not in rendered
+    assert "apply_ordering" not in rendered
 
 
 def test_handler_fragment_custom_route_prefix(registry):

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from foundry.naming import prefix_import
 from foundry.operation import operation
-from foundry.outputs import RouteHandler, TestCase
+from kiln.operations.types import RouteHandler, TestCase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

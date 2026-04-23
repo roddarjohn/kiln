@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
-from foundry.outputs import RouteHandler, RouteParam, TestCase
 from kiln._helpers import PYTHON_TYPES
 from kiln.operations.renderers import utils_imports
+from kiln.operations.types import RouteHandler, RouteParam, TestCase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

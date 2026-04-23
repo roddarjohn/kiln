@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 from foundry import Engine, Scoped, operation
 from foundry.engine import _resolve_options
 from foundry.operation import EmptyOptions, OperationRegistry
-from foundry.outputs import RouteHandler, StaticFile
+from foundry.outputs import StaticFile
+from kiln.operations.types import RouteHandler
 
 # -------------------------------------------------------------------
 # Test config models

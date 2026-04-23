@@ -79,6 +79,7 @@ def _assemble_files(
     snippets_by_path = _group_by_path(fragments=snippets)
 
     orphan_paths = snippets_by_path.keys() - files_by_path.keys()
+
     if orphan_paths:
         msg = (
             "SnippetFragment targets path with no FileFragment: "
@@ -141,4 +142,5 @@ def _render_file(
         template_name=file.template,
         **context,
     )
+
     return GeneratedFile(path=file.path, content=rendered.rstrip() + "\n")

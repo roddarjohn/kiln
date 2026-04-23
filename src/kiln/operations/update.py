@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from foundry.outputs import (
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations._shared import FieldsOptions, _field_dicts
+from kiln.operations.renderers import utils_imports
+from kiln.operations.types import (
     Field,
     RouteHandler,
     RouteParam,
     SchemaClass,
     TestCase,
 )
-from kiln._helpers import PYTHON_TYPES
-from kiln.operations._shared import FieldsOptions, _field_dicts
-from kiln.operations.renderers import utils_imports
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

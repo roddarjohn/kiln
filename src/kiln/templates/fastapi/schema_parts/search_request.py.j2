@@ -3,8 +3,10 @@
 class {{ model_name }}SearchRequest(BaseModel):
     """Search request body for {{ model_name }} lists."""
 
+{% if has_filter %}
     filter: {{ model_name }}FilterCondition | {{ model_name }}FilterExpression | None = None
-{% if sort_fields %}
+{% endif %}
+{% if has_sort %}
     sort: list[{{ model_name }}SortClause] | None = None
 {% endif %}
 {% if pagination_mode == "keyset" %}

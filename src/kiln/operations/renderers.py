@@ -25,16 +25,16 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
-from foundry.outputs import (
+from foundry.outputs import StaticFile
+from foundry.render import FileFragment, Fragment, SnippetFragment, registry
+from kiln._helpers import PYTHON_TYPES
+from kiln.operations.types import (
     EnumClass,
     RouteHandler,
     SchemaClass,
     SerializerFn,
-    StaticFile,
     TestCase,
 )
-from foundry.render import FileFragment, Fragment, SnippetFragment, registry
-from kiln._helpers import PYTHON_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -117,11 +117,41 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
 @registry.renders(SchemaClass)
 def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
+    """Render a :class:`SchemaClass` into the schemas file.
+
+    Dispatches on :attr:`SchemaClass.body_template`:
+
+    - When set: uses that template with ``body_context`` +
+      ``extra_imports``.  ``fields`` / ``validators`` are ignored.
+    - When unset: renders ``fields`` through the default
+      ``schema_class.py.j2`` template, auto-collecting imports
+      for common field types (uuid, datetime, date, Any).
+    """
     info = _resource_info(ctx)
     path = f"{info.app}/schemas/{info.model.lower}.py"
+
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
+
+    yield FileFragment(
+        path=path,
+        template="fastapi/schema_outer.py.j2",
+        context={"model_name": info.model.pascal},
+    )
+
+    if schema.body_template is not None:
+        for module, name in schema.extra_imports:
+            imports.add_from(module, name)
+        yield SnippetFragment(
+            path=path,
+            slot="schema_classes",
+            template=schema.body_template,
+            context=schema.body_context,
+            imports=imports,
+        )
+        return
+
     for f in schema.fields:
         py_type = f.py_type
         if py_type == "uuid.UUID":
@@ -132,12 +162,6 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
             imports.add_from("datetime", "date")
         elif py_type == "dict[str, Any]":
             imports.add_from("typing", "Any")
-
-    yield FileFragment(
-        path=path,
-        template="fastapi/schema_outer.py.j2",
-        context={"model_name": info.model.pascal},
-    )
 
     yield SnippetFragment(
         path=path,
