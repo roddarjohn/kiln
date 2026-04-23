@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from foundry import GeneratedFile, write_files
 from foundry.cli import app, cli_main
-from foundry.errors import ConfigError
+from foundry.errors import CLIError, ConfigError
 
 runner = CliRunner()
 
@@ -349,23 +349,23 @@ def test_validate_does_not_write_files(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# list-targets
+# targets list
 # ---------------------------------------------------------------------------
 
 
-def test_list_targets_shows_kiln():
-    result = runner.invoke(app, ["list-targets"])
+def test_targets_list_shows_kiln():
+    result = runner.invoke(app, ["targets", "list"])
     assert result.exit_code == 0
     assert "kiln" in result.output
     assert "python" in result.output
 
 
 # ---------------------------------------------------------------------------
-# dry-run
+# generate --dry-run
 # ---------------------------------------------------------------------------
 
 
-def test_dry_run_lists_files_without_writing(tmp_path: Path):
+def test_generate_dry_run_lists_files_without_writing(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
         {
@@ -386,7 +386,15 @@ def test_dry_run_lists_files_without_writing(tmp_path: Path):
     )
     out = tmp_path / "out"
     result = runner.invoke(
-        app, ["dry-run", "--config", str(cfg), "--out", str(out)]
+        app,
+        [
+            "generate",
+            "--config",
+            str(cfg),
+            "--out",
+            str(out),
+            "--dry-run",
+        ],
     )
     assert result.exit_code == 0
     assert "Would generate" in result.output
@@ -394,13 +402,30 @@ def test_dry_run_lists_files_without_writing(tmp_path: Path):
     assert not out.exists()
 
 
-def test_dry_run_bad_config_raises_config_error(tmp_path: Path):
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("version: 1")
-    result = runner.invoke(
-        app, ["dry-run", "--config", str(bad), "--out", str(tmp_path)]
+def test_generate_dry_run_rejects_clean(tmp_path: Path):
+    cfg = _write_json_config(
+        tmp_path,
+        {
+            "module": "myapp",
+            "databases": [{"key": "primary", "default": True}],
+            "resources": [],
+        },
     )
-    assert isinstance(result.exception, ConfigError)
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--config",
+            str(cfg),
+            "--out",
+            str(out),
+            "--dry-run",
+            "--clean",
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CLIError)
 
 
 # ---------------------------------------------------------------------------
