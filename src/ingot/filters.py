@@ -48,8 +48,10 @@ def apply_filters(
 
     """
     clause = _build_filter_clause(node, model)
+
     if clause is None:
         return stmt
+
     return stmt.where(clause)
 
 

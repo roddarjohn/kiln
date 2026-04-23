@@ -120,6 +120,7 @@ def format_imports(collector: ImportCollector, language: str) -> str:
     """
     if not language:
         return ""
+
     return _get_formatter(language=language)(collector)
 
 
@@ -141,4 +142,5 @@ def _get_formatter(language: str) -> Callable[[ImportCollector], str]:
         f"No import formatter registered for language {language!r}; "
         f"registered: {registered}"
     )
+
     raise KeyError(msg)
