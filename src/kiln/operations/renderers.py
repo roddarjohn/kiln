@@ -27,7 +27,7 @@ from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import StaticFile
 from foundry.render import FileFragment, Fragment, SnippetFragment, registry
-from kiln._helpers import PYTHON_TYPES
+from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.types import (
     EnumClass,
     RouteHandler,
@@ -98,7 +98,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         package_prefix=package_prefix,
         route_prefix=route_prefix,
         pk_name=getattr(resource, "pk", "id"),
-        pk_py_type=PYTHON_TYPES[getattr(resource, "pk_type", "uuid")],
+        pk_py_type=PYTHON_TYPES[resource.pk_type],
         has_auth=getattr(config, "auth", None) is not None,
         session_module=db.session_module,
         get_db_fn=db.get_db_fn,

@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln.operations._shared import FieldsOptions, _field_dicts
 from kiln.operations.types import (
+    FieldsOptions,
     RouteHandler,
     RouteParam,
     SchemaClass,
     TestCase,
+    _field_dicts,
 )
 
 if TYPE_CHECKING:

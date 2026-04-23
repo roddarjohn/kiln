@@ -26,7 +26,6 @@ from kiln.operations._list_config import (
     OrderConfig,
     PaginateConfig,
 )
-from kiln.operations._shared import _field_dicts
 from kiln.operations.create import Create
 from kiln.operations.delete import Delete
 from kiln.operations.get import Get
@@ -40,6 +39,7 @@ from kiln.operations.types import (
     SchemaClass,
     SerializerFn,
     TestCase,
+    _field_dicts,
 )
 from kiln.operations.update import Update
 
@@ -932,6 +932,7 @@ class TestAction:
 
         op_config = OperationConfig(
             name="publish",
+            type="action",
             fn="blog.actions.publish",
         )
         ctx = _operation_ctx(resource, op_config)
@@ -968,6 +969,7 @@ class TestAction:
 
         op_config = OperationConfig(
             name="bulk_import",
+            type="action",
             fn="blog.actions.bulk_import",
         )
         ctx = _operation_ctx(resource, op_config)

@@ -55,10 +55,10 @@ class Auth:
             ``True``).
 
         """
-        if getattr(ctx.config, "auth", None) is None:
-            return False
-
-        return ctx.instance.require_auth
+        return (
+            getattr(ctx.config, "auth", None) is not None
+            and ctx.instance.require_auth
+        )
 
     def build(
         self,
@@ -87,6 +87,8 @@ class Auth:
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(dep_line)
             handler.extra_imports.append(import_pair)
+
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
             test.requires_auth = True
+
         return ()

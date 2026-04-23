@@ -14,16 +14,14 @@ from kiln.operations._list_config import (  # noqa: TC001
     OrderConfig,
     PaginateConfig,
 )
-from kiln.operations._shared import (
-    _construct_response_schema,
-    _construct_serializer,
-)
 from kiln.operations.types import (
     EnumClass,
     RouteHandler,
     RouteParam,
     SchemaClass,
     TestCase,
+    _construct_response_schema,
+    _construct_serializer,
 )
 
 if TYPE_CHECKING:
@@ -229,6 +227,7 @@ def _sort_schemas(
         members=[(f.upper(), f) for f in ordering.fields],
         base="str, Enum",
     )
+
     yield SchemaClass(
         name=model.suffixed("SortClause"),
         body_template="fastapi/schema_parts/sort_clause.py.j2",
@@ -247,10 +246,14 @@ def _search_runtime_imports(
     pairs: list[tuple[str, str]] = [("sqlalchemy", "select")]
     if has_filter:
         pairs.append(("ingot", "apply_filters"))
+
     if has_sort:
         pairs.append(("ingot", "apply_ordering"))
+
     if pagination_mode == "keyset":
         pairs.append(("ingot", "apply_keyset_pagination"))
+
     elif pagination_mode == "offset":
         pairs.append(("ingot", "apply_offset_pagination"))
+
     return pairs

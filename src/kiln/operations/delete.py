@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
-from kiln._helpers import PYTHON_TYPES
+from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.renderers import utils_imports
 from kiln.operations.types import RouteHandler, RouteParam, TestCase
 

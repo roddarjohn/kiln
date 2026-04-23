@@ -307,9 +307,7 @@ def _resource(
 
 
 # Scope-instance ids used by :func:`_store_with_resource`.  The
-# shorthand ``{module, resources, ...}`` config is wrapped into a
-# single implicit app by :class:`ProjectConfig`, so the chain is
-# always project → app → resource → operation.
+# scope chain is always project → app → resource → operation.
 _APP_ID = "project.apps.0"
 _RESOURCE_ID = f"{_APP_ID}.resources.0"
 _OP_ID = f"{_RESOURCE_ID}.operations.0"
@@ -322,8 +320,15 @@ def _rctx(
 ) -> RenderCtx:
     config = ProjectConfig.model_validate(
         {
-            "module": "myapp",
-            "resources": [resource.model_dump()],
+            "apps": [
+                {
+                    "config": {
+                        "module": "myapp",
+                        "resources": [resource.model_dump()],
+                    },
+                    "prefix": "",
+                },
+            ],
             "databases": [{"key": "primary", "default": True}],
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }

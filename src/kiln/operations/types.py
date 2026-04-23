@@ -1,4 +1,4 @@
-"""Typed dataclasses operations yield from their ``build()`` method.
+"""Build-output dataclasses and the helpers that construct them.
 
 These are the vocabulary of emissions every ``@operation``-decorated
 class draws from: schema classes, route handlers, serializer
@@ -11,12 +11,29 @@ They live in kiln rather than foundry because they're
 FastAPI/Pydantic-flavored — a non-Python target wouldn't use them.
 :class:`foundry.outputs.StaticFile` stays in foundry since "render
 this template to this path" is target-agnostic.
+
+The small constructor helpers at the bottom (``FieldsOptions``,
+``_field_dicts``, ``_construct_response_schema``,
+``_construct_serializer``) live here too because they're tightly
+coupled to the dataclasses above — a read op always pairs its
+``SchemaClass`` and its ``SerializerFn``, and the config-to-Field
+conversion is the same everywhere.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel
+
+from kiln.config.schema import (
+    PYTHON_TYPES,
+    FieldSpec,
+)
+
+if TYPE_CHECKING:
+    from foundry.naming import Name
 
 
 @dataclass
@@ -153,3 +170,49 @@ class TestCase:
     response_schema: str | None = None
     is_list_response: bool = False
     action_name: str | None = None
+
+
+class FieldsOptions(BaseModel):
+    """Options for operations that require a field list."""
+
+    fields: list[FieldSpec]
+
+
+def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
+    """Convert config FieldSpecs to :class:`Field` dataclasses."""
+    return [Field(name=f.name, py_type=PYTHON_TYPES[f.type]) for f in fields]
+
+
+def _construct_response_schema(
+    model: Name,
+    fields: list[FieldSpec],
+    suffix: str,
+) -> SchemaClass:
+    """Build the response ``SchemaClass`` for a read op.
+
+    ``suffix`` is appended to the model's pascal-cased name to form
+    the schema class (e.g. ``Resource`` -> ``UserResource``).
+    """
+    return SchemaClass(
+        name=model.suffixed(suffix),
+        fields=_field_dicts(fields),
+        doc=f"{suffix} schema for {model.pascal}.",
+    )
+
+
+def _construct_serializer(
+    model: Name,
+    schema: SchemaClass,
+    stem: str,
+) -> SerializerFn:
+    """Build the ``SerializerFn`` that maps a model row to ``schema``.
+
+    ``stem`` becomes the trailing segment of the serializer
+    function, e.g. ``resource`` -> ``to_user_resource``.
+    """
+    return SerializerFn(
+        function_name=f"to_{model.lower}_{stem}",
+        model_name=model.pascal,
+        schema_name=schema.name,
+        fields=schema.fields,
+    )

@@ -51,6 +51,34 @@ def test_cli_main_renders_config_error(
     assert "Error loading config" in captured.err
 
 
+def _project_with(
+    *,
+    module: str = "myapp",
+    resources: list[dict] | None = None,
+    databases: list[dict] | None = None,
+    **extras: object,
+) -> dict:
+    """Build a canonical project config from per-app fields.
+
+    Keeps tests terse without re-introducing a Pydantic-level
+    shorthand — the wrapping into ``apps: [...]`` is explicit in
+    one place and visible to readers.
+    """
+    return {
+        "databases": databases or [{"key": "primary", "default": True}],
+        "apps": [
+            {
+                "config": {
+                    "module": module,
+                    "resources": resources or [],
+                },
+                "prefix": "",
+            }
+        ],
+        **extras,
+    }
+
+
 def _write_json_config(tmp_path: Path, data: dict) -> Path:
     cfg = tmp_path / "kiln.json"
     cfg.write_text(json.dumps(data))
@@ -65,10 +93,8 @@ def _write_json_config(tmp_path: Path, data: dict) -> Path:
 def test_generate_writes_app_files(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [
+        _project_with(
+            resources=[
                 {
                     "model": "myapp.models.Post",
                     "operations": [
@@ -92,7 +118,7 @@ def test_generate_writes_app_files(tmp_path: Path):
                     ],
                 }
             ],
-        },
+        ),
     )
     out = tmp_path / "out"
     result = runner.invoke(
@@ -106,15 +132,12 @@ def test_generate_writes_app_files(tmp_path: Path):
 def test_generate_with_auth_writes_scaffold(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
-        {
-            "module": "myapp",
-            "auth": {
+        _project_with(
+            auth={
                 "type": "jwt",
                 "verify_credentials_fn": "myapp.auth.verify",
             },
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [],
-        },
+        ),
     )
     out = tmp_path / "out"
     result = runner.invoke(
@@ -128,15 +151,12 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
 def test_generate_overwrites_on_rerun(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
-        {
-            "module": "myapp",
-            "auth": {
+        _project_with(
+            auth={
                 "type": "jwt",
                 "verify_credentials_fn": "myapp.auth.verify",
             },
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [],
-        },
+        ),
     )
     out = tmp_path / "out"
     runner.invoke(app, ["generate", "--config", str(cfg), "--out", str(out)])
@@ -213,14 +233,7 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
 
 
 def test_clean_removes_out_dir(tmp_path: Path):
-    cfg = _write_json_config(
-        tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [],
-        },
-    )
+    cfg = _write_json_config(tmp_path, _project_with())
     out = tmp_path / "out"
     out.mkdir()
     (out / "stale.py").write_text("old")
@@ -233,14 +246,7 @@ def test_clean_removes_out_dir(tmp_path: Path):
 
 
 def test_clean_noop_when_out_missing(tmp_path: Path):
-    cfg = _write_json_config(
-        tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [],
-        },
-    )
+    cfg = _write_json_config(tmp_path, _project_with())
     missing = tmp_path / "never_existed"
     result = runner.invoke(
         app, ["clean", "--config", str(cfg), "--out", str(missing)]
@@ -261,10 +267,8 @@ def test_clean_bad_config_raises_config_error(tmp_path: Path):
 def test_generate_clean_flag_removes_stale(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [
+        _project_with(
+            resources=[
                 {
                     "model": "myapp.models.Post",
                     "operations": [
@@ -275,7 +279,7 @@ def test_generate_clean_flag_removes_stale(tmp_path: Path):
                     ],
                 }
             ],
-        },
+        ),
     )
     out = tmp_path / "out"
     out.mkdir()

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln._helpers import PYTHON_TYPES
+from kiln.config.schema import PYTHON_TYPES
 from kiln.operations._introspect import introspect_action_fn
 from kiln.operations.renderers import utils_imports
 from kiln.operations.types import RouteHandler, RouteParam, TestCase
@@ -20,23 +20,21 @@ if TYPE_CHECKING:
     from kiln.config.schema import OperationConfig, ResourceConfig
 
 
-@operation("action", scope="operation")
+@operation("action", scope="operation", dispatch_on="type")
 class Action:
     """Custom action endpoint via function introspection.
 
-    Dispatches on the presence of a ``fn`` attribute rather than
-    a literal name match: any :class:`OperationConfig` whose
-    ``options`` include ``fn`` becomes an action.
+    Dispatches on :attr:`~kiln.config.schema.OperationConfig.type`
+    ``== "action"``.  Every action config declares ``type:
+    "action"`` explicitly (typically via the
+    ``kiln/resources/presets.libsonnet`` helper), with a
+    user-defined ``name`` and the ``fn`` import path to introspect.
     """
 
     class Options(BaseModel):
         """Options for action operations."""
 
         fn: str
-
-    def when(self, ctx: BuildContext[OperationConfig]) -> bool:
-        """Activate whenever the op config carries an ``fn`` field."""
-        return getattr(ctx.instance, "fn", None) is not None
 
     def build(
         self,
@@ -77,6 +75,7 @@ class Action:
                     annotation=PYTHON_TYPES[resource.pk_type],
                 )
             )
+
         if info.request_class:
             params.append(
                 RouteParam(name="body", annotation=info.request_class)

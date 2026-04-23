@@ -21,6 +21,23 @@ FieldType = Literal[
     "json",
 ]
 
+PYTHON_TYPES: dict[FieldType, str] = {
+    "uuid": "uuid.UUID",
+    "str": "str",
+    "email": "str",
+    "int": "int",
+    "float": "float",
+    "bool": "bool",
+    "datetime": "datetime",
+    "date": "date",
+    "json": "dict[str, Any]",
+}
+"""Python annotation strings for each :data:`FieldType` value.
+
+Used by op builders to render pk/field type annotations into the
+generated Pydantic schemas and route handlers.
+"""
+
 
 class AuthConfig(BaseModel):
     """JWT authentication configuration."""
@@ -62,6 +79,7 @@ class AuthConfig(BaseModel):
                 "(get_current_user_fn is not set)"
             )
             raise ValueError(msg)
+
         return self
 
 
@@ -134,6 +152,11 @@ class OperationConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
+    type: str | None = None
+    """Discriminator for non-name-based op dispatch.  CRUD ops
+    dispatch on :attr:`name`; ops whose name is user-defined
+    (like actions) set ``type`` so the engine can route to the
+    right op class.  ``None`` means name-based dispatch."""
     require_auth: bool | None = None
     """Per-operation auth override.  When ``None``, inherits the
     resource-level ``require_auth`` default."""
@@ -163,25 +186,32 @@ class ResourceConfig(BaseModel):
     model: str
     """Dotted import path to the consumer's SQLAlchemy model class,
     e.g. ``"myapp.models.Article"``."""
+
     pk: str = "id"
     """Primary-key attribute name on the model."""
+
     pk_type: FieldType = "uuid"
     """Type of the primary key, used to generate the correct path
     parameter."""
+
     route_prefix: str | None = None
     """URL prefix for this resource's router, e.g. ``"/articles"``.
     Defaults to ``"/{model_lower}s"`` (simple lowercase + 's').
     """
+
     db_key: str | None = None
+
     require_auth: bool = True
     """Default authentication requirement for all operations on this
     resource.  Individual operations can override via their own
     ``require_auth`` field."""
+
     operations: Annotated[list[OperationConfig], Scoped(name="operation")] = (
         Field(default_factory=list)
     )
     """Ordered list of operations to run — each becomes a scope
     instance of ``"operation"`` that the engine visits in turn."""
+
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
@@ -212,11 +242,8 @@ class ProjectConfig(FoundryConfig):
 
     A project is a collection of apps plus shared infrastructure
     (auth, databases, framework target).  Resources always live
-    under ``apps[*].config.resources``; a shorthand config with
-    top-level ``module`` / ``resources`` / ``operations`` fields is
-    wrapped into a single implicit app with ``prefix=""`` by
-    :meth:`_wrap_shorthand`, so the scope tree
-    (``project → app → resource``) is uniform across configs.
+    under ``apps[*].config.resources``; the scope tree
+    (``project → app → resource``) is the only supported shape.
 
     Inherits :attr:`~foundry.config.FoundryConfig.package_prefix`
     from foundry and overrides its default to ``"_generated"`` so
@@ -237,27 +264,6 @@ class ProjectConfig(FoundryConfig):
         default_factory=list,
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _wrap_shorthand(cls, data: Any) -> Any:  # type: ignore[operator]  # noqa: ANN401
-        """Wrap single-app shorthand into an implicit ``apps`` entry.
-
-        A config like ``{"module": "blog", "resources": [...]}`` is
-        rewritten to
-        ``{"apps": [{"config": {"module": "blog", "resources": [...]},
-        "prefix": ""}]}`` so the scope tree always runs
-        ``project → app → resource``.  Configs that already set
-        ``apps`` are returned unchanged.
-        """
-        if not isinstance(data, dict) or "apps" in data:
-            return data
-        app_keys = ("module", "resources")
-        if not any(k in data for k in app_keys):
-            return data
-        app_data = {k: data.pop(k) for k in list(data.keys()) if k in app_keys}
-        data["apps"] = [{"config": app_data, "prefix": ""}]
-        return data
-
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
         """Return the :class:`DatabaseConfig` selected by *db_key*.
 
@@ -271,17 +277,23 @@ class ProjectConfig(FoundryConfig):
 
         """
         if db_key is None:
-            defaults = [d for d in self.databases if d.default]
-            if not defaults:
+            default = next((db for db in self.databases if db.default), None)
+
+            if not default:
                 msg = (
                     "No database has default=True. "
                     "Set default: true on one database "
                     "or specify db_key."
                 )
+
                 raise ValueError(msg)
-            return defaults[0]
-        matches = [d for d in self.databases if d.key == db_key]
-        if not matches:
+
+            return default
+
+        matched = next((db for db in self.databases if db.key == db_key), None)
+
+        if not matched:
             msg = f"No database with key '{db_key}' found in databases config."
             raise ValueError(msg)
-        return matches[0]
+
+        return matched
