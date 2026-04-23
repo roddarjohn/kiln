@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.5.1...kiln-v0.6.0) (2026-04-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* kiln audits for comprehensibility ([#25](https://github.com/roddarjohn/kiln/issues/25))
+* operations fixing ([#24](https://github.com/roddarjohn/kiln/issues/24))
+* foundry rework ([#20](https://github.com/roddarjohn/kiln/issues/20))
+
+### Features
+
+* foundry rework ([#20](https://github.com/roddarjohn/kiln/issues/20)) ([493ae0a](https://github.com/roddarjohn/kiln/commit/493ae0a0d09fdcb29e5524455625698e3f78bdfc))
+* kiln audits for comprehensibility ([#25](https://github.com/roddarjohn/kiln/issues/25)) ([c891a07](https://github.com/roddarjohn/kiln/commit/c891a07dc0c64d81820e4b075ccb760463679998))
+* more cleanup for readability ([#26](https://github.com/roddarjohn/kiln/issues/26)) ([b689272](https://github.com/roddarjohn/kiln/commit/b6892729c907ca2b8a82b8ac5968df265e0f007b))
+* operations fixing ([#24](https://github.com/roddarjohn/kiln/issues/24)) ([03b575c](https://github.com/roddarjohn/kiln/commit/03b575c5a036652dca6e1c86ea3884cec8d6e192))
+
 ## [0.5.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.5.0...kiln-v0.5.1) (2026-04-04)
 
 
