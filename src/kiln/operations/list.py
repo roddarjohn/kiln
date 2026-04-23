@@ -84,6 +84,7 @@ class List:
         list_item_schema = _construct_response_schema(
             model, options.fields, suffix="ListItem"
         )
+
         serializer = _construct_serializer(
             model, list_item_schema, stem="list_item"
         )
