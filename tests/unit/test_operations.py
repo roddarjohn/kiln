@@ -629,8 +629,8 @@ class TestList:
         assert sers[0].schema_name == "UserListItem"
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
-        assert handler.method == "GET"
-        assert handler.path == "/"
+        assert handler.method == "POST"
+        assert handler.path == "/search"
         assert handler.function_name == "list_users"
         assert handler.response_model == "list[UserListItem]"
         assert handler.return_type == "list[UserListItem]"
@@ -642,16 +642,22 @@ class TestList:
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
         tests = [r for r in result if isinstance(r, TestCase)]
         assert tests[0].op_name == "list"
+        assert tests[0].method == "post"
+        assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
 
-    def test_list_without_extensions_has_no_search_route(self):
-        """No search route or extensions when no options configured."""
+    def test_list_without_extensions_has_single_bodyless_search(self):
+        """Bare list op emits only one POST /search with no body."""
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
         assert len(handlers) == 1
+        assert handlers[0].method == "POST"
+        assert handlers[0].path == "/search"
+        assert handlers[0].params == []
+        assert handlers[0].request_schema is None
         assert not any(isinstance(r, ExtensionSchema) for r in result)
         assert not any(isinstance(r, EnumClass) for r in result)
 
@@ -701,9 +707,11 @@ class TestList:
         assert "UserSearchRequest" in ext_names
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
-        search = next(h for h in handlers if h.path == "/search")
+        assert len(handlers) == 1
+        search = handlers[0]
         assert search.method == "POST"
-        assert search.function_name == "search_users"
+        assert search.path == "/search"
+        assert search.function_name == "list_users"
         assert search.response_model == "UserPage"
         assert search.request_schema == "UserSearchRequest"
         assert search.body_context["pagination_mode"] == "keyset"
@@ -720,7 +728,8 @@ class TestList:
         result = list(List().build(ctx, opts))
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
-        search = next(h for h in handlers if h.path == "/search")
+        assert len(handlers) == 1
+        search = handlers[0]
         assert search.body_context["pagination_mode"] == "offset"
         assert ("ingot", "apply_offset_pagination") in search.extra_imports
         assert ("ingot", "apply_keyset_pagination") not in search.extra_imports
@@ -745,9 +754,8 @@ class TestList:
         }
 
         handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert [h.path for h in handlers] == ["/", "/search"]
-
-        search = next(h for h in handlers if h.path == "/search")
+        assert len(handlers) == 1
+        search = handlers[0]
         assert search.body_context["has_filter"] is True
         assert search.body_context["has_sort"] is True
         assert search.body_context["pagination_mode"] == "keyset"
@@ -756,11 +764,13 @@ class TestList:
         assert ("ingot", "apply_keyset_pagination") in search.extra_imports
 
         tests = [r for r in result if isinstance(r, TestCase)]
-        search_tc = next(t for t in tests if t.op_name == "search")
-        assert search_tc.method == "post"
-        assert search_tc.path == "/search"
-        assert search_tc.has_request_body is True
-        assert search_tc.request_schema == "UserSearchRequest"
+        assert len(tests) == 1
+        tc = tests[0]
+        assert tc.method == "post"
+        assert tc.path == "/search"
+        assert tc.has_request_body is True
+        assert tc.request_schema == "UserSearchRequest"
+        assert tc.is_list_response is False
 
     def test_list_filters_default_to_all_list_fields(self):
         """FilterConfig with no fields uses the list op's full field set."""
