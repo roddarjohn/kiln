@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.0...kiln-v0.6.1) (2026-04-23)
+
+
+### Features
+
+* ingot readibility ([#28](https://github.com/roddarjohn/kiln/issues/28)) ([4d44cd3](https://github.com/roddarjohn/kiln/commit/4d44cd3dc703a6aed865db5b5351643b5e9e0a9e))
+
 ## [0.6.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.5.1...kiln-v0.6.0) (2026-04-22)
 
 
