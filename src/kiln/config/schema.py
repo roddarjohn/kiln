@@ -118,6 +118,33 @@ class FieldSpec(BaseModel):
     type: FieldType
 
 
+class ModifierConfig(BaseModel):
+    """Configuration for an op modifier.
+
+    Modifiers nest inside their parent op's config (under
+    ``modifiers: [...]``) and augment the parent's outputs.  The
+    ``type`` field discriminates which modifier op consumes the
+    entry — ``"filter"`` routes to :class:`~kiln.operations.filter.Filter`,
+    ``"order"`` to :class:`~kiln.operations.order.Order`, etc.  All
+    other keys are collected into :attr:`options` via Pydantic's
+    ``extra="allow"`` and fed to the modifier op's own ``Options``
+    model.
+
+    Same shape as :class:`OperationConfig` — deliberately, so the
+    engine treats modifier-scope entries the same way it treats
+    operation-scope entries.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+
+    @property
+    def options(self) -> dict[str, Any]:
+        """Modifier-specific options (all extra fields)."""
+        return self.model_extra or {}
+
+
 class OperationConfig(BaseModel):
     """Configuration for a single operation.
 
@@ -160,6 +187,12 @@ class OperationConfig(BaseModel):
     require_auth: bool | None = None
     """Per-operation auth override.  When ``None``, inherits the
     resource-level ``require_auth`` default."""
+    modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
+        default_factory=list
+    )
+    """Modifier entries that nest inside this op and augment its
+    outputs.  Today only the list op consumes modifiers (Filter /
+    Order / Paginate); every other op leaves this empty."""
 
     @property
     def options(self) -> dict[str, Any]:

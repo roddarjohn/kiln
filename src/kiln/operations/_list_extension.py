@@ -1,10 +1,11 @@
-"""Shared lookup helpers for list-extension ops.
+"""Shared lookup helper for list-modifier ops.
 
-The Filter / Order / Paginate ops each need to locate the
-``SchemaClass`` and ``RouteHandler`` that the List op emitted
-under the same resource, then mutate them in place.  This module
-centralizes that lookup so each extension op stays focused on its
-own field contributions.
+Modifier ops (Filter / Order / Paginate) run at the ``modifier``
+scope, nested inside a specific list op's config.  Their parent
+in the scope tree is that specific list op — no sibling search,
+no ambiguity.  This helper extracts the parent list's outputs and
+the enclosing resource's model name for the three modifier ops
+to share.
 """
 
 from __future__ import annotations
@@ -16,11 +17,11 @@ from kiln.operations.types import RouteHandler, SchemaClass
 
 if TYPE_CHECKING:
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig, ResourceConfig
+    from kiln.config.schema import ModifierConfig, ResourceConfig
 
 
 class ListOutputs(NamedTuple):
-    """The per-resource outputs an extension op amends."""
+    """The parent list's outputs a modifier op amends."""
 
     resource: ResourceConfig
     model: Name
@@ -28,60 +29,58 @@ class ListOutputs(NamedTuple):
     handler: RouteHandler
 
 
-def find_list_outputs(ctx: BuildContext[OperationConfig]) -> ListOutputs:
-    """Locate List's SearchRequest and search RouteHandler.
+def find_list_outputs(ctx: BuildContext[ModifierConfig]) -> ListOutputs:
+    """Locate the parent list op's SearchRequest and search handler.
 
-    Looks them up under the enclosing resource — there's exactly
-    one list op per resource, so exactly one SearchRequest and one
-    ``POST /search`` handler to find.
+    Modifier ops nest inside a specific list op's config, so the
+    parent in the scope tree *is* that list op.  We walk up one
+    level via :meth:`BuildStore.ancestor_id_of` and read outputs
+    registered under that id.  No name-matching on siblings.
 
     Raises:
-        LookupError: If List hasn't run yet (should be impossible
-            with ``requires=["list"]``) or its outputs are missing.
+        LookupError: If the parent op isn't registered or didn't
+            emit the expected SearchRequest / handler (would
+            indicate an engine-ordering bug, not a user error).
 
     """
+    parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
+    if parent_id is None:
+        msg = "Modifier op has no enclosing operation."
+        raise LookupError(msg)
+
     resource = cast(
         "ResourceConfig",
         ctx.store.ancestor_of(ctx.instance_id, "resource"),
     )
-    resource_id = ctx.store.ancestor_id_of(ctx.instance_id, "resource")
-
-    if resource_id is None:
-        msg = "Extension op has no enclosing resource."
-        raise LookupError(msg)
-
     _, model = Name.from_dotted(resource.model)
-    search_request_name = model.suffixed("SearchRequest")
 
     search_request = next(
         (
             s
-            for s in ctx.store.outputs_under(resource_id, SchemaClass)
-            if s.name == search_request_name
+            for s in ctx.store.outputs_from(parent_id, "list", SchemaClass)
+            if s.name == model.suffixed("SearchRequest")
         ),
         None,
     )
-
     if search_request is None:
         msg = (
-            f"Extension op for resource '{resource.model}' ran "
-            f"before List emitted '{search_request_name}'."
+            f"Modifier under '{resource.model}' ran before List emitted "
+            f"its SearchRequest."
         )
         raise LookupError(msg)
 
     handler = next(
         (
             h
-            for h in ctx.store.outputs_under(resource_id, RouteHandler)
+            for h in ctx.store.outputs_from(parent_id, "list", RouteHandler)
             if h.method == "POST" and h.path == "/search"
         ),
         None,
     )
-
     if handler is None:
         msg = (
-            f"Extension op for resource '{resource.model}' ran "
-            f"before List emitted its POST /search handler."
+            f"Modifier under '{resource.model}' ran before List emitted "
+            f"its POST /search handler."
         )
         raise LookupError(msg)
 

@@ -18,6 +18,7 @@ from kiln.config.schema import (
     DatabaseConfig,
     FieldSpec,
     FilterConfig,
+    ModifierConfig,
     OperationConfig,
     OrderConfig,
     PaginateConfig,
@@ -69,7 +70,14 @@ OPERATION_SCOPE = Scope(
     config_key="operations",
     parent=RESOURCE_SCOPE,
 )
-SCOPE_TREE = ScopeTree([PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE])
+MODIFIER_SCOPE = Scope(
+    name="modifier",
+    config_key="modifiers",
+    parent=OPERATION_SCOPE,
+)
+SCOPE_TREE = ScopeTree(
+    [PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE, MODIFIER_SCOPE],
+)
 
 
 def _resource_ctx(
@@ -630,9 +638,15 @@ def _drive_list(
     Extension-op tests call this first so ``find_list_outputs``
     has a SearchRequest and RouteHandler to amend.
     """
-    op_config = OperationConfig(name="list")
+    effective_fields = fields or _FIELDS
+    op_config = OperationConfig(
+        name="list",
+        fields=[f.model_dump() for f in effective_fields],
+    )
     ctx = _operation_ctx(resource, op_config, store=store)
-    outputs = list(List().build(ctx, List.Options(fields=fields or _FIELDS)))
+    outputs = list(
+        List().build(ctx, List.Options(fields=effective_fields)),
+    )
     ctx.store.add(ctx.instance_id, "list", *outputs)
     return ctx
 
@@ -645,27 +659,26 @@ def _drive_extension(
     options: BaseModel,
     extra_config: dict | None = None,
 ) -> list[object]:
-    """Run an extension op at the next free ``.operations.N`` slot.
+    """Run a modifier op at the next free modifier-scope slot.
 
-    Returns the op's own yielded outputs; any amendments it made
-    to List's outputs are visible on *parent_ctx*'s store.
+    Modifiers nest inside the parent list op (``parent_ctx``'s
+    instance).  Registers the modifier under the list's
+    instance_id so ``find_list_outputs`` resolves the parent
+    correctly.  Returns the op's yielded outputs; any amendments
+    it made to the parent's outputs are visible on the store.
     """
     store = parent_ctx.store
-    resource_id = "project.apps.0.resources.0"
-    n = 1
-    while f"{resource_id}.operations.{n}" in store._instances:
+    list_id = parent_ctx.instance_id
+    n = 0
+    while f"{list_id}.modifiers.{n}" in store._instances:
         n += 1
-    ext_id = f"{resource_id}.operations.{n}"
+    ext_id = f"{list_id}.modifiers.{n}"
 
-    ext_config = OperationConfig(
-        name=type_name,
-        type=type_name,
-        **(extra_config or {}),
-    )
-    store.register_instance(ext_id, ext_config, parent=resource_id)
+    ext_config = ModifierConfig(type=type_name, **(extra_config or {}))
+    store.register_instance(ext_id, ext_config, parent=list_id)
     ext_ctx = BuildContext(
         config=parent_ctx.config,
-        scope=OPERATION_SCOPE,
+        scope=MODIFIER_SCOPE,
         instance=ext_config,
         instance_id=ext_id,
         store=store,
@@ -986,6 +999,13 @@ class TestCreate:
         assert tests[0].status_invalid == 422
         assert tests[0].has_request_body is True
         assert tests[0].request_schema == "UserCreateRequest"
+        # Required fields must be carried through so the generated
+        # success test posts a valid body (regression: empty-dict
+        # bodies were returning 422 for non-empty CreateRequests).
+        assert tests[0].request_fields == [
+            {"name": "name", "py_type": "str"},
+            {"name": "age", "py_type": "int"},
+        ]
 
 
 # -------------------------------------------------------------------
@@ -1085,7 +1105,9 @@ class TestAction:
         class _Info:
             is_object_action: bool = True
             response_class: str | None = "PostResult"
+            response_module: str = "blog.actions"
             request_class: str | None = "PostRequest"
+            request_module: str | None = "blog.actions"
             model_param_name: str | None = "post"
 
         op_config = OperationConfig(
@@ -1109,6 +1131,8 @@ class TestAction:
         assert handler.path == "/{id}/publish"
         assert handler.function_name == "publish_action"
         assert handler.response_model == "PostResult"
+        assert handler.request_schema_module == "blog.actions"
+        assert handler.response_schema_module == "blog.actions"
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found == 404
@@ -1122,7 +1146,9 @@ class TestAction:
         class _Info:
             is_object_action: bool = False
             response_class: str | None = None
+            response_module: str = "blog.actions"
             request_class: str | None = None
+            request_module: str | None = None
             model_param_name: str | None = None
 
         op_config = OperationConfig(

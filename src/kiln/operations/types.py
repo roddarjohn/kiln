@@ -102,6 +102,13 @@ class RouteHandler:
     rendered with :attr:`body_context`; ops that carry the body
     inline set :attr:`body_lines` instead and leave
     :attr:`body_template` ``None``.
+
+    :attr:`request_schema_module` and :attr:`response_schema_module`
+    override where the renderer imports the request/response classes
+    from.  CRUD ops leave them ``None`` so the classes resolve to the
+    generated schemas module; the action op sets them to the
+    consumer's module (discovered via introspection) so user-defined
+    request/response models import from their real location.
     """
 
     method: str
@@ -110,7 +117,9 @@ class RouteHandler:
     params: list[RouteParam] = field(default_factory=list)
     body_param: str | None = None
     request_schema: str | None = None
+    request_schema_module: str | None = None
     response_model: str | None = None
+    response_schema_module: str | None = None
     serializer_fn: str | None = None
     status_code: int | None = None
     return_type: str | None = None

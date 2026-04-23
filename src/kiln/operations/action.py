@@ -89,9 +89,11 @@ class Action:
             function_name=f"{action_name.raw}_action",
             params=params,
             response_model=info.response_class,
+            response_schema_module=info.response_module,
             return_type=info.response_class,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
+            request_schema_module=info.request_module,
             body_template="fastapi/ops/action.py.j2",
             body_context={
                 "is_object_action": info.is_object_action,

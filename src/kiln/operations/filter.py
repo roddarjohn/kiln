@@ -1,11 +1,10 @@
 """Filter extension: emits filter schemas, wires them into search.
 
-Runs at operation scope with ``type: "filter"`` after
-:class:`~kiln.operations.list.List`.  Emits the
-``{Model}FilterCondition`` and ``{Model}FilterExpression``
-schemas, then flips ``has_filter`` on List's ``SearchRequest``
-and search handler so the generated route calls
-``ingot.apply_filters``.
+Runs at modifier scope with ``type: "filter"`` as a nested child
+of a list op.  Emits the ``{Model}FilterCondition`` and
+``{Model}FilterExpression`` schemas, then flips ``has_filter`` on
+the parent list's ``SearchRequest`` and search handler so the
+generated route calls ``ingot.apply_filters``.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation
-from kiln.config.schema import FilterConfig
+from kiln.config.schema import FilterConfig, OperationConfig
 from kiln.operations._list_extension import find_list_outputs
 from kiln.operations.types import SchemaClass
 
@@ -21,27 +20,28 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig
+    from kiln.config.schema import ModifierConfig
 
 
 @operation(
     "filter",
-    scope="operation",
+    scope="modifier",
     dispatch_on="type",
-    requires=["list"],
 )
 class Filter:
     """Amend the list op with filterable fields.
 
-    ``filter`` config entries stand next to the list op at the
-    same resource; the engine topo-sorts Filter after List.
+    Runs at modifier scope — filter configs nest inside a specific
+    list op, so the engine descends into List first, then into its
+    modifiers in order.  No sibling lookup, no ambiguity with
+    multiple lists per resource.
     """
 
     Options = FilterConfig
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[ModifierConfig],
         options: FilterConfig,
     ) -> Iterable[object]:
         """Emit filter schemas and amend List's outputs.
@@ -79,21 +79,16 @@ class Filter:
         outputs.handler.extra_imports.append(("ingot", "apply_filters"))
 
 
-def _list_field_names(ctx: BuildContext[OperationConfig]) -> list[str]:
-    """Return the List op's field names for this resource.
+def _list_field_names(ctx: BuildContext[ModifierConfig]) -> list[str]:
+    """Return the parent list op's declared field names.
 
     When a filter config doesn't name fields explicitly, every
-    field the list op exposes becomes filterable.  The names live
-    on the ``name: "list"`` entry's ``options["fields"]``.
+    field the list op exposes becomes filterable.  The modifier's
+    parent scope instance *is* the list op's config, so we read
+    its ``options["fields"]`` directly — no sibling scan.
     """
-    from kiln.config.schema import ResourceConfig  # noqa: PLC0415
-
-    resource = ctx.store.ancestor_of(ctx.instance_id, "resource")
-    if not isinstance(resource, ResourceConfig) or resource.operations is None:
+    parent = ctx.store.ancestor_of(ctx.instance_id, "operation")
+    if not isinstance(parent, OperationConfig):
         return []
-
-    for op in resource.operations:
-        if not isinstance(op, str) and op.name == "list":
-            fields: list[dict[str, str]] = op.options.get("fields") or []
-            return [f["name"] for f in fields if isinstance(f, dict)]
-    return []
+    fields: list[dict[str, str]] = parent.options.get("fields") or []
+    return [f["name"] for f in fields if isinstance(f, dict)]

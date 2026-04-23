@@ -238,11 +238,13 @@ def _handler_fragment(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
     if handler.request_schema:
-        imports.add_from(schema_mod, handler.request_schema)
+        request_mod = handler.request_schema_module or schema_mod
+        imports.add_from(request_mod, handler.request_schema)
 
     response_schema = _response_schema_name(handler)
     if response_schema:
-        imports.add_from(schema_mod, response_schema)
+        response_mod = handler.response_schema_module or schema_mod
+        imports.add_from(response_mod, response_schema)
     if handler.serializer_fn:
         serializer_mod = prefix_import(
             info.package_prefix, info.app, "serializers", info.model.lower
@@ -354,12 +356,23 @@ def _serializer_fragment(
         imports=imports,
     )
 
-    if info.generate_tests:
+    # Only the resource serializer contributes to the test file; the
+    # test template renders exactly one `test_to_{model}_resource_*`
+    # function, so emitting from list_item too would duplicate the
+    # mock-row assignments and assertions.
+    is_resource_ser = ser.function_name == f"to_{info.model.lower}_resource"
+    if info.generate_tests and is_resource_ser:
         test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+        ser_mod = prefix_import(
+            info.package_prefix, info.app, "serializers", info.model.lower
+        )
+        test_imports = ImportCollector()
+        test_imports.add_from(ser_mod, ser.function_name)
         yield FileFragment(
             path=test_path,
             template="fastapi/test_outer.py.j2",
             context={"has_serializer_test": True},
+            imports=test_imports,
         )
         for f in ser.fields:
             yield SnippetFragment(

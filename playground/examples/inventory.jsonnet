@@ -38,28 +38,28 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "available_from", type: "date" },
           ],
         },
-      ] + list.searchable(
-        fields=[
-          { name: "id", type: "uuid" },
-          { name: "sku", type: "str" },
-          { name: "name", type: "str" },
-          { name: "unit_price", type: "float" },
-          { name: "active", type: "bool" },
-        ],
-        filter={ fields: ["sku", "name", "unit_price", "active"] },
-        order={
-          fields: ["name", "unit_price"],
-          default: "name",
-          default_dir: "asc",
-        },
-        paginate={
-          mode: "keyset",
-          cursor_field: "id",
-          cursor_type: "uuid",
-          default_page_size: 25,
-          max_page_size: 100,
-        },
-      ) + [
+        list.searchable(
+          fields=[
+            { name: "id", type: "uuid" },
+            { name: "sku", type: "str" },
+            { name: "name", type: "str" },
+            { name: "unit_price", type: "float" },
+            { name: "active", type: "bool" },
+          ],
+          filter={ fields: ["sku", "name", "unit_price", "active"] },
+          order={
+            fields: ["name", "unit_price"],
+            default: "name",
+            default_dir: "asc",
+          },
+          paginate={
+            mode: "keyset",
+            cursor_field: "id",
+            cursor_type: "uuid",
+            default_page_size: 25,
+            max_page_size: 100,
+          },
+        ),
         {
           name: "create",
           require_auth: true,

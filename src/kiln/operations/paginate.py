@@ -1,11 +1,10 @@
 """Paginate extension: emits Page schema, wires pagination into search.
 
-Runs at operation scope with ``type: "paginate"`` after
-:class:`~kiln.operations.list.List`.  Emits the ``{Model}Page``
-response schema, swaps List's response model from
-``list[{Model}ListItem]`` to ``{Model}Page``, and stamps the
-pagination mode plus keyset/offset defaults onto List's search
-handler.
+Runs at modifier scope with ``type: "paginate"`` as a nested
+child of a list op.  Emits the ``{Model}Page`` response schema,
+swaps the parent list's response model from ``list[{Model}ListItem]``
+to ``{Model}Page``, and stamps the pagination mode plus
+keyset/offset defaults onto the parent's search handler.
 """
 
 from __future__ import annotations
@@ -21,14 +20,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig
+    from kiln.config.schema import ModifierConfig
 
 
 @operation(
     "paginate",
-    scope="operation",
+    scope="modifier",
     dispatch_on="type",
-    requires=["list"],
 )
 class Paginate:
     """Amend the list op with pagination."""
@@ -37,7 +35,7 @@ class Paginate:
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[ModifierConfig],
         options: PaginateConfig,
     ) -> Iterable[object]:
         """Emit Page schema and amend List's outputs.
@@ -86,11 +84,11 @@ class Paginate:
             options.default_page_size
         )
 
-        # The list test case was emitted with is_list_response=True
-        # because List doesn't know whether anyone will wrap the
-        # response in a Page.  Now that we know, fix it.
-        resource_id = ctx.store.ancestor_id_of(ctx.instance_id, "resource")
-        if resource_id is not None:
-            for tc in ctx.store.outputs_under(resource_id, TestCase):
-                if tc.op_name == "list":
-                    tc.is_list_response = False
+        # The parent list's test case was emitted with
+        # is_list_response=True because List doesn't know whether a
+        # modifier will wrap the response in a Page.  Now that we
+        # know, fix it.
+        parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
+        if parent_id is not None:
+            for tc in ctx.store.outputs_from(parent_id, "list", TestCase):
+                tc.is_list_response = False

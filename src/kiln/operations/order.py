@@ -1,9 +1,9 @@
 """Order extension: emits sort schemas, wires them into search.
 
-Runs at operation scope with ``type: "order"`` after
-:class:`~kiln.operations.list.List`.  Emits the
-``{Model}SortField`` enum and ``{Model}SortClause`` schema, and
-stamps the sort defaults onto List's search handler.
+Runs at modifier scope with ``type: "order"`` as a nested child
+of a list op.  Emits the ``{Model}SortField`` enum and
+``{Model}SortClause`` schema, and stamps the sort defaults onto
+the parent list's search handler.
 """
 
 from __future__ import annotations
@@ -19,14 +19,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig
+    from kiln.config.schema import ModifierConfig
 
 
 @operation(
     "order",
-    scope="operation",
+    scope="modifier",
     dispatch_on="type",
-    requires=["list"],
 )
 class Order:
     """Amend the list op with sort fields."""
@@ -35,7 +34,7 @@ class Order:
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[ModifierConfig],
         options: OrderConfig,
     ) -> Iterable[object]:
         """Emit sort schemas and amend List's outputs.
