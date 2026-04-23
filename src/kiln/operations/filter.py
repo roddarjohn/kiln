@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import FilterConfig, OperationConfig
-from kiln.operations._list_extension import find_list_outputs
+from kiln.operations.list import (
+    find_search_handler,
+    find_search_request,
+    resource_model,
+)
 from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
@@ -55,8 +59,7 @@ class Filter:
             schema is rendered as part of the same template.)
 
         """
-        outputs = find_list_outputs(ctx)
-        model = outputs.model
+        model = resource_model(ctx)
 
         allowed = options.fields or _list_field_names(ctx)
         yield SchemaClass(
@@ -74,9 +77,12 @@ class Filter:
             ],
         )
 
-        outputs.search_request.body_context["has_filter"] = True
-        outputs.handler.body_context["has_filter"] = True
-        outputs.handler.extra_imports.append(("ingot", "apply_filters"))
+        search_request = find_search_request(ctx)
+        search_request.body_context["has_filter"] = True
+
+        handler = find_search_handler(ctx)
+        handler.body_context["has_filter"] = True
+        handler.extra_imports.append(("ingot", "apply_filters"))
 
 
 def _list_field_names(ctx: BuildContext[ModifierConfig]) -> list[str]:

@@ -13,8 +13,13 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import PaginateConfig
-from kiln.operations._list_extension import find_list_outputs
-from kiln.operations.types import SchemaClass, TestCase
+from kiln.operations.list import (
+    find_list_test_case,
+    find_search_handler,
+    find_search_request,
+    resource_model,
+)
+from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -48,22 +53,20 @@ class Paginate:
             ``{Model}Page`` response schema.
 
         """
-        outputs = find_list_outputs(ctx)
-        model = outputs.model
+        model = resource_model(ctx)
 
-        list_item_name = f"{model.pascal}ListItem"
         page_name = model.suffixed("Page")
         yield SchemaClass(
             name=page_name,
             body_template="fastapi/schema_parts/page.py.j2",
             body_context={
                 "model_name": model.pascal,
-                "item_type": list_item_name,
+                "item_type": f"{model.pascal}ListItem",
                 "mode": options.mode,
             },
         )
 
-        handler = outputs.handler
+        handler = find_search_handler(ctx)
         handler.response_model = page_name
         handler.return_type = page_name
         handler.body_context["pagination_mode"] = options.mode
@@ -78,7 +81,7 @@ class Paginate:
             ),
         )
 
-        search_request = outputs.search_request
+        search_request = find_search_request(ctx)
         search_request.body_context["pagination_mode"] = options.mode
         search_request.body_context["default_page_size"] = (
             options.default_page_size
@@ -88,7 +91,6 @@ class Paginate:
         # is_list_response=True because List doesn't know whether a
         # modifier will wrap the response in a Page.  Now that we
         # know, fix it.
-        parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
-        if parent_id is not None:
-            for tc in ctx.store.outputs_from(parent_id, "list", TestCase):
-                tc.is_list_response = False
+        test_case = find_list_test_case(ctx)
+        if test_case is not None:
+            test_case.is_list_response = False

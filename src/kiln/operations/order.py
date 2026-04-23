@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import OrderConfig
-from kiln.operations._list_extension import find_list_outputs
+from kiln.operations.list import (
+    find_search_handler,
+    find_search_request,
+    resource_model,
+)
 from kiln.operations.types import EnumClass, SchemaClass
 
 if TYPE_CHECKING:
@@ -48,8 +52,7 @@ class Order:
             schema.
 
         """
-        outputs = find_list_outputs(ctx)
-        model = outputs.model
+        model = resource_model(ctx)
 
         yield EnumClass(
             name=model.suffixed("SortField"),
@@ -63,9 +66,11 @@ class Order:
             extra_imports=[("typing", "Literal")],
         )
 
-        outputs.search_request.body_context["has_sort"] = True
-        outputs.handler.body_context["has_sort"] = True
+        find_search_request(ctx).body_context["has_sort"] = True
+
+        handler = find_search_handler(ctx)
+        handler.body_context["has_sort"] = True
         if options.default is not None:
-            outputs.handler.body_context["default_sort_field"] = options.default
-        outputs.handler.body_context["default_sort_dir"] = options.default_dir
-        outputs.handler.extra_imports.append(("ingot", "apply_ordering"))
+            handler.body_context["default_sort_field"] = options.default
+        handler.body_context["default_sort_dir"] = options.default_dir
+        handler.extra_imports.append(("ingot", "apply_ordering"))
