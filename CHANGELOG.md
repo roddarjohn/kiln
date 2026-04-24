@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.1...kiln-v0.7.0) (2026-04-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* list extension changes ([#30](https://github.com/roddarjohn/kiln/issues/30))
+
+### Features
+
+* CLI improvements ([#31](https://github.com/roddarjohn/kiln/issues/31)) ([ec5d090](https://github.com/roddarjohn/kiln/commit/ec5d090bd4edd06bd8e9153b3a4715661fefb39a))
+* list extension changes ([#30](https://github.com/roddarjohn/kiln/issues/30)) ([14a6b38](https://github.com/roddarjohn/kiln/commit/14a6b38f9a40e38f4abdf653d90b15085390c5a2))
+
 ## [0.6.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.0...kiln-v0.6.1) (2026-04-23)
 
 
