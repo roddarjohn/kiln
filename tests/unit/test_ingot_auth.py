@@ -130,7 +130,7 @@ class TestSessionAuthValidation:
 class TestSessionAuthBearer:
     """Bearer-only source."""
 
-    def _dep(self):  # noqa: ANN202
+    def _dep(self):
         return session_auth(
             Session,
             ["bearer"],
@@ -161,7 +161,7 @@ class TestSessionAuthBearer:
 class TestSessionAuthCookie:
     """Cookie-only source."""
 
-    def _dep(self):  # noqa: ANN202
+    def _dep(self):
         return session_auth(
             Session,
             ["cookie"],
@@ -185,7 +185,7 @@ class TestSessionAuthCookie:
 class TestSessionAuthBoth:
     """Both sources — picks the first token that's present."""
 
-    def _dep(self):  # noqa: ANN202
+    def _dep(self):
         return session_auth(
             Session,
             ["bearer", "cookie"],
