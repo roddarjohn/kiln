@@ -93,29 +93,21 @@ class EnumClass:
 
 @dataclass
 class RouteHandler:
-    """A single route handler function.
+    """A single route handler function, produced by a CRUD or action op.
 
-    Produced by CRUD and action operations.  The assembler
-    collects all handlers for a resource into one route file.
+    Body dispatches through :attr:`body_template` + :attr:`body_context`;
+    ops that inline their body set :attr:`body_lines` and leave the
+    template ``None``.
 
-    The renderer builds the handler's body via :attr:`body_template`
-    rendered with :attr:`body_context`; ops that carry the body
-    inline set :attr:`body_lines` instead and leave
-    :attr:`body_template` ``None``.
+    :attr:`request_schema_module` / :attr:`response_schema_module`
+    override the import source: ``None`` resolves to the generated
+    schemas module (CRUD); the action op sets them to the consumer's
+    module so introspected user types import from their real location.
 
-    :attr:`request_schema_module` and :attr:`response_schema_module`
-    override where the renderer imports the request/response classes
-    from.  CRUD ops leave them ``None`` so the classes resolve to the
-    generated schemas module; the action op sets them to the
-    consumer's module (discovered via introspection) so user-defined
-    request/response models import from their real location.
-
-    :attr:`op_name` is the
-    :attr:`~kiln.config.schema.OperationConfig.name` of the op that
-    produced this handler -- "create" / "list" / "publish" / etc.
-    The :class:`~kiln.operations.auth.Auth` op consults it to decide
-    whether a given handler should receive a session dependency
-    based on per-op ``require_auth`` overrides.
+    :attr:`op_name` carries the
+    :class:`~kiln.config.schema.OperationConfig` ``name`` so
+    :class:`~kiln.operations.auth.Auth` can filter per-op
+    ``require_auth`` overrides.
     """
 
     method: str

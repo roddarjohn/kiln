@@ -101,13 +101,10 @@ class AuthConfig(BaseModel):
     token_url: str = "/auth/token"  # noqa: S105
 
     session_store: str | None = None
-    """Optional dotted path to a :class:`ingot.auth.SessionStore`
-    instance, e.g. ``"myapp.revocation.revocations"``.  When set,
-    the generated ``get_session`` dep consults the store's
-    :meth:`is_revoked` after JWT verification and the generated
-    logout handler calls :meth:`revoke` before
-    :func:`ingot.auth.clear_session`.  Leave ``None`` for pure
-    stateless-JWT behaviour."""
+    """Dotted path to an :class:`ingot.auth.SessionStore` instance
+    (e.g. ``"myapp.revocation.revocations"``).  When set, the
+    generated ``get_session`` enforces the deny-list and logout
+    calls :meth:`revoke` before clearing; ``None`` = stateless."""
 
     cookie_name: str = "access_token"
     """Name of the cookie carrying the JWT when ``"cookie"`` is in

@@ -1,22 +1,9 @@
-"""Auth operation: augments CRUD handlers with a session dependency.
+"""Auth operation -- augments handlers + tests after the CRUD sweep.
 
-Auth is a resource-scoped operation that runs *after* the CRUD
-and action operations have produced their route handlers and
-test cases.  When the project has auth configured and the
-current resource opts in, it:
-
-* Appends ``session: Annotated[dict, Depends(...)]`` to each
-  :class:`RouteHandler`'s ``extra_deps`` so the template renders
-  the auth dependency.
-* Appends the ``get_session`` import to the handler's
-  ``extra_imports`` so the assembler includes it.  The imported
-  name is aliased from the consumer's
-  :attr:`~kiln.config.schema.AuthConfig.get_session_fn`.
-* Flips :attr:`TestCase.requires_auth` so the generated tests
-  expect a 401 without credentials.
-
-This is the first example of an operation in the augment role:
-it produces no new outputs, only mutates earlier ones.
+Resource-scoped, ``after_children=True``, emits nothing.  Stamps a
+``Depends(get_session)`` parameter onto each handler whose op has
+effective ``require_auth`` and flips :attr:`TestCase.requires_auth`
+to match.
 """
 
 from __future__ import annotations
@@ -38,20 +25,13 @@ if TYPE_CHECKING:
 
 @operation("auth", scope="resource", after_children=True)
 class Auth:
-    """Augment CRUD/action handlers and tests with auth.
-
-    Runs at resource scope with ``after_children=True`` so all
-    operation-scope ops under this resource have already produced
-    their handlers and test cases by the time auth sweeps through.
-    """
+    """Augment CRUD/action handlers and tests with auth."""
 
     def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
         """Run whenever auth is configured.
 
-        Per-op filtering happens in :meth:`build`; gating here on
-        "any op opts in" would duplicate that logic.  The cost of
-        an unconditional pass is one no-op loop over empty handler
-        lists when nothing ends up needing auth.
+        Per-op filtering lives in :meth:`build`; gating here too
+        would duplicate it.
         """
         return getattr(ctx.config, "auth", None) is not None
 
@@ -60,21 +40,11 @@ class Auth:
         ctx: BuildContext[ResourceConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
-        """Mutate handlers/tests per effective per-op ``require_auth``.
+        """Stamp session dep onto handlers whose op opts in.
 
-        Each op's effective auth is its own ``require_auth`` when set,
-        else the resource-level default.  Handlers from ops that
-        don't require auth are left alone so no spurious session
-        dependency leaks into open routes.
-
-        Args:
-            ctx: Build context with store of earlier outputs.
-            _options: Unused.
-
-        Returns:
-            Empty iterable -- this operation only mutates earlier
-            output and emits no new objects.
-
+        Effective auth = op's ``require_auth`` when set, else the
+        resource default.  Skipping non-auth ops keeps the session
+        dep from leaking onto open routes.
         """
         auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
