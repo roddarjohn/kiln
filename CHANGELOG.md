@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.0...kiln-v0.7.1) (2026-04-24)
+
+
+### Features
+
+* simplifying store + docs ([e670000](https://github.com/roddarjohn/kiln/commit/e6700002265c681c573fef23816a86c2281a2472))
+
 ## [0.7.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.1...kiln-v0.7.0) (2026-04-24)
 
 
