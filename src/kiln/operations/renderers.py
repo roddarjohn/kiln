@@ -28,6 +28,7 @@ from foundry.naming import Name, prefix_import
 from foundry.outputs import StaticFile
 from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 from kiln.config.schema import PYTHON_TYPES
+from kiln.operations.list import ListResult
 from kiln.operations.types import (
     EnumClass,
     RouteHandler,
@@ -452,6 +453,19 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
         template=sf.template,
         context=dict(sf.context),
     )
+
+
+@registry.renders(ListResult)
+def _list_result_fragment(
+    _result: ListResult, _ctx: RenderCtx
+) -> Iterator[Fragment]:
+    """ListResult is an internal bundle for modifier ops; emit nothing.
+
+    The individual outputs it references (ListItem / SearchRequest /
+    handler / etc.) are yielded separately by the list op and
+    rendered through their own registered renderers.
+    """
+    return iter(())
 
 
 # -------------------------------------------------------------------

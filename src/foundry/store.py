@@ -206,32 +206,6 @@ class BuildStore:
 
         return result
 
-    def outputs_from[T](
-        self,
-        ancestor_id: str,
-        op_name: str,
-        output_type: type[T],
-    ) -> list[T]:
-        """Return outputs emitted by *op_name* at or below *ancestor_id*.
-
-        Like :meth:`outputs_under` but filtered to outputs a
-        specific op produced.  Used by modifier ops (declared with
-        :attr:`OperationMeta.modifies`) to find the target op's
-        outputs without string-matching on output names or paths.
-        """
-        prefix = f"{ancestor_id}."
-        result: list[T] = []
-
-        for (stored_id, stored_op), items in self._items.items():
-            if stored_op != op_name:
-                continue
-            if stored_id == ancestor_id or stored_id.startswith(prefix):
-                result.extend(
-                    item for item in items if isinstance(item, output_type)
-                )
-
-        return result
-
     def entries(
         self,
     ) -> Iterator[tuple[str, str, list[object]]]:

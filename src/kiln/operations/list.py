@@ -1,15 +1,17 @@
 """List operation: POST /search -- bare list endpoint.
 
 Emits an always-present ``POST /search`` route plus the schemas
-and serializer that any list op needs.  Modifier ops (Filter /
-Order / Paginate) nest inside a list op's config and find its
-outputs via :func:`find_search_request` and
-:func:`find_search_handler` — the authoritative "where are my
-outputs" contract lives here, next to the op that produces them.
+and serializer every list op needs.  Modifier ops (Filter / Order
+/ Paginate) nest inside a list op's config and reach its outputs
+via a :class:`ListResult` bundle that List yields alongside the
+individual outputs.  The bundle carries direct references to each
+emitted object, so modifiers amend fields on the bundle rather
+than searching the store by name or shape.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -21,6 +23,7 @@ from kiln.operations.types import (
     RouteHandler,
     RouteParam,
     SchemaClass,
+    SerializerFn,
     TestCase,
     _construct_response_schema,
     _construct_serializer,
@@ -37,7 +40,24 @@ if TYPE_CHECKING:
     )
 
 
-@operation("list", scope="operation", dispatch_on="name", requires=["get"])
+@dataclass
+class ListResult:
+    """Direct references to everything the list op emits.
+
+    Not a rendered output (see the no-op renderer registered in
+    :mod:`kiln.operations.renderers`) — just a typed handle that
+    modifier ops fetch to amend specific objects by name rather
+    than scanning the store.
+    """
+
+    list_item: SchemaClass
+    serializer: SerializerFn
+    search_request: SchemaClass
+    handler: RouteHandler
+    test_case: TestCase
+
+
+@operation("list", scope="operation", dispatch_on="name")
 class List:
     """POST /search -- list resources.
 
@@ -81,18 +101,13 @@ class List:
         _, model = Name.from_dotted(resource.model)
         pk_name = getattr(resource, "pk", "id")
 
-        list_item_schema = _construct_response_schema(
+        list_item = _construct_response_schema(
             model, options.fields, suffix="ListItem"
         )
 
-        serializer = _construct_serializer(
-            model, list_item_schema, stem="list_item"
-        )
-        yield list_item_schema
-        yield serializer
-
+        serializer = _construct_serializer(model, list_item, stem="list_item")
         search_request_name = model.suffixed("SearchRequest")
-        yield SchemaClass(
+        search_request = SchemaClass(
             name=search_request_name,
             body_template="fastapi/schema_parts/search_request.py.j2",
             body_context={
@@ -104,8 +119,9 @@ class List:
             },
         )
 
-        response_model = f"list[{list_item_schema.name}]"
-        yield RouteHandler(
+        response_model = f"list[{list_item.name}]"
+
+        handler = RouteHandler(
             method="POST",
             path="/search",
             function_name=f"list_{model.lower}s",
@@ -130,7 +146,7 @@ class List:
             extra_imports=[("sqlalchemy", "select")],
         )
 
-        yield TestCase(
+        test_case = TestCase(
             op_name="list",
             method="post",
             path="/search",
@@ -140,26 +156,28 @@ class List:
             is_list_response=True,
         )
 
+        yield list_item
+        yield serializer
+        yield search_request
+        yield handler
+        yield test_case
+        yield ListResult(
+            list_item=list_item,
+            serializer=serializer,
+            search_request=search_request,
+            handler=handler,
+            test_case=test_case,
+        )
+
 
 # -------------------------------------------------------------------
-# Modifier-op lookup helpers
+# Modifier-op lookup
 #
 # Filter / Order / Paginate nest as children of a specific list op
-# in the scope tree.  To amend that list's outputs, a modifier asks
-# the helpers below for the SearchRequest schema and the search
-# handler registered by its parent list.  Keeping these here —
-# rather than in a sidecar module — makes the list op the sole
-# source of truth for its own output shape.
+# in the scope tree.  Each fetches the parent list's
+# :class:`ListResult` bundle and amends fields directly — no store
+# scanning, no name/shape matching.
 # -------------------------------------------------------------------
-
-
-def _parent_list_id(ctx: BuildContext[ModifierConfig]) -> str:
-    """Return the instance id of the list op enclosing a modifier."""
-    parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
-    if parent_id is None:
-        msg = "Modifier op has no enclosing operation."
-        raise LookupError(msg)
-    return parent_id
 
 
 def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
@@ -172,52 +190,35 @@ def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
     return model
 
 
-def find_search_request(ctx: BuildContext[ModifierConfig]) -> SchemaClass:
-    """Return the parent list op's ``{Model}SearchRequest`` schema."""
-    model = resource_model(ctx)
-    expected = model.suffixed("SearchRequest")
-    parent_id = _parent_list_id(ctx)
-    match = next(
-        (
-            s
-            for s in ctx.store.outputs_from(parent_id, "list", SchemaClass)
-            if s.name == expected
-        ),
+def find_list_result(ctx: BuildContext[ModifierConfig]) -> ListResult:
+    """Return the parent list op's :class:`ListResult` bundle.
+
+    The modifier's enclosing operation-scope instance *is* the
+    parent list op; looking up a ``ListResult`` under that id
+    locates the bundle directly — no name matching, no emitter
+    filter, no sibling scanning.
+
+    Raises:
+        LookupError: If the modifier has no enclosing operation or
+            the parent didn't emit a ``ListResult`` (would indicate
+            the modifier nests inside a non-list op).
+
+    """
+    parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
+    if parent_id is None:
+        msg = "Modifier op has no enclosing operation."
+        raise LookupError(msg)
+
+    bundle = next(
+        iter(ctx.store.outputs_under(parent_id, ListResult)),
         None,
     )
-    if match is None:
+
+    if bundle is None:
         msg = (
-            f"Modifier ran before List emitted '{expected}' — "
-            f"check scope descent / engine ordering."
+            "Parent op did not emit a ListResult — modifier must "
+            "nest inside a list op."
         )
         raise LookupError(msg)
-    return match
 
-
-def find_search_handler(ctx: BuildContext[ModifierConfig]) -> RouteHandler:
-    """Return the parent list op's ``POST /search`` handler."""
-    parent_id = _parent_list_id(ctx)
-    match = next(
-        (
-            h
-            for h in ctx.store.outputs_from(parent_id, "list", RouteHandler)
-            if h.method == "POST" and h.path == "/search"
-        ),
-        None,
-    )
-    if match is None:
-        msg = (
-            "Modifier ran before List emitted its POST /search handler "
-            "— check scope descent / engine ordering."
-        )
-        raise LookupError(msg)
-    return match
-
-
-def find_list_test_case(ctx: BuildContext[ModifierConfig]) -> TestCase | None:
-    """Return the parent list op's TestCase, if tests are configured."""
-    parent_id = _parent_list_id(ctx)
-    return next(
-        iter(ctx.store.outputs_from(parent_id, "list", TestCase)),
-        None,
-    )
+    return bundle

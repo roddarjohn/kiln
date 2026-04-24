@@ -13,12 +13,7 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import PaginateConfig
-from kiln.operations.list import (
-    find_list_test_case,
-    find_search_handler,
-    find_search_request,
-    resource_model,
-)
+from kiln.operations.list import find_list_result, resource_model
 from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
@@ -66,7 +61,9 @@ class Paginate:
             },
         )
 
-        handler = find_search_handler(ctx)
+        result = find_list_result(ctx)
+
+        handler = result.handler
         handler.response_model = page_name
         handler.return_type = page_name
         handler.body_context["pagination_mode"] = options.mode
@@ -81,9 +78,8 @@ class Paginate:
             ),
         )
 
-        search_request = find_search_request(ctx)
-        search_request.body_context["pagination_mode"] = options.mode
-        search_request.body_context["default_page_size"] = (
+        result.search_request.body_context["pagination_mode"] = options.mode
+        result.search_request.body_context["default_page_size"] = (
             options.default_page_size
         )
 
@@ -91,6 +87,4 @@ class Paginate:
         # is_list_response=True because List doesn't know whether a
         # modifier will wrap the response in a Page.  Now that we
         # know, fix it.
-        test_case = find_list_test_case(ctx)
-        if test_case is not None:
-            test_case.is_list_response = False
+        result.test_case.is_list_response = False

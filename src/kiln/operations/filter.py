@@ -13,11 +13,7 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import FilterConfig, OperationConfig
-from kiln.operations.list import (
-    find_search_handler,
-    find_search_request,
-    resource_model,
-)
+from kiln.operations.list import find_list_result, resource_model
 from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
@@ -77,12 +73,10 @@ class Filter:
             ],
         )
 
-        search_request = find_search_request(ctx)
-        search_request.body_context["has_filter"] = True
-
-        handler = find_search_handler(ctx)
-        handler.body_context["has_filter"] = True
-        handler.extra_imports.append(("ingot", "apply_filters"))
+        result = find_list_result(ctx)
+        result.search_request.body_context["has_filter"] = True
+        result.handler.body_context["has_filter"] = True
+        result.handler.extra_imports.append(("ingot", "apply_filters"))
 
 
 def _list_field_names(ctx: BuildContext[ModifierConfig]) -> list[str]:

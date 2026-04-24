@@ -12,11 +12,7 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import OrderConfig
-from kiln.operations.list import (
-    find_search_handler,
-    find_search_request,
-    resource_model,
-)
+from kiln.operations.list import find_list_result, resource_model
 from kiln.operations.types import EnumClass, SchemaClass
 
 if TYPE_CHECKING:
@@ -66,9 +62,10 @@ class Order:
             extra_imports=[("typing", "Literal")],
         )
 
-        find_search_request(ctx).body_context["has_sort"] = True
+        result = find_list_result(ctx)
+        result.search_request.body_context["has_sort"] = True
 
-        handler = find_search_handler(ctx)
+        handler = result.handler
         handler.body_context["has_sort"] = True
         if options.default is not None:
             handler.body_context["default_sort_field"] = options.default
