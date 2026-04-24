@@ -51,6 +51,7 @@ class Delete:
             method="DELETE",
             path=f"/{{{resource.pk}}}",
             function_name=f"delete_{model.lower}",
+            op_name=ctx.instance.name,
             params=[
                 RouteParam(
                     name=resource.pk,

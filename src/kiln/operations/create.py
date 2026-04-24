@@ -67,6 +67,7 @@ class Create:
             method="POST",
             path="/",
             function_name=f"create_{model.lower}",
+            op_name=ctx.instance.name,
             params=[RouteParam(name="body", annotation=request_schema)],
             status_code=201,
             doc=f"Create a new {model.pascal}.",

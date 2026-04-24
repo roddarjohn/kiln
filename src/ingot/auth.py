@@ -24,21 +24,15 @@ The secret is read from an environment variable named by the caller
 a key.
 """
 
-from __future__ import annotations
-
 import datetime
 import os
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Annotated, Any, Literal, Protocol
 
 import jwt
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
-
-    from fastapi import Response
 
 DEFAULT_TOKEN_TTL = datetime.timedelta(minutes=30)
 """Lifetime stamped onto tokens when the caller does not set ``exp``."""
@@ -47,6 +41,41 @@ Source = Literal["bearer", "cookie"]
 """Where a session token may travel.  See module docstring for semantics."""
 
 SameSite = Literal["lax", "strict", "none"]
+
+
+class SessionStore(Protocol):
+    """Server-side hook pair that turns the stateless flow stateful.
+
+    Implement this on the consumer side to layer DB-backed
+    revocation (deny-list), opaque session records, or anything
+    else that needs per-token server state.  Two methods:
+
+    * :meth:`is_revoked` -- called by :func:`session_auth`'s
+      generated dep after JWT verification; returning ``True``
+      rejects the request with HTTP 401 ``"Session revoked"``.
+    * :meth:`revoke` -- called by the generated logout handler
+      before :func:`clear_session`; marks the session dead so
+      the next :meth:`is_revoked` call returns ``True``.
+
+    Both methods are async so the store can hit a database
+    without blocking the event loop.  In-memory implementations
+    just declare ``async def`` and return immediately -- Python
+    awaits on non-suspending coroutines cheaply.
+
+    The store receives the whole :class:`~pydantic.BaseModel`
+    session so it can key on whichever field is stable
+    (typically ``jti``).  The consumer's ``Session`` is expected
+    to carry that identity claim; ``ingot.auth`` itself stays
+    agnostic about the shape.
+    """
+
+    async def is_revoked(self, session: BaseModel) -> bool:
+        """Return ``True`` if *session* has been revoked."""
+        ...
+
+    async def revoke(self, session: BaseModel) -> None:
+        """Mark *session* as revoked.  Should be idempotent."""
+        ...
 
 
 def encode_jwt(
@@ -112,12 +141,9 @@ def decode_jwt(
     try:
         secret = os.environ[secret_env]
         return jwt.decode(token, secret, algorithms=[algorithm])
+
     except (jwt.InvalidTokenError, KeyError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        raise _unauthorized() from exc
 
 
 def _unauthorized() -> HTTPException:
@@ -153,12 +179,34 @@ def _validate_session_sources(
         raise ValueError(msg)
 
 
+def _revoked() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Session revoked",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def _check_store[T: BaseModel](
+    session: T, store: SessionStore | None
+) -> T:
+    """Consult *store* and raise 401 if *session* is revoked.
+
+    Factored out because all three transport deps run the same
+    post-validation step.
+    """
+    if store is not None and await store.is_revoked(session):
+        raise _revoked()
+    return session
+
+
 def _bearer_dep[T: BaseModel](
     schema: type[T],
     *,
     token_url: str,
     secret_env: str,
     algorithm: str,
+    store: SessionStore | None,
 ) -> Callable[..., Awaitable[T]]:
     oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
 
@@ -168,7 +216,7 @@ def _bearer_dep[T: BaseModel](
         if bearer is None:
             raise _unauthorized()
         claims = decode_jwt(bearer, secret_env=secret_env, algorithm=algorithm)
-        return schema.model_validate(claims)
+        return await _check_store(schema.model_validate(claims), store)
 
     return get_session
 
@@ -179,6 +227,7 @@ def _cookie_dep[T: BaseModel](
     cookie_name: str,
     secret_env: str,
     algorithm: str,
+    store: SessionStore | None,
 ) -> Callable[..., Awaitable[T]]:
     async def get_session(
         cookie: Annotated[str | None, Cookie(alias=cookie_name)] = None,
@@ -186,7 +235,7 @@ def _cookie_dep[T: BaseModel](
         if cookie is None:
             raise _unauthorized()
         claims = decode_jwt(cookie, secret_env=secret_env, algorithm=algorithm)
-        return schema.model_validate(claims)
+        return await _check_store(schema.model_validate(claims), store)
 
     return get_session
 
@@ -198,6 +247,7 @@ def _bearer_or_cookie_dep[T: BaseModel](
     cookie_name: str,
     secret_env: str,
     algorithm: str,
+    store: SessionStore | None,
 ) -> Callable[..., Awaitable[T]]:
     oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
 
@@ -209,7 +259,7 @@ def _bearer_or_cookie_dep[T: BaseModel](
         if token is None:
             raise _unauthorized()
         claims = decode_jwt(token, secret_env=secret_env, algorithm=algorithm)
-        return schema.model_validate(claims)
+        return await _check_store(schema.model_validate(claims), store)
 
     return get_session
 
@@ -222,6 +272,7 @@ def session_auth[T: BaseModel](
     algorithm: str,
     token_url: str | None = None,
     cookie_name: str | None = None,
+    store: SessionStore | None = None,
 ) -> Callable[..., Awaitable[T]]:
     """Build a FastAPI dependency that yields a validated session.
 
@@ -237,6 +288,12 @@ def session_auth[T: BaseModel](
     returns, so handlers type ``session: Session`` and get the full
     model — not a raw dict.
 
+    When *store* is supplied the dep also calls
+    :meth:`SessionStore.is_revoked` after validation and raises
+    HTTP 401 ``"Session revoked"`` if the store says so.  Use this
+    to layer DB-backed deny-lists on top of the JWT without
+    writing a wrapper dep on the consumer side.
+
     Args:
         schema: Pydantic model describing the session payload.
         sources: Ordered list of transports to accept.  Must be
@@ -248,6 +305,8 @@ def session_auth[T: BaseModel](
             :class:`OAuth2PasswordBearer`.
         cookie_name: Name of the cookie carrying the JWT, required
             when ``"cookie"`` is in *sources*.
+        store: Optional server-side session store.  When supplied
+            the dep consults it and rejects revoked sessions.
 
     Returns:
         An async dependency that yields a *schema* instance or
@@ -275,6 +334,7 @@ def session_auth[T: BaseModel](
             cookie_name=cookie_name,
             secret_env=secret_env,
             algorithm=algorithm,
+            store=store,
         )
     if use_bearer:
         assert token_url is not None  # noqa: S101
@@ -283,6 +343,7 @@ def session_auth[T: BaseModel](
             token_url=token_url,
             secret_env=secret_env,
             algorithm=algorithm,
+            store=store,
         )
     assert cookie_name is not None  # noqa: S101
     return _cookie_dep(
@@ -290,6 +351,7 @@ def session_auth[T: BaseModel](
         cookie_name=cookie_name,
         secret_env=secret_env,
         algorithm=algorithm,
+        store=store,
     )
 
 
@@ -416,10 +478,12 @@ def clear_session(
         if cookie_name is None:
             msg = "cookie_name is required when 'cookie' is in sources"
             raise ValueError(msg)
+
         response.delete_cookie(
             key=cookie_name,
             httponly=True,
             secure=cookie_secure,
             samesite=cookie_samesite,
         )
+
     return {"ok": True}

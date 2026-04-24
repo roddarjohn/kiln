@@ -67,4 +67,12 @@ See [LICENSE](LICENSE) for details.
   - e.g. filter list endpoints
   - should be rego I'd think
 
-- related models in dumps
+- async tasks?
+
+- emails / texts / pdfs / spreadsheets?
+
+- document uploading?
+
+- multi-tenant?
+
+- websockets?

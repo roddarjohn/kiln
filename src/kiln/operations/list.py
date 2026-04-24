@@ -125,6 +125,7 @@ class List:
             method="POST",
             path="/search",
             function_name=f"list_{model.lower}s",
+            op_name=ctx.instance.name,
             params=[
                 RouteParam(name="body", annotation=search_request_name),
             ],

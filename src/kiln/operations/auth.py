@@ -46,28 +46,36 @@ class Auth:
     """
 
     def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
-        """Apply only when auth is configured and the resource opts in.
+        """Apply when auth is configured and any op opts in.
 
         Args:
             ctx: Build context for the current resource.
 
         Returns:
-            ``True`` when the project config has ``auth`` set
-            and the resource has ``require_auth`` (default
-            ``True``).
+            ``True`` when the project has ``auth`` set AND the
+            resource default is ``require_auth=True`` OR any
+            operation overrides with ``require_auth=True``.  The
+            latter matters when the resource default is ``False``
+            but an individual op opts in.
 
         """
-        return (
-            getattr(ctx.config, "auth", None) is not None
-            and ctx.instance.require_auth
-        )
+        if getattr(ctx.config, "auth", None) is None:
+            return False
+        if ctx.instance.require_auth:
+            return True
+        return any(op.require_auth for op in ctx.instance.operations)
 
     def build(
         self,
         ctx: BuildContext[ResourceConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
-        """Mutate earlier handlers/tests to require auth.
+        """Mutate handlers/tests per effective per-op ``require_auth``.
+
+        Each op's effective auth is its own ``require_auth`` when set,
+        else the resource-level default.  Handlers from ops that
+        don't require auth are left alone so no spurious session
+        dependency leaks into open routes.
 
         Args:
             ctx: Build context with store of earlier outputs.
@@ -82,7 +90,19 @@ class Auth:
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
+        resource_default = ctx.instance.require_auth
+        op_auth: dict[str, bool] = {
+            op.name: (
+                op.require_auth
+                if op.require_auth is not None
+                else resource_default
+            )
+            for op in ctx.instance.operations
+        }
+
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
+            if not op_auth.get(handler.op_name, False):
+                continue
             handler.extra_deps.append(
                 f"session: Annotated[{session_name}, Depends(get_session)],"
             )
@@ -90,6 +110,10 @@ class Auth:
             handler.extra_imports.append((session_module, session_name))
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
-            test.requires_auth = True
+            # TestCase.op_name holds the op class for actions
+            # ("action"); the concrete instance name is in
+            # action_name.  For CRUD the two match.
+            instance_name = test.action_name or test.op_name
+            test.requires_auth = op_auth.get(instance_name, False)
 
         return ()

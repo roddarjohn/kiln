@@ -87,6 +87,7 @@ class Action:
             method="POST",
             path=path,
             function_name=f"{action_name.raw}_action",
+            op_name=ctx.instance.name,
             params=params,
             response_model=info.response_class,
             response_schema_module=info.response_module,

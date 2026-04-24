@@ -109,11 +109,19 @@ class RouteHandler:
     generated schemas module; the action op sets them to the
     consumer's module (discovered via introspection) so user-defined
     request/response models import from their real location.
+
+    :attr:`op_name` is the
+    :attr:`~kiln.config.schema.OperationConfig.name` of the op that
+    produced this handler -- "create" / "list" / "publish" / etc.
+    The :class:`~kiln.operations.auth.Auth` op consults it to decide
+    whether a given handler should receive a session dependency
+    based on per-op ``require_auth`` overrides.
     """
 
     method: str
     path: str
     function_name: str
+    op_name: str = ""
     params: list[RouteParam] = field(default_factory=list)
     body_param: str | None = None
     request_schema: str | None = None

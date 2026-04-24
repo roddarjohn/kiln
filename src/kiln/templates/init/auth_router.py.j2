@@ -8,6 +8,23 @@ success or ``None`` on failure.
 Token sources: {{ sources | join(", ") }}.  The same JWT is emitted
 to every configured source on login and cleared by ``logout``.
 
+Three endpoints are generated:
+
+* ``POST {{ token_url }}`` -- issue a session (login).
+* ``GET {{ token_url }}`` -- return the current session as JSON.
+  Enforces auth via the shared ``get_session`` dep, so a missing
+  or revoked token yields HTTP 401.
+* ``POST {{ token_url }}/logout`` -- clear the transport (and
+  revoke the server-side record when a
+  :class:`ingot.auth.SessionStore` is wired in).
+{% if store_name %}
+
+A :class:`ingot.auth.SessionStore` is wired in, so ``logout`` also
+calls ``{{ store_name }}.revoke(session)`` before clearing the
+cookie.  The revoke runs first so that a failure leaves the token
+non-verifying rather than zombie-valid.
+{% endif %}
+
 Mount this router in your application::
 
     from auth.router import router as auth_router
@@ -17,12 +34,20 @@ Mount this router in your application::
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Response
 
 from ingot.auth import clear_session, issue_session
 
 from {{ creds_module }} import {{ creds_name }}
 from {{ validate_module }} import {{ validate_name }}
+from {{ session_module }} import {{ session_name }}
+{% if store_name %}
+from {{ store_module }} import {{ store_name }}
+{% endif %}
+
+from .dependencies import get_session
 
 router = APIRouter()
 
@@ -60,7 +85,44 @@ def create_token(
     )
 
 
+@router.get("{{ token_url }}")
+def read_session(
+    session: Annotated[{{ session_name }}, Depends(get_session)],
+) -> {{ session_name }}:
+    """Return the current authenticated session as JSON.
+
+    The shared ``get_session`` dep enforces authentication and
+    (when a :class:`ingot.auth.SessionStore` is wired in) the
+    deny-list, so no extra work is needed here -- a missing,
+    invalid, or revoked token yields HTTP 401 before this body
+    runs.
+    """
+    return session
+
+
 @router.post("{{ token_url }}/logout")
+{% if store_name -%}
+async def logout(
+    response: Response,
+    session: Annotated[{{ session_name }}, Depends(get_session)],
+) -> dict:
+    """Revoke the session server-side, then clear the transport.
+
+    Calls ``{{ store_name }}.revoke(session)`` before
+    :func:`ingot.auth.clear_session`; revoke-first means a failure
+    leaves the token non-verifying rather than zombie-valid.
+    """
+    await {{ store_name }}.revoke(session)
+    return clear_session(
+        response,
+        sources={{ sources }},
+{%- if "cookie" in sources %}
+        cookie_name="{{ cookie_name }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
+    )
+{%- else -%}
 def logout(response: Response) -> dict:
     """Clear the session.
 
@@ -76,3 +138,4 @@ def logout(response: Response) -> dict:
         cookie_samesite="{{ cookie_samesite }}",
 {%- endif %}
     )
+{%- endif %}

@@ -130,6 +130,11 @@ class AuthScaffold:
         session_module, session_name = auth.session_schema.rsplit(".", 1)
         validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
 
+        store_module: str | None = None
+        store_name: str | None = None
+        if auth.session_store is not None:
+            store_module, store_name = auth.session_store.rsplit(".", 1)
+
         yield StaticFile(
             path="auth/dependencies.py",
             template="init/auth_dependencies.py.j2",
@@ -141,6 +146,8 @@ class AuthScaffold:
                 "algorithm": auth.algorithm,
                 "token_url": auth.token_url,
                 "cookie_name": auth.cookie_name,
+                "store_module": store_module,
+                "store_name": store_name,
             },
         )
 
@@ -161,5 +168,7 @@ class AuthScaffold:
                 "cookie_name": auth.cookie_name,
                 "cookie_secure": auth.cookie_secure,
                 "cookie_samesite": auth.cookie_samesite,
+                "store_module": store_module,
+                "store_name": store_name,
             },
         )

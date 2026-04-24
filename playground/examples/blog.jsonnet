@@ -158,7 +158,7 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "slug", type: "str" },
           ],
         },
-        "delete",
+        { name: "delete" },
       ],
     },
   ],

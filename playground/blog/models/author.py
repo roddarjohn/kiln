@@ -2,29 +2,26 @@
 
 from __future__ import annotations
 
-import uuid
-from typing import TYPE_CHECKING
-
-from sqlalchemy import String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgcraft.plugins.pk import UUIDV4PKPlugin
+from sqlalchemy import Column, String, Text
 
 from db.base import Base
 
-if TYPE_CHECKING:
-    from blog.models.article import Article
-
 
 class Author(Base):
-    """Blog author with optional bio."""
+    """Blog author with optional bio.
+
+    The ``id`` column comes from :class:`UUIDV4PKPlugin` via
+    ``__pgcraft__``; other fields are raw ``Column`` so pgcraft's
+    ``_collect_columns`` picks them up.  ``mapped_column`` is
+    intentionally not used -- pgcraft's plugin pipeline only
+    recognises raw ``Column`` instances.
+    """
 
     __tablename__ = "authors"
     __table_args__ = {"schema": "public"}
+    __pgcraft__ = [UUIDV4PKPlugin()]
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False)
-    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    articles: Mapped[list[Article]] = relationship(
-        "Article", back_populates="author"
-    )
+    name = Column(String(120), nullable=False)
+    email = Column(String(254), unique=True, nullable=False)
+    bio = Column(Text, nullable=True)

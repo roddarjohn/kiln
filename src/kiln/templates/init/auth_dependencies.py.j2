@@ -4,6 +4,11 @@
 the configured sources ({{ sources | join(", ") }}).  Protected
 route handlers receive the validated session via
 ``Depends(get_session)``.
+{% if store_name %}
+A :class:`ingot.auth.SessionStore` is wired in, so ``get_session``
+also calls ``{{ store_name }}.is_revoked(session)`` after JWT
+verification and rejects revoked sessions with HTTP 401.
+{% endif %}
 {% endset %}
 {{ file_header("FastAPI session dependency", extra=_extra) }}
 
@@ -12,6 +17,9 @@ from __future__ import annotations
 from ingot.auth import session_auth
 
 from {{ session_module }} import {{ session_name }}
+{% if store_name %}
+from {{ store_module }} import {{ store_name }}
+{% endif %}
 
 get_session = session_auth(
     {{ session_name }},
@@ -23,6 +31,9 @@ get_session = session_auth(
 {%- endif %}
 {%- if "cookie" in sources %}
     cookie_name="{{ cookie_name }}",
+{%- endif %}
+{%- if store_name %}
+    store={{ store_name }},
 {%- endif %}
 )
 

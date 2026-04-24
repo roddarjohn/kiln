@@ -27,5 +27,10 @@
     cookie_name: std.get(opts, "cookie_name", "access_token"),
     cookie_secure: std.get(opts, "cookie_secure", true),
     cookie_samesite: std.get(opts, "cookie_samesite", "lax"),
+    // Optional dotted path to an ingot.auth.SessionStore instance.
+    // When set, the generated get_session dep enforces the store's
+    // deny-list and the generated logout calls store.revoke first.
+    [if std.objectHas(opts, "session_store") then "session_store"]:
+      opts.session_store,
   },
 }

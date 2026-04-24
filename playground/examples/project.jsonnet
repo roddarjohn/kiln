@@ -13,10 +13,14 @@ local db = import "kiln/db/databases.libsonnet";
   // Auth — shared across all apps.
   // -------------------------------------------------------------------------
   auth: auth.jwt({
+    credentials_schema: "myapp.auth.LoginCredentials",
+    session_schema: "myapp.auth.Session",
+    validate_fn: "myapp.auth.validate_login",
+    // Consumer-supplied ingot.auth.SessionStore.  Wires a
+    // deny-list into get_session and revoke into logout.
+    session_store: "myapp.revocation.revocations",
     secret_env: "JWT_SECRET",
     token_url: "/auth/token",
-    exclude_paths: ["/docs", "/openapi.json", "/health", "/metrics"],
-    verify_credentials_fn: "myapp.auth.verify_credentials",
   }),
 
   // -------------------------------------------------------------------------

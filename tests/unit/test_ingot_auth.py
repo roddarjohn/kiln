@@ -333,3 +333,109 @@ class TestClearSession:
         response = MagicMock()
         with pytest.raises(ValueError, match="cookie_name"):
             clear_session(response, sources=["cookie"])
+
+
+# -------------------------------------------------------------------
+# session_auth + SessionStore
+# -------------------------------------------------------------------
+
+
+class _FakeStore:
+    """Minimal :class:`ingot.auth.SessionStore` for tests.
+
+    Backs the deny-list with a plain ``set`` of ``jti`` values.
+    Tracks method call counts so we can assert the dep consulted
+    ``is_revoked`` even when the session wasn't in the deny-list.
+    """
+
+    def __init__(self, revoked: set[str] | None = None) -> None:
+        self.revoked: set[str] = set(revoked or ())
+        self.is_revoked_calls = 0
+        self.revoke_calls = 0
+
+    async def is_revoked(self, session: BaseModel) -> bool:
+        self.is_revoked_calls += 1
+        sub = session.model_dump().get("sub", "")
+        return sub in self.revoked
+
+    async def revoke(self, session: BaseModel) -> None:
+        self.revoke_calls += 1
+        sub = session.model_dump().get("sub", "")
+        self.revoked.add(sub)
+
+
+class TestSessionAuthStore:
+    """Deny-list hook on top of each transport mode."""
+
+    async def test_bearer_rejects_revoked(self) -> None:
+        store = _FakeStore(revoked={"alice"})
+        dep = session_auth(
+            Session,
+            ["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            store=store,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await dep(bearer=_token())
+        assert exc.value.status_code == 401
+        assert exc.value.detail == "Session revoked"
+        assert store.is_revoked_calls == 1
+
+    async def test_cookie_rejects_revoked(self) -> None:
+        store = _FakeStore(revoked={"alice"})
+        dep = session_auth(
+            Session,
+            ["cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            cookie_name="session",
+            store=store,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await dep(cookie=_token())
+        assert exc.value.status_code == 401
+
+    async def test_both_sources_rejects_revoked(self) -> None:
+        store = _FakeStore(revoked={"alice"})
+        dep = session_auth(
+            Session,
+            ["bearer", "cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            cookie_name="session",
+            store=store,
+        )
+        with pytest.raises(HTTPException):
+            await dep(bearer=_token(), cookie=None)
+
+    async def test_store_consulted_even_when_not_revoked(self) -> None:
+        """Deny-list check runs on every authenticated request."""
+        store = _FakeStore()
+        dep = session_auth(
+            Session,
+            ["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            store=store,
+        )
+        session = await dep(bearer=_token())
+        assert isinstance(session, Session)
+        assert store.is_revoked_calls == 1
+
+    async def test_no_store_skips_check(self) -> None:
+        """With ``store=None`` the dep never attempts a lookup."""
+        store = _FakeStore()
+        dep = session_auth(
+            Session,
+            ["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            store=None,
+        )
+        await dep(bearer=_token())
+        assert store.is_revoked_calls == 0
