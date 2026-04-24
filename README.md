@@ -1,6 +1,6 @@
 # kiln
 
-[![PyPI](https://img.shields.io/pypi/v/kiln)](https://pypi.org/project/kiln/)
+[![PyPI](https://img.shields.io/pypi/v/kiln-generator)](https://pypi.org/project/kiln-generator/)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://roddarjohn.github.io/kiln/)
 
 > **Pre-alpha** — kiln is under active development. APIs may change
@@ -13,7 +13,7 @@
 ## Install
 
 ```bash
-pip install kiln            # or: uv add kiln
+pip install kiln-generator  # or: uv add kiln-generator
 ```
 
 ## Quick start
