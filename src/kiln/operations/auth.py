@@ -46,24 +46,14 @@ class Auth:
     """
 
     def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
-        """Apply when auth is configured and any op opts in.
+        """Run whenever auth is configured.
 
-        Args:
-            ctx: Build context for the current resource.
-
-        Returns:
-            ``True`` when the project has ``auth`` set AND the
-            resource default is ``require_auth=True`` OR any
-            operation overrides with ``require_auth=True``.  The
-            latter matters when the resource default is ``False``
-            but an individual op opts in.
-
+        Per-op filtering happens in :meth:`build`; gating here on
+        "any op opts in" would duplicate that logic.  The cost of
+        an unconditional pass is one no-op loop over empty handler
+        lists when nothing ends up needing auth.
         """
-        if getattr(ctx.config, "auth", None) is None:
-            return False
-        if ctx.instance.require_auth:
-            return True
-        return any(op.require_auth for op in ctx.instance.operations)
+        return getattr(ctx.config, "auth", None) is not None
 
     def build(
         self,

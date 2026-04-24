@@ -78,6 +78,60 @@ class SessionStore(Protocol):
         ...
 
 
+def _unauthorized() -> HTTPException:
+    """Build a 401 for the "no valid token" case."""
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _revoked() -> HTTPException:
+    """Build a 401 for the "token was valid but deny-listed" case."""
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Session revoked",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+_ALLOWED_SOURCES: tuple[Source, ...] = ("bearer", "cookie")
+
+
+def _require_cookie_name(
+    sources: Sequence[Source], cookie_name: str | None
+) -> None:
+    """Raise ``ValueError`` if the cookie source is used without a name."""
+    if "cookie" in sources and cookie_name is None:
+        msg = "cookie_name is required when 'cookie' is in sources"
+        raise ValueError(msg)
+
+
+def _validate_session_args(
+    sources: Sequence[Source],
+    token_url: str | None,
+    cookie_name: str | None,
+) -> None:
+    """Validate the ``(sources, token_url, cookie_name)`` triple.
+
+    Factored out of :func:`session_auth` so its body stays focused
+    on building the dep.  The checks are runtime-only because the
+    :data:`Source` ``Literal`` keeps typed call sites safe already.
+    """
+    unknown = [s for s in sources if s not in _ALLOWED_SOURCES]
+    if unknown:
+        msg = f"unknown source(s): {sorted(set(unknown))}"
+        raise ValueError(msg)
+    if not sources:
+        msg = "sources must contain at least one of 'bearer' or 'cookie'"
+        raise ValueError(msg)
+    if "bearer" in sources and token_url is None:
+        msg = "token_url is required when 'bearer' is in sources"
+        raise ValueError(msg)
+    _require_cookie_name(sources, cookie_name)
+
+
 def encode_jwt(
     payload: dict[str, Any],
     *,
@@ -108,8 +162,7 @@ def encode_jwt(
         "exp",
         datetime.datetime.now(tz=datetime.UTC) + ttl,
     )
-    secret = os.environ[secret_env]
-    return jwt.encode(claims, secret, algorithm=algorithm)
+    return jwt.encode(claims, os.environ[secret_env], algorithm=algorithm)
 
 
 def decode_jwt(
@@ -139,129 +192,9 @@ def decode_jwt(
 
     """
     try:
-        secret = os.environ[secret_env]
-        return jwt.decode(token, secret, algorithms=[algorithm])
-
+        return jwt.decode(token, os.environ[secret_env], algorithms=[algorithm])
     except (jwt.InvalidTokenError, KeyError) as exc:
         raise _unauthorized() from exc
-
-
-def _unauthorized() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-_ALLOWED_SOURCES: frozenset[Source] = frozenset({"bearer", "cookie"})
-
-
-def _validate_session_sources(
-    sources: Sequence[Source],
-    *,
-    token_url: str | None,
-    cookie_name: str | None,
-) -> None:
-    """Validate ``sources`` arguments for :func:`session_auth`."""
-    if not sources:
-        msg = "sources must contain at least one of 'bearer' or 'cookie'"
-        raise ValueError(msg)
-    unknown = [s for s in sources if s not in _ALLOWED_SOURCES]
-    if unknown:
-        msg = f"unknown source(s): {sorted(set(unknown))}"
-        raise ValueError(msg)
-    if "bearer" in sources and token_url is None:
-        msg = "token_url is required when 'bearer' is in sources"
-        raise ValueError(msg)
-    if "cookie" in sources and cookie_name is None:
-        msg = "cookie_name is required when 'cookie' is in sources"
-        raise ValueError(msg)
-
-
-def _revoked() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Session revoked",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-async def _check_store[T: BaseModel](
-    session: T, store: SessionStore | None
-) -> T:
-    """Consult *store* and raise 401 if *session* is revoked.
-
-    Factored out because all three transport deps run the same
-    post-validation step.
-    """
-    if store is not None and await store.is_revoked(session):
-        raise _revoked()
-    return session
-
-
-def _bearer_dep[T: BaseModel](
-    schema: type[T],
-    *,
-    token_url: str,
-    secret_env: str,
-    algorithm: str,
-    store: SessionStore | None,
-) -> Callable[..., Awaitable[T]]:
-    oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
-
-    async def get_session(
-        bearer: Annotated[str | None, Depends(oauth)] = None,
-    ) -> T:
-        if bearer is None:
-            raise _unauthorized()
-        claims = decode_jwt(bearer, secret_env=secret_env, algorithm=algorithm)
-        return await _check_store(schema.model_validate(claims), store)
-
-    return get_session
-
-
-def _cookie_dep[T: BaseModel](
-    schema: type[T],
-    *,
-    cookie_name: str,
-    secret_env: str,
-    algorithm: str,
-    store: SessionStore | None,
-) -> Callable[..., Awaitable[T]]:
-    async def get_session(
-        cookie: Annotated[str | None, Cookie(alias=cookie_name)] = None,
-    ) -> T:
-        if cookie is None:
-            raise _unauthorized()
-        claims = decode_jwt(cookie, secret_env=secret_env, algorithm=algorithm)
-        return await _check_store(schema.model_validate(claims), store)
-
-    return get_session
-
-
-def _bearer_or_cookie_dep[T: BaseModel](
-    schema: type[T],
-    *,
-    token_url: str,
-    cookie_name: str,
-    secret_env: str,
-    algorithm: str,
-    store: SessionStore | None,
-) -> Callable[..., Awaitable[T]]:
-    oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
-
-    async def get_session(
-        bearer: Annotated[str | None, Depends(oauth)] = None,
-        cookie: Annotated[str | None, Cookie(alias=cookie_name)] = None,
-    ) -> T:
-        token = bearer or cookie
-        if token is None:
-            raise _unauthorized()
-        claims = decode_jwt(token, secret_env=secret_env, algorithm=algorithm)
-        return await _check_store(schema.model_validate(claims), store)
-
-    return get_session
 
 
 def session_auth[T: BaseModel](
@@ -318,41 +251,49 @@ def session_auth[T: BaseModel](
             configured source.
 
     """
-    _validate_session_sources(
-        sources, token_url=token_url, cookie_name=cookie_name
-    )
-
+    _validate_session_args(sources, token_url, cookie_name)
     use_bearer = "bearer" in sources
     use_cookie = "cookie" in sources
 
+    async def resolve(token: str | None) -> T:
+        """Decode, validate, deny-list check — or raise 401."""
+        if token is None:
+            raise _unauthorized()
+        claims = decode_jwt(token, secret_env=secret_env, algorithm=algorithm)
+        session = schema.model_validate(claims)
+        if store is not None and await store.is_revoked(session):
+            raise _revoked()
+        return session
+
     if use_bearer and use_cookie:
-        assert token_url is not None  # noqa: S101 -- _validate guarantees
+        assert token_url is not None  # noqa: S101 -- validated above
         assert cookie_name is not None  # noqa: S101
-        return _bearer_or_cookie_dep(
-            schema,
-            token_url=token_url,
-            cookie_name=cookie_name,
-            secret_env=secret_env,
-            algorithm=algorithm,
-            store=store,
-        )
-    if use_bearer:
+        oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
+
+        async def get_session(
+            bearer: Annotated[str | None, Depends(oauth)] = None,
+            cookie: Annotated[str | None, Cookie(alias=cookie_name)] = None,
+        ) -> T:
+            return await resolve(bearer or cookie)
+
+    elif use_bearer:
         assert token_url is not None  # noqa: S101
-        return _bearer_dep(
-            schema,
-            token_url=token_url,
-            secret_env=secret_env,
-            algorithm=algorithm,
-            store=store,
-        )
-    assert cookie_name is not None  # noqa: S101
-    return _cookie_dep(
-        schema,
-        cookie_name=cookie_name,
-        secret_env=secret_env,
-        algorithm=algorithm,
-        store=store,
-    )
+        oauth = OAuth2PasswordBearer(tokenUrl=token_url, auto_error=False)
+
+        async def get_session(  # type: ignore[misc]
+            bearer: Annotated[str | None, Depends(oauth)] = None,
+        ) -> T:
+            return await resolve(bearer)
+
+    else:
+        assert cookie_name is not None  # noqa: S101
+
+        async def get_session(  # type: ignore[misc]
+            cookie: Annotated[str | None, Cookie(alias=cookie_name)] = None,
+        ) -> T:
+            return await resolve(cookie)
+
+    return get_session
 
 
 def issue_session(
@@ -404,10 +345,7 @@ def issue_session(
     if not sources:
         msg = "sources must be non-empty"
         raise ValueError(msg)
-
-    if "cookie" in sources and cookie_name is None:
-        msg = "cookie_name is required when 'cookie' is in sources"
-        raise ValueError(msg)
+    _require_cookie_name(sources, cookie_name)
 
     if session is None:
         raise HTTPException(
@@ -435,7 +373,6 @@ def issue_session(
 
     if "bearer" in sources:
         return {"access_token": token, "token_type": "bearer"}
-
     return {"ok": True}
 
 
@@ -474,16 +411,12 @@ def clear_session(
             ``cookie_name``.
 
     """
+    _require_cookie_name(sources, cookie_name)
     if "cookie" in sources:
-        if cookie_name is None:
-            msg = "cookie_name is required when 'cookie' is in sources"
-            raise ValueError(msg)
-
         response.delete_cookie(
-            key=cookie_name,
+            key=cookie_name,  # type: ignore[arg-type]
             httponly=True,
             secure=cookie_secure,
             samesite=cookie_samesite,
         )
-
     return {"ok": True}
