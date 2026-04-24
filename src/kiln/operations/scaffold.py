@@ -1,16 +1,19 @@
-"""Scaffold operations: db sessions and auth dependencies.
+"""Scaffold operations: db sessions and the auth token endpoint.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
 infrastructure files.  Split into two operations:
 
 * :class:`Scaffold` -- always runs; emits the ``db/`` tree.
 * :class:`AuthScaffold` -- runs only when the project config has
-  ``auth`` set, via :meth:`AuthScaffold.when`.
+  ``auth`` set, via :meth:`AuthScaffold.when`.  Emits the generated
+  ``POST {token_url}`` route (and, for cookie transport, a logout
+  route).  The consumer's ``get_current_user`` is *not* scaffolded;
+  its dotted path is imported directly at use-sites.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -21,7 +24,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import AuthConfig, ProjectConfig
+    from kiln.config.schema import ProjectConfig
 
 
 @operation("scaffold", scope="project")
@@ -72,7 +75,15 @@ class Scaffold:
 
 @operation("auth_scaffold", scope="project")
 class AuthScaffold:
-    """Generate ``auth/`` infrastructure files."""
+    """Generate the token-issuance route.
+
+    Emits a single :class:`StaticFile` at ``auth/router.py`` whose
+    ``POST {token_url}`` handler calls the consumer's
+    :attr:`~kiln.config.schema.AuthConfig.verify_credentials_fn`
+    and returns either an OAuth2 JSON body (``type == "jwt"``) or
+    sets an ``httpOnly`` cookie (``type == "cookie"``, which also
+    gets a matching logout route).
+    """
 
     def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
         """Apply only when the project config has ``auth`` set.
@@ -91,7 +102,7 @@ class AuthScaffold:
         ctx: BuildContext[ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
-        """Produce static files for auth dependencies and router.
+        """Produce the auth router static file.
 
         Args:
             ctx: Build context with project config.  ``when`` has
@@ -99,12 +110,11 @@ class AuthScaffold:
             _options: Unused (no options).
 
         Yields:
-            :class:`StaticFile` for the ``auth/`` package, the
-            dependencies module, and the JWT router (only when
-            using the default flow).
+            A single :class:`StaticFile` for ``auth/router.py``.
 
         """
-        auth = cast("AuthConfig", ctx.instance.auth)
+        auth = ctx.instance.auth
+        assert auth is not None  # noqa: S101 -- guaranteed by when()
 
         yield StaticFile(
             path="auth/__init__.py",
@@ -112,40 +122,19 @@ class AuthScaffold:
             context={},
         )
 
-        gcu_module = None
-        gcu_name = None
-        if auth.get_current_user_fn:
-            gcu_module, gcu_name = auth.get_current_user_fn.rsplit(".", 1)
-
+        vcf_module, vcf_name = auth.verify_credentials_fn.rsplit(".", 1)
         yield StaticFile(
-            path="auth/dependencies.py",
-            template="init/auth_dependencies.py.j2",
+            path="auth/router.py",
+            template="init/auth_router.py.j2",
             context={
-                "gcu_module": gcu_module,
-                "gcu_name": gcu_name,
+                "vcf_module": vcf_module,
+                "vcf_name": vcf_name,
                 "transport": auth.type,
                 "secret_env": auth.secret_env,
                 "algorithm": auth.algorithm,
                 "token_url": auth.token_url,
                 "cookie_name": auth.cookie_name,
+                "cookie_secure": auth.cookie_secure,
+                "cookie_samesite": auth.cookie_samesite,
             },
         )
-
-        if auth.get_current_user_fn is None:
-            vcf = cast("str", auth.verify_credentials_fn)
-            vcf_module, vcf_name = vcf.rsplit(".", 1)
-            yield StaticFile(
-                path="auth/router.py",
-                template="init/auth_router.py.j2",
-                context={
-                    "vcf_module": vcf_module,
-                    "vcf_name": vcf_name,
-                    "transport": auth.type,
-                    "secret_env": auth.secret_env,
-                    "algorithm": auth.algorithm,
-                    "token_url": auth.token_url,
-                    "cookie_name": auth.cookie_name,
-                    "cookie_secure": auth.cookie_secure,
-                    "cookie_samesite": auth.cookie_samesite,
-                },
-            )

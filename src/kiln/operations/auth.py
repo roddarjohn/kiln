@@ -19,9 +19,8 @@ it produces no new outputs, only mutates earlier ones.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from foundry.naming import prefix_import
 from foundry.operation import operation
 from kiln.operations.types import RouteHandler, TestCase
 
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import AuthConfig, ResourceConfig
 
 
 @operation("auth", scope="resource", after_children=True)
@@ -76,17 +75,18 @@ class Auth:
             output and emits no new objects.
 
         """
-        auth_mod = prefix_import(
-            ctx.package_prefix,
-            "auth",
-            "dependencies",
-        )
+        auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
+        gcu_module, gcu_name = auth_cfg.get_current_user_fn.rsplit(".", 1)
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(
                 "current_user: Annotated[dict, Depends(get_current_user)],"
             )
-            handler.extra_imports.append((auth_mod, "get_current_user"))
+            handler.extra_imports.append(
+                (gcu_module, f"{gcu_name} as get_current_user")
+                if gcu_name != "get_current_user"
+                else (gcu_module, "get_current_user")
+            )
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
             test.requires_auth = True

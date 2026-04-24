@@ -51,24 +51,20 @@ def test_project_config_apps_mode_untouched():
 
 def test_auth_config_defaults():
     auth = AuthConfig(
+        get_current_user_fn="myapp.auth.get_current_user",
         verify_credentials_fn="myapp.auth.verify",
     )
     assert auth.type == "jwt"
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
-    assert "/docs" in auth.exclude_paths
+    assert auth.token_url == "/auth/token"  # noqa: S105
 
 
-def test_auth_config_verify_credentials_required():
+def test_auth_config_both_fns_required():
+    with pytest.raises(ValueError, match="get_current_user_fn"):
+        AuthConfig(verify_credentials_fn="myapp.auth.verify")
     with pytest.raises(ValueError, match="verify_credentials_fn"):
-        AuthConfig()
-
-
-def test_auth_config_verify_not_required_with_custom_auth():
-    auth = AuthConfig(
-        get_current_user_fn="myapp.auth.get_user",
-    )
-    assert auth.verify_credentials_fn is None
+        AuthConfig(get_current_user_fn="myapp.auth.get_current_user")
 
 
 def test_database_config_session_names():

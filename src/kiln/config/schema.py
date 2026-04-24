@@ -40,27 +40,55 @@ generated Pydantic schemas and route handlers.
 
 
 class AuthConfig(BaseModel):
-    """JWT authentication configuration.
+    """Authentication configuration.
 
-    Both transports use the same signed JWT; only the carrier
-    differs:
+    kiln does not scaffold an auth module — the consumer owns that.
+    This config points kiln at the consumer's functions and tells
+    it how to shape the generated ``POST {token_url}`` endpoint.
 
-    * ``type: "jwt"`` -- token in the ``Authorization: Bearer``
-      header, wired through :class:`~fastapi.security.OAuth2PasswordBearer`.
-    * ``type: "cookie"`` -- token in an ``httpOnly`` cookie named by
-      :attr:`cookie_name`.  The ``cookie_*`` fields only apply in
-      this mode.
+    The consumer provides:
+
+    * :attr:`get_current_user_fn` -- a FastAPI dependency that
+      validates the incoming request and returns the user.  Every
+      protected route gets ``Depends(...)`` on this function.  A
+      thin implementation using :mod:`ingot.auth` looks like::
+
+          # myapp/auth.py
+          from ingot.auth import bearer_auth
+          get_current_user = bearer_auth(
+              token_url="/auth/token",
+              secret_env="JWT_SECRET",
+              algorithm="HS256",
+          )
+
+    * :attr:`verify_credentials_fn` -- business logic that checks
+      a username/password and returns the JWT payload on success
+      or ``None`` on failure.  kiln generates the HTTP route that
+      calls this function and mints the token.
+
+    Token-endpoint transport:
+
+    * ``type: "jwt"`` -- the endpoint returns an OAuth2 JSON body
+      (``{"access_token": ..., "token_type": "bearer"}``).
+    * ``type: "cookie"`` -- the endpoint sets an ``httpOnly`` cookie
+      named :attr:`cookie_name` and a ``POST {token_url}/logout``
+      route clears it.
     """
+
+    get_current_user_fn: str
+    """Dotted path to the consumer's ``get_current_user`` FastAPI
+    dependency, e.g. ``"myapp.auth.get_current_user"``."""
+
+    verify_credentials_fn: str
+    """Dotted path to the consumer's credential-verification function,
+    e.g. ``"myapp.auth.verify_credentials"``.  It must accept
+    ``(username: str, password: str)`` and return a ``dict`` (the
+    JWT payload) on success or ``None`` on failure."""
 
     type: Literal["jwt", "cookie"] = "jwt"
     secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
-    exclude_paths: list[str] = [
-        "/docs",
-        "/openapi.json",
-        "/health",
-    ]
     cookie_name: str = "access_token"
     """Name of the cookie carrying the JWT when ``type == "cookie"``."""
     cookie_secure: bool = True
@@ -69,36 +97,6 @@ class AuthConfig(BaseModel):
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     """SameSite attribute applied to the auth cookie.  ``"none"``
     requires ``cookie_secure=True`` per RFC 6265bis."""
-    get_current_user_fn: str | None = None
-    """Dotted import path to a custom ``get_current_user`` dependency,
-    e.g. ``"myapp.auth.custom.get_current_user"``.  When set, the
-    generated ``auth/dependencies.py`` re-exports this function instead
-    of containing the default JWT implementation.
-    """
-    verify_credentials_fn: str | None = None
-    """Dotted import path to a credential-verification function,
-    e.g. ``"myapp.auth.verify_credentials"``.  The function must
-    accept ``(username: str, password: str)`` and return a ``dict``
-    (the JWT payload) on success or ``None`` on failure.
-
-    Required when using the default JWT auth flow
-    (``get_current_user_fn`` is not set).
-    """
-
-    @model_validator(mode="after")
-    def _require_verify_credentials(self) -> AuthConfig:
-        if (
-            self.get_current_user_fn is None
-            and self.verify_credentials_fn is None
-        ):
-            msg = (
-                "verify_credentials_fn is required when using "
-                "the default JWT auth flow "
-                "(get_current_user_fn is not set)"
-            )
-            raise ValueError(msg)
-
-        return self
 
     @model_validator(mode="after")
     def _samesite_none_requires_secure(self) -> AuthConfig:
