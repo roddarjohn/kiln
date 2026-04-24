@@ -13,6 +13,17 @@ NESTED: Literal["nested"] = "nested"
 """Sentinel value for :attr:`FieldSpec.type` that marks a field as a
 nested dump of a related model rather than a scalar."""
 
+
+LoaderStrategy = Literal["selectin", "joined", "subquery"]
+"""SQLAlchemy eager-loading strategy for a nested field.  Generated
+handlers translate this to the matching ``sqlalchemy.orm`` loader
+(``selectinload`` / ``joinedload`` / ``subqueryload``) on the
+``select(...)`` statement so the related row is available when the
+serializer reads ``obj.{field}``."""
+
+
+_DEFAULT_LOAD: LoaderStrategy = "selectin"
+
 FieldType = Literal[
     "uuid",
     "str",
@@ -142,6 +153,15 @@ class FieldSpec(BaseModel):
     many: bool = False
     """``True`` when the relationship returns a collection (list).
     Only meaningful when ``type == "nested"``."""
+    load: LoaderStrategy = _DEFAULT_LOAD
+    """Eager-loading strategy applied to this relationship in the
+    generated ``select(...)`` statement.  Defaults to ``"selectin"``
+    which issues one additional SELECT per relationship (safe for
+    both scalar and collection relationships and avoids N+1).  Use
+    ``"joined"`` for a single-query JOIN (better for one-to-one /
+    many-to-one scalars) or ``"subquery"`` for an older-style
+    correlated subquery load.  Only meaningful when
+    ``type == "nested"``."""
 
     @model_validator(mode="after")
     def _validate_nested(self) -> FieldSpec:
@@ -165,6 +185,12 @@ class FieldSpec(BaseModel):
             if self.many:
                 msg = (
                     f"Field {self.name!r}: `many` is only meaningful "
+                    f'when `type: "nested"`.'
+                )
+                raise ValueError(msg)
+            if self.load != _DEFAULT_LOAD:
+                msg = (
+                    f"Field {self.name!r}: `load` is only meaningful "
                     f'when `type: "nested"`.'
                 )
                 raise ValueError(msg)

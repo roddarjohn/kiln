@@ -284,6 +284,35 @@ def test_field_spec_nested_many_allowed():
     assert f.many is True
 
 
+def test_field_spec_nested_load_defaults_to_selectin():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+    )
+    assert f.load == "selectin"
+
+
+def test_field_spec_nested_load_override():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+        load="joined",
+    )
+    assert f.load == "joined"
+
+
+def test_field_spec_load_on_scalar_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="`load` is only meaningful"):
+        FieldSpec(name="title", type="str", load="joined")
+
+
 # ---------------------------------------------------------------------------
 # Loader tests
 # ---------------------------------------------------------------------------

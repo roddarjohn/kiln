@@ -35,11 +35,17 @@
   // class.  ``fields`` is the sub-field list (can itself contain
   // further nested entries).  Pass ``many=true`` when the
   // relationship returns a collection.
-  nested(name, model, fields, many=false):: {
+  //
+  // ``load`` picks the SQLAlchemy eager-loading strategy for the
+  // relationship (``"selectin"`` by default — safe for both scalar
+  // and collection relationships; ``"joined"`` for single-query
+  // JOINs on one-to-one / many-to-one).
+  nested(name, model, fields, many=false, load="selectin"):: {
     name: name,
     type: "nested",
     model: model,
     fields: fields,
     [if many then "many"]: true,
+    [if load != "selectin" then "load"]: load,
   },
 }

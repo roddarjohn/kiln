@@ -145,8 +145,9 @@ class List:
                 "default_sort_dir": "asc",
                 "max_page_size": 100,
                 "cursor_field": pk_name,
+                "load_options": dump.load_options,
             },
-            extra_imports=[("sqlalchemy", "select")],
+            extra_imports=[("sqlalchemy", "select"), *dump.load_imports],
         )
 
         test_case = TestCase(

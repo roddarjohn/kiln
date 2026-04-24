@@ -81,7 +81,12 @@ class Get:
             return_type=dump.main_schema.name,
             doc=f"Get a {model.pascal} by {resource.pk}.",
             body_template="fastapi/ops/get.py.j2",
-            extra_imports=[("sqlalchemy", "select"), *utils_imports()],
+            body_context={"load_options": dump.load_options},
+            extra_imports=[
+                ("sqlalchemy", "select"),
+                *utils_imports(),
+                *dump.load_imports,
+            ],
         )
 
         yield TestCase(

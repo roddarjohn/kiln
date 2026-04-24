@@ -10,13 +10,14 @@
 //   - Actions with params
 
 local resource = import "kiln/resources/presets.libsonnet";
+local fields = import "kiln/fields.libsonnet";
 
 {
   version: "1",
   module: "blog",
 
   resources: [
-    // Authors: read-only (get + list)
+    // Authors: read-only (get + list), with nested one-to-many articles dump
     {
       model: "blog.models.Author",
       pk: "id",
@@ -31,6 +32,14 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "name", type: "str" },
             { name: "email", type: "email" },
             { name: "bio", type: "str" },
+            // Nested many=true: dump each Article as a summary under
+            // the author.  selectinload is the default — one extra
+            // SELECT, avoids N+1.
+            fields.nested("articles", "blog.models.Article", [
+              { name: "id", type: "uuid" },
+              { name: "title", type: "str" },
+              { name: "slug", type: "str" },
+            ], many=true),
           ],
         },
         {
@@ -61,6 +70,13 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "body", type: "str" },
             { name: "published", type: "bool" },
             { name: "author_id", type: "uuid" },
+            // Nested many-to-one: inline the author as a summary.
+            // ``load="joined"`` emits a single JOIN (better than an
+            // extra SELECT for a one-to-one scalar relationship).
+            fields.nested("author", "blog.models.Author", [
+              { name: "id", type: "uuid" },
+              { name: "name", type: "str" },
+            ], load="joined"),
           ],
         },
         {
@@ -70,6 +86,10 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "title", type: "str" },
             { name: "slug", type: "str" },
             { name: "published", type: "bool" },
+            fields.nested("author", "blog.models.Author", [
+              { name: "id", type: "uuid" },
+              { name: "name", type: "str" },
+            ], load="joined"),
           ],
           // Filtering: search by title and published status
           filters: {

@@ -32,7 +32,18 @@ from kiln.config.schema import (
     PYTHON_TYPES,
     FieldSpec,
     FieldType,
+    LoaderStrategy,
 )
+
+_LOADER_FN: dict[LoaderStrategy, str] = {
+    "selectin": "selectinload",
+    "joined": "joinedload",
+    "subquery": "subqueryload",
+}
+"""Map of config load-strategy tokens to the ``sqlalchemy.orm``
+function name that implements them.  ``raiseload`` / ``noload`` are
+deliberately omitted: a field the user has configured for nested
+dumping must be loadable."""
 
 
 @dataclass
@@ -235,12 +246,22 @@ class _DumpOutputs:
     entry in ``nested_schemas`` and ``nested_serializers`` — the
     nested lists are ordered deepest-first so classes are defined
     before the parent schema that references them.
+
+    ``load_options`` carries the SQLAlchemy loader-chain strings the
+    handler's ``select(...)`` needs (e.g.
+    ``"selectinload(Task.project).selectinload(Project.owner)"``)
+    so nested relationships are eagerly loaded before the serializer
+    reads them.  ``load_imports`` are the ``(module, name)`` pairs
+    those chains reference — loader functions plus any related model
+    classes — to be added to the handler's ``extra_imports``.
     """
 
     main_schema: SchemaClass
     main_serializer: SerializerFn
     nested_schemas: list[SchemaClass]
     nested_serializers: list[SerializerFn]
+    load_options: list[str]
+    load_imports: list[tuple[str, str]]
 
 
 def _construct_dump(
@@ -280,11 +301,14 @@ def _construct_dump(
         schema_name=main_schema.name,
         fields=expanded,
     )
+    load_options, load_imports = _build_load_chains(fields, model.pascal)
     return _DumpOutputs(
         main_schema=main_schema,
         main_serializer=main_serializer,
         nested_schemas=nested_schemas,
         nested_serializers=nested_sers,
+        load_options=load_options,
+        load_imports=load_imports,
     )
 
 
@@ -373,3 +397,59 @@ def _expand_field_specs(
         )
 
     return fields, out_schemas, out_sers
+
+
+def _build_load_chains(
+    specs: list[FieldSpec],
+    parent_pascal: str,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Build eager-load chain strings for every nested field in ``specs``.
+
+    Returns ``(chains, imports)``:
+
+    * ``chains`` is a list of expressions to drop into
+      ``select(...).options(...)``.  One chain is produced per leaf
+      nested path — a chain to an intermediate would be redundant
+      since ``selectinload(A.b).selectinload(B.c)`` already loads
+      ``A.b``.
+    * ``imports`` are ``(module, class_or_fn)`` pairs the chain
+      strings reference: the loader functions themselves and any
+      related model classes used at intermediate levels.  The parent
+      model class is intentionally omitted — the caller already
+      imports it for its own ``select(...)`` statement.
+
+    Load strategy mixes per level: ``"joined"`` on the outer and
+    ``"selectin"`` on the inner compose as
+    ``joinedload(A.b).selectinload(B.c)``.
+    """
+    chains: list[str] = []
+    imports: list[tuple[str, str]] = []
+    for fs in specs:
+        if not fs.is_nested:
+            continue
+        fs_model = cast("str", fs.model)
+        fs_fields = cast("list[FieldSpec]", fs.fields)
+
+        loader_fn = _LOADER_FN[fs.load]
+        imports.append(("sqlalchemy.orm", loader_fn))
+
+        head = f"{loader_fn}({parent_pascal}.{fs.name})"
+
+        related_module, related_class = split_dotted_class(fs_model)
+        related_pascal = Name(related_class).pascal
+
+        has_nested_child = any(child.is_nested for child in fs_fields)
+        if not has_nested_child:
+            chains.append(head)
+            continue
+
+        # Intermediate level: the related model class is referenced in
+        # the inner chain segments, so it has to be imported.
+        imports.append((related_module, related_pascal))
+        inner_chains, inner_imports = _build_load_chains(
+            fs_fields, related_pascal
+        )
+        imports.extend(inner_imports)
+        chains.extend(f"{head}.{inner}" for inner in inner_chains)
+
+    return chains, imports
