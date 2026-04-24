@@ -301,8 +301,8 @@ def decode_jwt(
         raise _unauthorized() from exc
 
 
-def session_auth[T: BaseModel](  # noqa: C901 -- FastAPI needs static per-combo signatures
-    schema: type[T],
+def session_auth[SessionT: BaseModel](
+    schema: type[SessionT],
     sources: Sequence[Source],
     *,
     secret_env: str,
@@ -310,13 +310,15 @@ def session_auth[T: BaseModel](  # noqa: C901 -- FastAPI needs static per-combo 
     token_url: str | None = None,
     cookie_name: str | None = None,
     store: SessionStore | None = None,
-) -> Callable[..., Awaitable[T]]:
+) -> Callable[..., Awaitable[SessionT]]:
     """Build a FastAPI dep that yields a validated *schema* instance.
 
-    The returned callable takes one parameter per configured
-    transport; the first token that's present wins.  Claims parse
-    through :meth:`~pydantic.BaseModel.model_validate` so handlers
-    get the full model, not a raw dict.
+    The returned callable takes one parameter per supported
+    transport; configured sources plug in their real extractors,
+    unconfigured ones get :func:`_no_token` (returns ``None``).
+    The first non-``None`` token wins.  Claims parse through
+    :meth:`~pydantic.BaseModel.model_validate` so handlers get the
+    full model, not a raw dict.
 
     *store*, when supplied, turns every authenticated request into
     a deny-list check -- avoids a wrapper dep on the consumer side.
@@ -328,15 +330,16 @@ def session_auth[T: BaseModel](  # noqa: C901 -- FastAPI needs static per-combo 
         msg = "token_url is required when 'bearer' is in sources"
         raise ValueError(msg)
 
-    bearer_ext: Callable[..., Awaitable[str | None]] | None = None
-    cookie_ext: Callable[..., Awaitable[str | None]] | None = None
-    for t in transports:
-        if isinstance(t, _BearerTransport):
-            bearer_ext = t.extract_dep()
-        else:
-            cookie_ext = t.extract_dep()
+    bearer_transport = transports.get("bearer")
+    cookie_transport = transports.get("cookie")
+    bearer_ext = (
+        bearer_transport.extract_dep() if bearer_transport else _no_token
+    )
+    cookie_ext = (
+        cookie_transport.extract_dep() if cookie_transport else _no_token
+    )
 
-    async def resolve(token: str | None) -> T:
+    async def resolve(token: str | None) -> SessionT:
         if token is None:
             raise _unauthorized()
         claims = decode_jwt(token, secret_env=secret_env, algorithm=algorithm)
@@ -345,31 +348,11 @@ def session_auth[T: BaseModel](  # noqa: C901 -- FastAPI needs static per-combo 
             raise _revoked()
         return session
 
-    # The three signatures below differ only in which transport
-    # parameters FastAPI should inject; the bodies all funnel
-    # through ``resolve``.
-    if bearer_ext is not None and cookie_ext is not None:
-
-        async def get_session(
-            bearer: Annotated[str | None, Depends(bearer_ext)] = None,
-            cookie: Annotated[str | None, Depends(cookie_ext)] = None,
-        ) -> T:
-            return await resolve(bearer or cookie)
-
-    elif bearer_ext is not None:
-
-        async def get_session(  # type: ignore[misc]
-            bearer: Annotated[str | None, Depends(bearer_ext)] = None,
-        ) -> T:
-            return await resolve(bearer)
-
-    else:
-        assert cookie_ext is not None  # noqa: S101 -- _build_transports guarantees
-
-        async def get_session(  # type: ignore[misc]
-            cookie: Annotated[str | None, Depends(cookie_ext)] = None,
-        ) -> T:
-            return await resolve(cookie)
+    async def get_session(
+        bearer: Annotated[str | None, Depends(bearer_ext)] = None,
+        cookie: Annotated[str | None, Depends(cookie_ext)] = None,
+    ) -> SessionT:
+        return await resolve(bearer or cookie)
 
     return get_session
 
