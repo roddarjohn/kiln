@@ -541,6 +541,20 @@ class TestCrudHelpers:
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
 
+    def test_field_dicts_rejects_nested(self):
+        import pytest
+
+        fields = [
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+            ),
+        ]
+        with pytest.raises(ValueError, match="only supported on read"):
+            _field_dicts(fields)
+
 
 # -------------------------------------------------------------------
 # Get
@@ -611,6 +625,118 @@ class TestGet:
         assert handler.path == "/{user_id}"
         assert handler.params[0].name == "user_id"
         assert handler.params[0].annotation == "int"
+
+    def test_get_with_nested_field_emits_sub_schema_and_serializer(self):
+        """A nested field adds its own schema + serializer alongside main."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(name="title", type="str"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(name="name", type="str"),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        # Parent schema's project field references the nested class name.
+        parent = schemas[1]
+        project_field = next(f for f in parent.fields if f.name == "project")
+        assert project_field.py_type == "TaskResourceProjectNested"
+        assert project_field.nested_serializer == (
+            "to_task_resource_project_nested"
+        )
+        assert project_field.many is False
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+        nested_ser = sers[0]
+        assert nested_ser.model_name == "Project"
+        assert nested_ser.model_module == "blog.models"
+        assert nested_ser.schema_name == "TaskResourceProjectNested"
+        assert [f.name for f in nested_ser.fields] == ["id", "name"]
+
+        main_ser = sers[1]
+        assert main_ser.model_module == "blog.models"
+        assert main_ser.model_name == "Task"
+
+    def test_get_with_nested_many_wraps_in_list(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="articles",
+                type="nested",
+                model="blog.models.Article",
+                fields=[FieldSpec(name="id", type="uuid")],
+                many=True,
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Author")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        parent = next(
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.name == "AuthorResource"
+        )
+        articles = next(f for f in parent.fields if f.name == "articles")
+        assert articles.py_type == "list[AuthorResourceArticlesNested]"
+        assert articles.many is True
+
+    def test_get_with_nested_in_nested(self):
+        """Nested fields recurse: names accumulate down the path."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[FieldSpec(name="name", type="str")],
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        # Deepest-first: owner, then project, then parent.
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectOwnerNested",
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_owner_nested",
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
 
 
 # -------------------------------------------------------------------
@@ -745,6 +871,39 @@ class TestList:
         assert tests[0].method == "post"
         assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
+
+    def test_list_with_nested_field_emits_scoped_sub_schema(self):
+        """List-item nested schema is scoped under ListItem, not Resource."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="name", type="str")],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=fields)))
+
+        schemas = [
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.body_template is None
+        ]
+        # Scoping under the list item keeps names distinct from a Get
+        # op's nested schemas on the same resource.
+        assert [s.name for s in schemas] == [
+            "TaskListItemProjectNested",
+            "TaskListItem",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_list_item_project_nested",
+            "to_task_list_item",
+        ]
 
 
 class TestFilter:

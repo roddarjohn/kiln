@@ -333,7 +333,7 @@ def _serializer_fragment(
     ser_path = f"{info.app}/serializers/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
-    imports.add_from(info.model_module, info.model.pascal)
+    imports.add_from(ser.model_module, ser.model_name)
     schema_mod = prefix_import(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
@@ -352,7 +352,14 @@ def _serializer_fragment(
             "function_name": ser.function_name,
             "model_name": ser.model_name,
             "schema_name": ser.schema_name,
-            "fields": [{"name": f.name} for f in ser.fields],
+            "fields": [
+                {
+                    "name": f.name,
+                    "nested_serializer": f.nested_serializer,
+                    "many": f.many,
+                }
+                for f in ser.fields
+            ],
         },
         imports=imports,
     )
@@ -376,6 +383,12 @@ def _serializer_fragment(
             imports=test_imports,
         )
         for f in ser.fields:
+            # Nested fields don't roundtrip through the naive mock-row
+            # serializer test (the test compares ORM attrs to schema
+            # attrs directly; nested fields go through a sub-serializer
+            # and produce a different object).
+            if f.nested_serializer is not None:
+                continue
             yield SnippetFragment(
                 path=test_path,
                 slot="serializer_fields",

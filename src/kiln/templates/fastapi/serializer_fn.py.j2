@@ -2,6 +2,12 @@ def {{ function_name }}(obj: {{ model_name }}) -> {{ schema_name }}:
     """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""
     return {{ schema_name }}(
 {% for f in fields %}
+{% if f.nested_serializer and f.many %}
+        {{ f.name }}=[{{ f.nested_serializer }}(x) for x in obj.{{ f.name }}],
+{% elif f.nested_serializer %}
+        {{ f.name }}={{ f.nested_serializer }}(obj.{{ f.name }}),
+{% else %}
         {{ f.name }}=obj.{{ f.name }},
+{% endif %}
 {% endfor %}
     )

@@ -398,6 +398,7 @@ def test_serializer_fragment_without_tests(registry):
     ser = SerializerFn(
         function_name="to_post_resource",
         model_name="Post",
+        model_module="myapp.models",
         schema_name="PostResource",
         fields=[Field(name="id", py_type="int")],
     )
@@ -410,6 +411,7 @@ def test_serializer_fragment_with_tests(registry):
     ser = SerializerFn(
         function_name="to_post_resource",
         model_name="Post",
+        model_module="myapp.models",
         schema_name="PostResource",
         fields=[Field(name="id", py_type="int")],
     )
@@ -449,6 +451,7 @@ def test_serializer_fragment_list_item_skips_test_file(registry):
     ser = SerializerFn(
         function_name="to_post_list_item",
         model_name="Post",
+        model_module="myapp.models",
         schema_name="PostListItem",
         fields=[Field(name="id", py_type="int")],
     )

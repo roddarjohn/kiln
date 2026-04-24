@@ -9,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from foundry.config import FoundryConfig
 from foundry.scope import Scoped
 
+NESTED: Literal["nested"] = "nested"
+"""Sentinel value for :attr:`FieldSpec.type` that marks a field as a
+nested dump of a related model rather than a scalar."""
+
 FieldType = Literal[
     "uuid",
     "str",
@@ -112,10 +116,64 @@ class DatabaseConfig(BaseModel):
 
 
 class FieldSpec(BaseModel):
-    """A named, typed field — used in operation schemas and action params."""
+    """A named, typed field — used in operation schemas and action params.
+
+    Most fields are scalars: ``{name, type}`` where ``type`` is one of
+    the :data:`FieldType` values.  A field can also be *nested* — a
+    dump of a related model — by setting ``type: "nested"`` and
+    supplying ``model`` (dotted import path to the related
+    SQLAlchemy class) and ``fields`` (the sub-field list).  Set
+    ``many=True`` when the relationship returns a collection.
+
+    Nested fields are only meaningful on read-op dumps (``get``,
+    ``list``).  Write-op request schemas (``create`` / ``update``)
+    don't traverse them today — a validator enforces that.
+    """
 
     name: str
-    type: FieldType
+    type: FieldType | Literal["nested"]
+    model: str | None = None
+    """Dotted import path of the related SQLAlchemy model, e.g.
+    ``"blog.models.Project"``.  Required when ``type == "nested"``;
+    must be omitted otherwise."""
+    fields: list[FieldSpec] | None = None
+    """Sub-field list for a nested dump.  Required when
+    ``type == "nested"``; must be omitted otherwise."""
+    many: bool = False
+    """``True`` when the relationship returns a collection (list).
+    Only meaningful when ``type == "nested"``."""
+
+    @model_validator(mode="after")
+    def _validate_nested(self) -> FieldSpec:
+        if self.type == NESTED:
+            if self.model is None or self.fields is None:
+                msg = (
+                    f"Field {self.name!r}: nested fields require "
+                    f"`model` and `fields`."
+                )
+                raise ValueError(msg)
+            if not self.fields:
+                msg = f"Field {self.name!r}: nested `fields` must be non-empty."
+                raise ValueError(msg)
+        else:
+            if self.model is not None or self.fields is not None:
+                msg = (
+                    f"Field {self.name!r}: `model` and `fields` are "
+                    f'only allowed when `type: "nested"`.'
+                )
+                raise ValueError(msg)
+            if self.many:
+                msg = (
+                    f"Field {self.name!r}: `many` is only meaningful "
+                    f'when `type: "nested"`.'
+                )
+                raise ValueError(msg)
+        return self
+
+    @property
+    def is_nested(self) -> bool:
+        """Whether this spec describes a nested dump of a related model."""
+        return self.type == NESTED
 
 
 class ModifierConfig(BaseModel):

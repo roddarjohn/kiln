@@ -23,26 +23,38 @@ conversion is the same everywhere.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
+from foundry.naming import Name, split_dotted_class
 from kiln.config.schema import (
     PYTHON_TYPES,
     FieldSpec,
+    FieldType,
 )
-
-if TYPE_CHECKING:
-    from foundry.naming import Name
 
 
 @dataclass
 class Field:
-    """A named, typed field in a schema or parameter list."""
+    """A named, typed field in a schema or parameter list.
+
+    When ``nested_serializer`` is set, this field is a dump of a
+    related model: the generated serializer calls the named function
+    on ``obj.{name}`` (or list-comprehends over it when ``many`` is
+    true) rather than assigning the attribute directly.
+    """
 
     name: str
     py_type: str
     optional: bool = False
+    nested_serializer: str | None = None
+    """Function name of the sub-serializer that maps the related
+    model instance to the nested schema.  ``None`` for scalar fields."""
+    many: bool = False
+    """When ``True`` with ``nested_serializer`` set, the source
+    attribute is a collection and each element is serialized through
+    ``nested_serializer``."""
 
 
 @dataclass
@@ -150,10 +162,17 @@ class SerializerFn:
     """A serializer function that maps a model to a schema.
 
     E.g. ``def to_user_resource(row) -> UserResource``.
+
+    ``model_module`` is the dotted import path to the SQLAlchemy
+    model class.  For top-level serializers this matches the
+    resource's ``model`` path; for nested sub-serializers it points
+    at the related model so the renderer can import it alongside
+    the parent.
     """
 
     function_name: str
     model_name: str
+    model_module: str
     schema_name: str
     fields: list[Field] = field(default_factory=list)
 
@@ -188,40 +207,169 @@ class FieldsOptions(BaseModel):
 
 
 def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
-    """Convert config FieldSpecs to :class:`Field` dataclasses."""
-    return [Field(name=f.name, py_type=PYTHON_TYPES[f.type]) for f in fields]
+    """Convert scalar ``FieldSpec`` entries to :class:`Field` dataclasses.
+
+    Write-op request schemas (``create`` / ``update``) call this —
+    they don't support nested fields today, so any nested entry is
+    rejected here rather than silently producing an invalid schema.
+    """
+    out: list[Field] = []
+    for f in fields:
+        if f.is_nested:
+            msg = (
+                f"Field {f.name!r}: nested fields are only supported "
+                f"on read operations (get, list)."
+            )
+            raise ValueError(msg)
+        out.append(
+            Field(name=f.name, py_type=PYTHON_TYPES[cast("FieldType", f.type)])
+        )
+    return out
 
 
-def _construct_response_schema(
+@dataclass
+class _DumpOutputs:
+    """Artifacts produced by :func:`_construct_dump`.
+
+    Read ops yield ``main_schema``, ``main_serializer``, then every
+    entry in ``nested_schemas`` and ``nested_serializers`` — the
+    nested lists are ordered deepest-first so classes are defined
+    before the parent schema that references them.
+    """
+
+    main_schema: SchemaClass
+    main_serializer: SerializerFn
+    nested_schemas: list[SchemaClass]
+    nested_serializers: list[SerializerFn]
+
+
+def _construct_dump(
     model: Name,
+    model_module: str,
     fields: list[FieldSpec],
     suffix: str,
-) -> SchemaClass:
-    """Build the response ``SchemaClass`` for a read op.
+    stem: str,
+) -> _DumpOutputs:
+    """Build the schema + serializer pair for a read op, expanding nesting.
 
     ``suffix`` is appended to the model's pascal-cased name to form
-    the schema class (e.g. ``Resource`` -> ``UserResource``).
+    the main schema class (``"Resource"`` -> ``"UserResource"``).
+    ``stem`` becomes the trailing segment of the serializer name
+    (``"resource"`` -> ``"to_user_resource"``).  Nested fields
+    recurse, emitting additional ``SchemaClass`` / ``SerializerFn``
+    entries whose names are derived from the accumulated field path
+    (e.g. ``TaskResourceProjectNested`` /
+    ``to_task_resource_project_nested``).
     """
-    return SchemaClass(
-        name=model.suffixed(suffix),
-        fields=_field_dicts(fields),
+    main_schema_name = model.suffixed(suffix)
+    main_fn_name = f"to_{model.lower}_{stem}"
+    expanded, nested_schemas, nested_sers = _expand_field_specs(
+        fields,
+        class_prefix=main_schema_name,
+        fn_prefix=main_fn_name,
+    )
+    main_schema = SchemaClass(
+        name=main_schema_name,
+        fields=expanded,
         doc=f"{suffix} schema for {model.pascal}.",
     )
-
-
-def _construct_serializer(
-    model: Name,
-    schema: SchemaClass,
-    stem: str,
-) -> SerializerFn:
-    """Build the ``SerializerFn`` that maps a model row to ``schema``.
-
-    ``stem`` becomes the trailing segment of the serializer
-    function, e.g. ``resource`` -> ``to_user_resource``.
-    """
-    return SerializerFn(
-        function_name=f"to_{model.lower}_{stem}",
+    main_serializer = SerializerFn(
+        function_name=main_fn_name,
         model_name=model.pascal,
-        schema_name=schema.name,
-        fields=schema.fields,
+        model_module=model_module,
+        schema_name=main_schema.name,
+        fields=expanded,
     )
+    return _DumpOutputs(
+        main_schema=main_schema,
+        main_serializer=main_serializer,
+        nested_schemas=nested_schemas,
+        nested_serializers=nested_sers,
+    )
+
+
+def _expand_field_specs(
+    specs: list[FieldSpec],
+    class_prefix: str,
+    fn_prefix: str,
+) -> tuple[list[Field], list[SchemaClass], list[SerializerFn]]:
+    """Walk ``specs``, expanding nested entries into sub-artifacts.
+
+    Returns ``(fields, nested_schemas, nested_serializers)``:
+
+    * ``fields`` is the flat :class:`Field` list the caller drops
+      into its own schema and serializer.  Scalar specs become plain
+      ``Field``; nested specs become ``Field`` entries carrying the
+      nested class as ``py_type`` and the sub-serializer's function
+      name in ``nested_serializer``.
+    * ``nested_schemas`` / ``nested_serializers`` are the sub-dump
+      artifacts, ordered deepest-first so they render before the
+      parent that references them.
+
+    Naming uses the accumulated path to guarantee uniqueness without
+    an explicit alias: ``TaskResource`` + field ``project`` ->
+    ``TaskResourceProjectNested``, and a further nested ``owner``
+    inside that -> ``TaskResourceProjectOwnerNested``.
+    """
+    fields: list[Field] = []
+    out_schemas: list[SchemaClass] = []
+    out_sers: list[SerializerFn] = []
+    for fs in specs:
+        if not fs.is_nested:
+            fields.append(
+                Field(
+                    name=fs.name,
+                    py_type=PYTHON_TYPES[cast("FieldType", fs.type)],
+                )
+            )
+            continue
+
+        # The FieldSpec validator guarantees non-None here when nested.
+        fs_model = cast("str", fs.model)
+        fs_fields = cast("list[FieldSpec]", fs.fields)
+        field_pascal = Name(fs.name).pascal
+        child_class_prefix = f"{class_prefix}{field_pascal}"
+        child_fn_prefix = f"{fn_prefix}_{fs.name}"
+
+        inner_fields, inner_schemas, inner_sers = _expand_field_specs(
+            fs_fields,
+            class_prefix=child_class_prefix,
+            fn_prefix=child_fn_prefix,
+        )
+
+        nested_schema_name = f"{child_class_prefix}Nested"
+        nested_fn_name = f"{child_fn_prefix}_nested"
+        related_module, related_class = split_dotted_class(fs_model)
+        related_pascal = Name(related_class).pascal
+
+        nested_schema = SchemaClass(
+            name=nested_schema_name,
+            fields=inner_fields,
+            doc=f"Nested {related_pascal} dump under {class_prefix}.",
+        )
+        nested_serializer = SerializerFn(
+            function_name=nested_fn_name,
+            model_name=related_pascal,
+            model_module=related_module,
+            schema_name=nested_schema_name,
+            fields=inner_fields,
+        )
+
+        out_schemas.extend(inner_schemas)
+        out_schemas.append(nested_schema)
+        out_sers.extend(inner_sers)
+        out_sers.append(nested_serializer)
+
+        py_type = (
+            f"list[{nested_schema_name}]" if fs.many else nested_schema_name
+        )
+        fields.append(
+            Field(
+                name=fs.name,
+                py_type=py_type,
+                nested_serializer=nested_fn_name,
+                many=fs.many,
+            )
+        )
+
+    return fields, out_schemas, out_sers
