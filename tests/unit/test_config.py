@@ -468,3 +468,49 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     assert op.name == "publish"
     assert op.type == "action"
     assert op.options == {"fn": "blog.actions.publish"}
+    assert op.require_auth is True
+
+
+def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
+    """``resource.action`` emits ``require_auth`` for bool values and
+    omits the key only when explicitly passed ``null`` (inherit)."""
+    src = """
+    local resource = import "kiln/resources/presets.libsonnet";
+    {
+      databases: [{ key: "primary", default: true }],
+      apps: [{
+        config: {
+          module: "blog",
+          resources: [
+            {
+              model: "blog.models.Article",
+              require_auth: false,
+              operations: [
+                resource.action(
+                  name="publish",
+                  fn="blog.actions.publish",
+                  require_auth=false,
+                ),
+                resource.action(
+                  name="archive",
+                  fn="blog.actions.archive",
+                  require_auth=null,
+                ),
+              ],
+            },
+          ],
+        },
+        prefix: "",
+      }],
+    }
+    """
+    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file.write_text(src)
+    cfg = _load(cfg_file)
+    ops = cfg.apps[0].config.resources[0].operations
+    assert ops is not None
+    publish, archive = ops[0], ops[1]
+    assert not isinstance(publish, str)
+    assert not isinstance(archive, str)
+    assert publish.require_auth is False
+    assert archive.require_auth is None

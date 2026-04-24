@@ -29,6 +29,6 @@
     type: "action",
     name: name,
     fn: fn,
-    [if require_auth != true then "require_auth"]: require_auth,
+    [if require_auth != null then "require_auth"]: require_auth,
   },
 }
