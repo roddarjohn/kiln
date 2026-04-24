@@ -1,9 +1,64 @@
 """Build-phase object store.
 
-:class:`BuildStore` accumulates the objects produced by every
-operation and tracks the ancestry between scope instances so
-later ops and the assembler can walk the tree without
-reconstructing dot-path ids themselves.
+:class:`BuildStore` is the shared scratchpad an
+:class:`~foundry.engine.Engine` run passes between operations.
+Every ``@operation`` :meth:`build` method emits zero or more
+objects; those objects land in the store keyed by the scope
+instance that produced them.  The assembler later walks the store
+to render files, and other operations can query and mutate what
+earlier operations emitted.
+
+Key terms
+---------
+
+- **instance id** — the engine's dot-path identifier for a scope
+  instance, e.g. ``"project.apps.0.resources.2.operations.1"``.
+  The leaf scope, the ancestor chain, and every index are all
+  recoverable from the id; callers never reconstruct these strings
+  themselves — :meth:`children`, :meth:`ancestor_of`, and
+  :meth:`ancestor_id_of` walk the tree for you.
+- **op name** — the :attr:`~foundry.operation.OperationMeta.name`
+  of the op that produced a given output, recorded alongside the
+  output in the store.  Used by ops that want to find outputs from
+  a specific producer.
+- **output type** — the Python class of the stored object.  Every
+  query method takes an ``output_type`` and returns only
+  ``isinstance`` matches, so ops can narrow by what they expect.
+
+What operations typically do
+----------------------------
+
+1. **Emit outputs** by yielding from :meth:`build`; the engine
+   calls :meth:`add` on their behalf, keyed by the op's instance
+   id and op name.  No direct store interaction needed for the
+   common case.
+2. **Look up ancestor config** with :meth:`ancestor_of` — e.g. an
+   operation-scope op reading the resource's ``model`` field.
+3. **Walk descendants' outputs** with :meth:`outputs_under` — e.g.
+   a resource-scope ``after_children=True`` op augmenting every
+   route handler under it (see
+   :class:`~kiln.operations.auth.Auth`).
+4. **Reach outputs an ancestor emitted** with
+   :meth:`outputs_under_ancestor` / :meth:`output_under_ancestor`
+   — e.g. a nested modifier op amending its parent op's outputs
+   (see :class:`~kiln.operations.filter.Filter`).
+
+Mutability
+----------
+
+Stored outputs are the live objects the assembler eventually
+renders.  A later op that wants to augment an earlier op's output
+doesn't copy — it mutates in place (append to a list, flip a flag
+on a dataclass, etc.).  Keeping the store a pile of mutable
+dataclasses is a deliberate contract — it's what lets augmenting
+ops (:class:`~kiln.operations.auth.Auth`, the list modifiers) stay
+small.
+
+Thread-safety
+-------------
+
+None.  The engine is single-threaded; don't share a store across
+threads.
 """
 
 from __future__ import annotations
@@ -21,16 +76,68 @@ if TYPE_CHECKING:
 class BuildStore:
     """Accumulator for objects produced during the build phase.
 
-    Objects are keyed by ``(instance_id, op_name)``.  Instance ids
-    are dot-path strings produced by the engine (e.g.
-    ``"project.apps.0.resources.2"``) — the leaf scope, the
-    ancestor chain, and every index are all recoverable from the
-    id via :func:`foundry.scope.scope_for`, so the store never
-    needs a separate scope field.
+    Outputs are keyed by ``(instance_id, op_name)``.  Ancestry
+    between instances is tracked separately so tree walks don't
+    have to parse dot-path ids.
 
-    Ancestry is tracked in :attr:`_children` — the engine records
-    each instance's parent id on registration so :meth:`children`
-    can walk the tree without callers reconstructing store keys.
+    Query methods at a glance
+    -------------------------
+
+    **Scope-instance lookup** (return config objects, not outputs):
+
+    - :meth:`ancestor_of` — walk up to find an enclosing scope's
+      config instance.
+    - :meth:`ancestor_id_of` — same walk, but return the id.
+      Useful when you need the id to pass into the output-query
+      methods below.
+    - :meth:`children` — direct children of an instance, optionally
+      filtered by child scope.
+    - :meth:`scope_of` — resolve an id's :class:`Scope`.
+
+    **Output lookup** (return objects emitted by ops):
+
+    - :meth:`outputs_under` — every output of a type at or below a
+      given instance id.  Good for aggregate passes (Auth at
+      resource scope sweeping handlers).
+    - :meth:`outputs_under_ancestor` — walk up to a named scope
+      first, then collect.  Good for ops that need to reach sideways
+      via a shared ancestor.
+    - :meth:`output_under_ancestor` — singular form; raises if
+      nothing matches.  For ops that expect exactly one target
+      (e.g. a modifier op finding its parent op's
+      :class:`~kiln.operations.list.ListResult`).
+    - :meth:`entries` — raw ``(instance_id, op_name, items)`` tuples.
+      The assembler uses this; ops rarely need to.
+
+    **Mutation:**
+
+    - :meth:`add` — engine calls this with an op's yielded outputs.
+      Ops normally don't call it directly.
+    - :meth:`register_instance` — engine calls this before invoking
+      :meth:`build` at a scope instance.  Ops never call it.
+
+    Typical extension recipes
+    -------------------------
+
+    *Read an ancestor's config* (e.g. resource model from operation
+    scope)::
+
+        resource = ctx.store.ancestor_of(ctx.instance_id, "resource")
+
+    *Augment every handler in your subtree* (e.g. Auth)::
+
+        for handler in ctx.store.outputs_under(
+            ctx.instance_id, RouteHandler
+        ):
+            handler.extra_deps.append(...)
+
+    *Reach a specific output your parent scope produced* (e.g. a
+    modifier finding its parent op's bundle)::
+
+        bundle = ctx.store.output_under_ancestor(
+            ctx.instance_id, "operation", ListResult
+        )
+        bundle.search_request.body_context["has_filter"] = True
 
     Attributes:
         scope_tree: :class:`ScopeTree` for the build's config.
@@ -44,6 +151,8 @@ class BuildStore:
             config object.
         _children: Map from a parent instance id to its registered
             child instance ids, in insertion order.
+        _parent_of: Map from an instance id to its parent id;
+            drives :meth:`ancestor_of` / :meth:`ancestor_id_of`.
 
     """
 
@@ -205,6 +314,52 @@ class BuildStore:
                 )
 
         return result
+
+    def outputs_under_ancestor[T](
+        self,
+        instance_id: str,
+        scope_name: str,
+        output_type: type[T],
+    ) -> list[T]:
+        """Return outputs under the ancestor of *instance_id* at *scope_name*.
+
+        Convenience for the common "walk up to a named scope, then
+        look for outputs there" pattern — used by ops that need to
+        reach outputs an ancestor (or sibling via a shared ancestor)
+        produced.  Returns ``[]`` when no ancestor at that scope is
+        registered.
+        """
+        ancestor_id = self.ancestor_id_of(instance_id, scope_name)
+        if ancestor_id is None:
+            return []
+        return self.outputs_under(ancestor_id, output_type)
+
+    def output_under_ancestor[T](
+        self,
+        instance_id: str,
+        scope_name: str,
+        output_type: type[T],
+    ) -> T:
+        """Return the sole *output_type* output under the named ancestor.
+
+        Singular form of :meth:`outputs_under_ancestor` — raises
+        :class:`LookupError` when no ancestor is registered at
+        *scope_name* or when the ancestor produced no output of
+        *output_type*.  Returns the first match when more than one
+        exists; callers that care about multiplicity should use the
+        plural form.
+        """
+        results = self.outputs_under_ancestor(
+            instance_id, scope_name, output_type
+        )
+        if not results:
+            type_name = getattr(output_type, "__name__", repr(output_type))
+            msg = (
+                f"No {type_name} reachable from ancestor at scope "
+                f"'{scope_name}' of '{instance_id}'."
+            )
+            raise LookupError(msg)
+        return results[0]
 
     def entries(
         self,

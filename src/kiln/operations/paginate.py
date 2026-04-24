@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.config.schema import PaginateConfig
-from kiln.operations.list import find_list_result, resource_model
+from kiln.operations.list import ListResult, resource_model
 from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
@@ -61,7 +61,9 @@ class Paginate:
             },
         )
 
-        result = find_list_result(ctx)
+        result = ctx.store.output_under_ancestor(
+            ctx.instance_id, "operation", ListResult
+        )
 
         handler = result.handler
         handler.response_model = page_name

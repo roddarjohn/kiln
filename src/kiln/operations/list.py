@@ -175,8 +175,12 @@ class List:
 #
 # Filter / Order / Paginate nest as children of a specific list op
 # in the scope tree.  Each fetches the parent list's
-# :class:`ListResult` bundle and amends fields directly — no store
-# scanning, no name/shape matching.
+# :class:`ListResult` bundle via
+# ``ctx.store.output_under_ancestor(ctx.instance_id, "operation",
+# ListResult)`` and amends fields directly — no store scanning, no
+# name/shape matching.  :func:`resource_model` here spares each
+# modifier from re-deriving the model Name it needs for schema
+# naming.
 # -------------------------------------------------------------------
 
 
@@ -188,37 +192,3 @@ def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
     )
     _, model = Name.from_dotted(resource.model)
     return model
-
-
-def find_list_result(ctx: BuildContext[ModifierConfig]) -> ListResult:
-    """Return the parent list op's :class:`ListResult` bundle.
-
-    The modifier's enclosing operation-scope instance *is* the
-    parent list op; looking up a ``ListResult`` under that id
-    locates the bundle directly — no name matching, no emitter
-    filter, no sibling scanning.
-
-    Raises:
-        LookupError: If the modifier has no enclosing operation or
-            the parent didn't emit a ``ListResult`` (would indicate
-            the modifier nests inside a non-list op).
-
-    """
-    parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
-    if parent_id is None:
-        msg = "Modifier op has no enclosing operation."
-        raise LookupError(msg)
-
-    bundle = next(
-        iter(ctx.store.outputs_under(parent_id, ListResult)),
-        None,
-    )
-
-    if bundle is None:
-        msg = (
-            "Parent op did not emit a ListResult — modifier must "
-            "nest inside a list op."
-        )
-        raise LookupError(msg)
-
-    return bundle

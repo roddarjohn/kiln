@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation
-from kiln.config.schema import FilterConfig, OperationConfig
-from kiln.operations.list import find_list_result, resource_model
+from kiln.config.schema import FilterConfig
+from kiln.operations.list import ListResult, resource_model
 from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
@@ -56,8 +56,11 @@ class Filter:
 
         """
         model = resource_model(ctx)
+        result = ctx.store.output_under_ancestor(
+            ctx.instance_id, "operation", ListResult
+        )
 
-        allowed = options.fields or _list_field_names(ctx)
+        allowed = options.fields or [f.name for f in result.list_item.fields]
         yield SchemaClass(
             name=model.suffixed("FilterCondition"),
             body_template="fastapi/schema_parts/filter_node.py.j2",
@@ -73,22 +76,6 @@ class Filter:
             ],
         )
 
-        result = find_list_result(ctx)
         result.search_request.body_context["has_filter"] = True
         result.handler.body_context["has_filter"] = True
         result.handler.extra_imports.append(("ingot", "apply_filters"))
-
-
-def _list_field_names(ctx: BuildContext[ModifierConfig]) -> list[str]:
-    """Return the parent list op's declared field names.
-
-    When a filter config doesn't name fields explicitly, every
-    field the list op exposes becomes filterable.  The modifier's
-    parent scope instance *is* the list op's config, so we read
-    its ``options["fields"]`` directly — no sibling scan.
-    """
-    parent = ctx.store.ancestor_of(ctx.instance_id, "operation")
-    if not isinstance(parent, OperationConfig):
-        return []
-    fields: list[dict[str, str]] = parent.options.get("fields") or []
-    return [f["name"] for f in fields if isinstance(f, dict)]
