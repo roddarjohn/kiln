@@ -72,6 +72,7 @@ class Update:
             method="PATCH",
             path=f"/{{{resource.pk}}}",
             function_name=f"update_{model.lower}",
+            op_name=ctx.instance.name,
             params=[
                 RouteParam(
                     name=resource.pk,

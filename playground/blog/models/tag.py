@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Column, String
 
 from db.base import Base
 
 
 class Tag(Base):
-    """Content tag with an integer primary key."""
+    """Content tag with an integer primary key.
+
+    ``id`` is added automatically by pgcraft's default
+    :class:`SerialPKPlugin` (Integer PK).  Other fields are raw
+    ``Column`` so pgcraft's ``_collect_columns`` picks them up.
+    """
 
     __tablename__ = "tags"
     __table_args__ = {"schema": "public"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    name = Column(String(80), unique=True, nullable=False)
+    slug = Column(String(80), unique=True, nullable=False)

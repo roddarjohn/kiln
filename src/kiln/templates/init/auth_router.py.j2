@@ -1,60 +1,134 @@
 {% from "_macros.j2" import file_header %}
 {% set _extra %}
-The ``{{ vcf_module }}.{{ vcf_name }}`` function is called to verify
-credentials.  It must accept ``(username: str, password: str)`` and
-return a ``dict`` (used as the JWT payload) on success, or ``None``
-on failure.
+The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
+and passed to ``{{ validate_module }}.{{ validate_name }}``, which
+must return a ``{{ session_module }}.{{ session_name }}`` instance on
+success or ``None`` on failure.
+
+Token sources: {{ sources | join(", ") }}.  The same JWT is emitted
+to every configured source on login and cleared by ``logout``.
+
+Three endpoints are generated:
+
+* ``POST {{ token_url }}`` -- issue a session (login).
+* ``GET {{ token_url }}`` -- return the current session as JSON.
+  Enforces auth via the shared ``get_session`` dep, so a missing
+  or revoked token yields HTTP 401.
+* ``POST {{ token_url }}/logout`` -- clear the transport (and
+  revoke the server-side record when a
+  :class:`ingot.auth.SessionStore` is wired in).
+{% if store_name %}
+
+A :class:`ingot.auth.SessionStore` is wired in, so ``logout`` also
+calls ``{{ store_name }}.revoke(session)`` before clearing the
+cookie.  The revoke runs first so that a failure leaves the token
+non-verifying rather than zombie-valid.
+{% endif %}
 
 Mount this router in your application::
 
     from auth.router import router as auth_router
     app.include_router(auth_router)
 {% endset %}
-{{ file_header("FastAPI JWT token endpoint", extra=_extra) }}
+{{ file_header("Session auth endpoints", extra=_extra) }}
 
 from __future__ import annotations
 
-import datetime
-import os
+from typing import Annotated
 
-import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, Response
 
-from {{ vcf_module }} import {{ vcf_name }}
+from ingot.auth import (
+    LoginResponse,
+    OkResponse,
+    clear_session,
+    issue_session,
+)
+
+from {{ creds_module }} import {{ creds_name }}
+from {{ validate_module }} import {{ validate_name }}
+from {{ session_module }} import {{ session_name }}
+{% if store_name %}
+from {{ store_module }} import {{ store_name }}
+{% endif %}
+
+from .dependencies import get_session
 
 router = APIRouter()
 
 
 @router.post("{{ token_url }}")
 def create_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-) -> dict[str, str]:
-    """Exchange username/password credentials for a JWT.
+    response: Response,
+    credentials: {{ creds_name }},
+) -> LoginResponse | OkResponse:
+    """Validate credentials and issue a session token.
 
-    Args:
-        form_data: OAuth2 password grant form fields.
-
-    Returns:
-        A dict with ``access_token`` and ``token_type`` keys.
-
-    Raises:
-        HTTPException: 401 if credentials are invalid.
+    Raises HTTP 401 if ``{{ validate_name }}`` returns ``None``.
     """
-    payload = {{ vcf_name }}(
-        form_data.username, form_data.password
+    return issue_session(
+        response,
+        {{ validate_name }}(credentials),
+        sources={{ sources }},
+        secret_env="{{ secret_env }}",
+        algorithm="{{ algorithm }}",
+{%- if "cookie" in sources %}
+        cookie_name="{{ cookie_name }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
     )
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    payload.setdefault(
-        "exp",
-        datetime.datetime.now(tz=datetime.UTC)
-        + datetime.timedelta(minutes=30),
+
+
+@router.get("{{ token_url }}")
+def read_session(
+    session: Annotated[{{ session_name }}, Depends(get_session)],
+) -> {{ session_name }}:
+    """Return the current authenticated session as JSON.
+
+    ``get_session`` enforces auth (and the deny-list when a
+    :class:`ingot.auth.SessionStore` is wired in) before this
+    body runs, so a missing, invalid, or revoked token yields
+    HTTP 401.
+    """
+    return session
+
+
+@router.post("{{ token_url }}/logout")
+{% if store_name -%}
+async def logout(
+    response: Response,
+    session: Annotated[{{ session_name }}, Depends(get_session)],
+) -> OkResponse:
+    """Revoke server-side, then clear the transport.
+
+    Revoke-before-clear: a revoke failure leaves the token
+    non-verifying rather than zombie-valid.
+    """
+    await {{ store_name }}.revoke(session)
+    return clear_session(
+        response,
+        sources={{ sources }},
+{%- if "cookie" in sources %}
+        cookie_name="{{ cookie_name }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
     )
-    secret = os.environ["{{ secret_env }}"]
-    token = jwt.encode(payload, secret, algorithm="{{ algorithm }}")
-    return {"access_token": token, "token_type": "bearer"}
+{%- else -%}
+def logout(response: Response) -> OkResponse:
+    """Clear the session transport.
+
+    Cookie source: ``Set-Cookie`` header deletes the cookie.
+    Bearer source: client discards its token.
+    """
+    return clear_session(
+        response,
+        sources={{ sources }},
+{%- if "cookie" in sources %}
+        cookie_name="{{ cookie_name }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
+    )
+{%- endif %}

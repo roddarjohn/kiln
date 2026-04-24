@@ -452,8 +452,8 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        auth_module = prefix_import(info.package_prefix, "auth", "dependencies")
-        imports.add_from(auth_module, "get_current_user")
+        deps_module = prefix_import(info.package_prefix, "auth", "dependencies")
+        imports.add_from(deps_module, "get_session")
 
     yield FileFragment(
         path=test_path,
@@ -467,9 +467,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
             "has_auth": info.has_auth,
             "get_db_fn": info.get_db_fn,
             "route_module": route_module,
-            "get_current_user_fn": (
-                "get_current_user" if info.has_auth else None
-            ),
+            "get_session_fn": ("get_session" if info.has_auth else None),
         },
         imports=imports,
     )

@@ -70,6 +70,7 @@ class Get:
             method="GET",
             path=f"/{{{resource.pk}}}",
             function_name=f"get_{model.lower}",
+            op_name=ctx.instance.name,
             params=[
                 RouteParam(
                     name=resource.pk,

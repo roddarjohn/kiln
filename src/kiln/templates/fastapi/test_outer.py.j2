@@ -71,7 +71,7 @@ def app(mock_db):
     application.include_router(router)
     application.dependency_overrides[{{ get_db_fn }}] = lambda: mock_db
 {% if has_auth %}
-    application.dependency_overrides[{{ get_current_user_fn }}] = lambda: {"sub": "test-user"}
+    application.dependency_overrides[{{ get_session_fn }}] = lambda: {"sub": "test-user"}
 {% endif %}
     return application
 

@@ -51,24 +51,47 @@ def test_project_config_apps_mode_untouched():
 
 def test_auth_config_defaults():
     auth = AuthConfig(
-        verify_credentials_fn="myapp.auth.verify",
+        credentials_schema="myapp.auth.LoginCredentials",
+        session_schema="myapp.auth.Session",
+        validate_fn="myapp.auth.validate",
     )
-    assert auth.type == "jwt"
+    assert auth.sources == ["bearer"]
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
-    assert "/docs" in auth.exclude_paths
+    assert auth.token_url == "/auth/token"  # noqa: S105
 
 
-def test_auth_config_verify_credentials_required():
-    with pytest.raises(ValueError, match="verify_credentials_fn"):
-        AuthConfig()
+def test_auth_config_fields_required():
+    fields = ("credentials_schema", "session_schema", "validate_fn")
+    for missing in fields:
+        kwargs = {
+            "credentials_schema": "myapp.auth.LoginCredentials",
+            "session_schema": "myapp.auth.Session",
+            "validate_fn": "myapp.auth.validate",
+        }
+        del kwargs[missing]
+        with pytest.raises(ValueError, match=missing):
+            AuthConfig(**kwargs)
 
 
-def test_auth_config_verify_not_required_with_custom_auth():
-    auth = AuthConfig(
-        get_current_user_fn="myapp.auth.get_user",
-    )
-    assert auth.verify_credentials_fn is None
+def test_auth_config_empty_sources_rejected():
+    with pytest.raises(ValueError, match="at least 1"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=[],
+        )
+
+
+def test_auth_config_duplicate_sources_rejected():
+    with pytest.raises(ValueError, match="duplicates"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=["bearer", "bearer"],
+        )
 
 
 def test_database_config_session_names():

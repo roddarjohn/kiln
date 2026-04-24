@@ -145,7 +145,7 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "payload", type: "json" },
           ],
         },
-        "delete",
+        { name: "delete" },
         resource.action(
           name="ping",
           fn="inventory.actions.ping_event_log",

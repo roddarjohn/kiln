@@ -55,43 +55,99 @@ generated Pydantic schemas and route handlers.
 
 
 class AuthConfig(BaseModel):
-    """JWT authentication configuration."""
+    """Authentication configuration.
 
-    type: Literal["jwt"] = "jwt"
+    kiln owns the auth *package* (dependency + login/logout routes);
+    the consumer owns the three types that characterise their domain:
+
+    * :attr:`credentials_schema` -- Pydantic model (or discriminated
+      union via ``Annotated[A | B, Field(discriminator="type")]``)
+      used as the JSON request body of the login endpoint.  Not
+      restricted to username/password — can describe API keys,
+      magic-link tokens, OAuth codes, whatever.
+    * :attr:`session_schema` -- Pydantic model describing what the
+      token carries (user id, tenant, roles, ...).  Flows through
+      protected routes as ``session: <Schema>``.
+    * :attr:`validate_fn` -- ``(creds) -> Session | None``.  The
+      consumer's business logic for deciding a login is valid.
+
+    :attr:`sources` controls which transports carry the token:
+
+    * ``["bearer"]`` -- login returns an OAuth2-shaped JSON body;
+      ``get_session`` reads the ``Authorization`` header.
+    * ``["cookie"]`` -- login sets an ``httpOnly`` cookie;
+      ``get_session`` reads it.
+    * ``["bearer", "cookie"]`` -- login does both, so the same
+      endpoint serves both web and API clients; ``get_session``
+      accepts either.
+
+    Note:
+        OAuth2 password-flow form bodies (as used by Swagger's
+        *Authorize* button) are not supported yet — the login
+        endpoint always accepts JSON.
+
+    """
+
+    credentials_schema: str
+    """Dotted path to the Pydantic model (or discriminated-union
+    type alias) accepted as the JSON request body of the login
+    endpoint, e.g. ``"myapp.auth.LoginCredentials"``."""
+
+    session_schema: str
+    """Dotted path to the Pydantic model carried in the token,
+    e.g. ``"myapp.auth.Session"``.  Fields must be JSON-serializable
+    so Pydantic can round-trip the model through the JWT claims."""
+
+    validate_fn: str
+    """Dotted path to a function ``(creds) -> Session | None`` where
+    ``creds`` is the parsed :attr:`credentials_schema` instance and
+    ``Session`` is the :attr:`session_schema` model.  Returns the
+    session on success or ``None`` to reject with HTTP 401."""
+
+    sources: list[Literal["bearer", "cookie"]] = Field(
+        default_factory=lambda: ["bearer"],
+        min_length=1,
+    )
+    """Ordered list of token transports.  At least one required;
+    any subset of ``{"bearer", "cookie"}`` in any order."""
+
     secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
-    exclude_paths: list[str] = [
-        "/docs",
-        "/openapi.json",
-        "/health",
-    ]
-    get_current_user_fn: str | None = None
-    """Dotted import path to a custom ``get_current_user`` dependency,
-    e.g. ``"myapp.auth.custom.get_current_user"``.  When set, the
-    generated ``auth/dependencies.py`` re-exports this function instead
-    of containing the default JWT implementation.
-    """
-    verify_credentials_fn: str | None = None
-    """Dotted import path to a credential-verification function,
-    e.g. ``"myapp.auth.verify_credentials"``.  The function must
-    accept ``(username: str, password: str)`` and return a ``dict``
-    (the JWT payload) on success or ``None`` on failure.
 
-    Required when using the default JWT auth flow
-    (``get_current_user_fn`` is not set).
-    """
+    session_store: str | None = None
+    """Dotted path to an :class:`ingot.auth.SessionStore` instance
+    (e.g. ``"myapp.revocation.revocations"``).  When set, the
+    generated ``get_session`` enforces the deny-list and logout
+    calls :meth:`revoke` before clearing; ``None`` = stateless."""
+
+    cookie_name: str = "access_token"
+    """Name of the cookie carrying the JWT when ``"cookie"`` is in
+    :attr:`sources`."""
+    cookie_secure: bool = True
+    """When ``True`` (default), the cookie is only sent over HTTPS.
+    Set to ``False`` for local HTTP development."""
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    """SameSite attribute applied to the auth cookie.  ``"none"``
+    requires ``cookie_secure=True`` per RFC 6265bis."""
 
     @model_validator(mode="after")
-    def _require_verify_credentials(self) -> AuthConfig:
+    def _sources_unique(self) -> AuthConfig:
+        if len(set(self.sources)) != len(self.sources):
+            msg = f"sources must not contain duplicates: {self.sources}"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _samesite_none_requires_secure(self) -> AuthConfig:
         if (
-            self.get_current_user_fn is None
-            and self.verify_credentials_fn is None
+            "cookie" in self.sources
+            and self.cookie_samesite == "none"
+            and not self.cookie_secure
         ):
             msg = (
-                "verify_credentials_fn is required when using "
-                "the default JWT auth flow "
-                "(get_current_user_fn is not set)"
+                "cookie_samesite='none' requires cookie_secure=True "
+                "(browsers reject non-Secure SameSite=None cookies)"
             )
             raise ValueError(msg)
 

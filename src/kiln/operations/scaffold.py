@@ -1,16 +1,19 @@
-"""Scaffold operations: db sessions and auth dependencies.
+"""Scaffold operations: db sessions and the auth package.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
 infrastructure files.  Split into two operations:
 
 * :class:`Scaffold` -- always runs; emits the ``db/`` tree.
 * :class:`AuthScaffold` -- runs only when the project config has
-  ``auth`` set, via :meth:`AuthScaffold.when`.
+  ``auth`` set, via :meth:`AuthScaffold.when`.  Emits the
+  session-dep and login/logout routes (three files under
+  ``auth/``); the consumer provides only the session/credentials
+  schemas and the credential-validation function.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -21,7 +24,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import AuthConfig, ProjectConfig
+    from kiln.config.schema import ProjectConfig
 
 
 @operation("scaffold", scope="project")
@@ -72,7 +75,19 @@ class Scaffold:
 
 @operation("auth_scaffold", scope="project")
 class AuthScaffold:
-    """Generate ``auth/`` infrastructure files."""
+    """Generate the ``auth/`` package.
+
+    Emits three :class:`StaticFile` objects:
+
+    * ``auth/__init__.py`` -- package marker.
+    * ``auth/dependencies.py`` -- binds :func:`ingot.auth.session_auth`
+      against the consumer's :attr:`session_schema` to produce the
+      ``get_session`` FastAPI dependency used by every protected
+      route.
+    * ``auth/router.py`` -- login (``POST {token_url}``) and logout
+      (``POST {token_url}/logout``) handlers that call
+      :func:`ingot.auth.issue_session` / :func:`clear_session`.
+    """
 
     def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
         """Apply only when the project config has ``auth`` set.
@@ -91,7 +106,7 @@ class AuthScaffold:
         ctx: BuildContext[ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
-        """Produce static files for auth dependencies and router.
+        """Produce the auth router static file.
 
         Args:
             ctx: Build context with project config.  ``when`` has
@@ -99,12 +114,11 @@ class AuthScaffold:
             _options: Unused (no options).
 
         Yields:
-            :class:`StaticFile` for the ``auth/`` package, the
-            dependencies module, and the JWT router (only when
-            using the default flow).
+            A single :class:`StaticFile` for ``auth/router.py``.
 
         """
-        auth = cast("AuthConfig", ctx.instance.auth)
+        auth = ctx.instance.auth
+        assert auth is not None  # noqa: S101 -- guaranteed by when()
 
         yield StaticFile(
             path="auth/__init__.py",
@@ -112,34 +126,49 @@ class AuthScaffold:
             context={},
         )
 
-        gcu_module = None
-        gcu_name = None
-        if auth.get_current_user_fn:
-            gcu_module, gcu_name = auth.get_current_user_fn.rsplit(".", 1)
+        creds_module, creds_name = auth.credentials_schema.rsplit(".", 1)
+        session_module, session_name = auth.session_schema.rsplit(".", 1)
+        validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
+
+        store_module: str | None = None
+        store_name: str | None = None
+        if auth.session_store is not None:
+            store_module, store_name = auth.session_store.rsplit(".", 1)
 
         yield StaticFile(
             path="auth/dependencies.py",
             template="init/auth_dependencies.py.j2",
             context={
-                "gcu_module": gcu_module,
-                "gcu_name": gcu_name,
+                "session_module": session_module,
+                "session_name": session_name,
+                "sources": list(auth.sources),
                 "secret_env": auth.secret_env,
                 "algorithm": auth.algorithm,
                 "token_url": auth.token_url,
+                "cookie_name": auth.cookie_name,
+                "store_module": store_module,
+                "store_name": store_name,
             },
         )
 
-        if auth.get_current_user_fn is None:
-            vcf = cast("str", auth.verify_credentials_fn)
-            vcf_module, vcf_name = vcf.rsplit(".", 1)
-            yield StaticFile(
-                path="auth/router.py",
-                template="init/auth_router.py.j2",
-                context={
-                    "vcf_module": vcf_module,
-                    "vcf_name": vcf_name,
-                    "secret_env": auth.secret_env,
-                    "algorithm": auth.algorithm,
-                    "token_url": auth.token_url,
-                },
-            )
+        yield StaticFile(
+            path="auth/router.py",
+            template="init/auth_router.py.j2",
+            context={
+                "creds_module": creds_module,
+                "creds_name": creds_name,
+                "session_module": session_module,
+                "session_name": session_name,
+                "validate_module": validate_module,
+                "validate_name": validate_name,
+                "sources": list(auth.sources),
+                "secret_env": auth.secret_env,
+                "algorithm": auth.algorithm,
+                "token_url": auth.token_url,
+                "cookie_name": auth.cookie_name,
+                "cookie_secure": auth.cookie_secure,
+                "cookie_samesite": auth.cookie_samesite,
+                "store_module": store_module,
+                "store_name": store_name,
+            },
+        )

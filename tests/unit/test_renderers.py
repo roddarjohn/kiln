@@ -536,8 +536,8 @@ def test_testcase_fragment_no_auth(registry):
     )
     shell = _file(fragments, "tests/test_myapp_post.py")
     assert shell.context["has_auth"] is False
-    assert shell.context["get_current_user_fn"] is None
-    assert "auth.dependencies" not in shell.imports.format("python")
+    assert shell.context["get_session_fn"] is None
+    assert "get_session" not in shell.imports.format("python")
 
 
 def test_testcase_fragment_with_tests(registry):
@@ -552,19 +552,26 @@ def test_testcase_fragment_with_tests(registry):
         tc,
         _rctx(
             _resource(generate_tests=True),
-            auth=AuthConfig(verify_credentials_fn="myapp.auth.verify"),
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+            ),
         ),
     )
     path = "tests/test_myapp_post.py"
     shell = _file(fragments, path)
     assert shell.context["model_name"] == "Post"
     assert shell.context["has_auth"] is True
-    assert shell.context["get_current_user_fn"] == "get_current_user"
+    assert shell.context["get_session_fn"] == "get_session"
     cases = [s.value for s in _snippets(fragments, path, "test_cases")]
     assert len(cases) == 1
     assert cases[0]["op_name"] == "get"
     assert cases[0]["status_not_found"] == 404
-    assert "from _generated.auth.dependencies" in shell.imports.format("python")
+    assert (
+        "from _generated.auth.dependencies import get_session"
+        in shell.imports.format("python")
+    )
 
 
 def _unioned_imports(fragments):
