@@ -426,6 +426,9 @@ def test_serializer_fragment_with_tests(registry):
     }
     test_shell = _file(fragments, "tests/test_myapp_post.py")
     assert test_shell.context["has_serializer_test"] is True
+    assert test_shell.context["mock_row_lines"] == [
+        'row.id = _sample("int")',
+    ]
     field_snippets = _snippets(
         fragments, "tests/test_myapp_post.py", "serializer_fields"
     )
@@ -439,6 +442,52 @@ def test_serializer_fragment_with_tests(registry):
         "from _generated.myapp.serializers.post import to_post_resource"
         in test_block
     )
+
+
+def test_serializer_fragment_nested_mock_row_lines(registry):
+    """Mock-row emission follows scalar-nested paths, skips collections.
+
+    Scalar nested relationships need dotted-path population so the
+    sub-serializer finds valid types; collections are left unset
+    because ``MagicMock`` iterates empty by default.
+    """
+    ser = SerializerFn(
+        function_name="to_post_resource",
+        model_name="Post",
+        model_module="myapp.models",
+        schema_name="PostResource",
+        fields=[
+            Field(name="id", py_type="int"),
+            Field(
+                name="author",
+                py_type="PostResourceAuthorNested",
+                nested_serializer="to_post_resource_author_nested",
+                nested_fields=[
+                    Field(name="id", py_type="uuid.UUID"),
+                    Field(name="name", py_type="str"),
+                ],
+            ),
+            Field(
+                name="tags",
+                py_type="list[PostResourceTagsNested]",
+                nested_serializer="to_post_resource_tags_nested",
+                many=True,
+                nested_fields=[Field(name="id", py_type="uuid.UUID")],
+            ),
+        ],
+    )
+    fragments = registry.render(
+        ser,
+        _rctx(_resource(generate_tests=True)),
+    )
+    test_shell = _file(fragments, "tests/test_myapp_post.py")
+    # Scalar nested author descends via dotted paths; nested many
+    # `tags` is absent (MagicMock iterates empty by default).
+    assert test_shell.context["mock_row_lines"] == [
+        'row.id = _sample("int")',
+        'row.author.id = _sample("uuid.UUID")',
+        'row.author.name = _sample("str")',
+    ]
 
 
 def test_serializer_fragment_list_item_skips_test_file(registry):
