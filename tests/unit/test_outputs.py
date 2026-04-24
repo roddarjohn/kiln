@@ -123,6 +123,7 @@ def test_serializer_fn():
     s = SerializerFn(
         function_name="to_user_resource",
         model_name="User",
+        model_module="app.models",
         schema_name="UserResource",
         fields=[
             Field(name="id", py_type="uuid.UUID"),

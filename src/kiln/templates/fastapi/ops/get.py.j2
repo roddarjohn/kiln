@@ -1,9 +1,22 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
+{% if load_options|default([]) %}
+    stmt = select({{ model_name }}).where(
+        {{ model_name }}.{{ pk_name }} == {{ pk_name }},
+    ).options(
+{% for opt in load_options %}
+        {{ opt }},
+{% endfor %}
+    )
+    obj = await get_object_from_query_or_404(
+        db, stmt, detail="{{ model_name }} not found",
+    )
+{% else %}
     obj = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
+{% endif %}
     return {{ serializer_fn }}(obj)
 {% endblock %}

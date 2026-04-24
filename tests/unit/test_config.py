@@ -204,6 +204,113 @@ def test_field_spec():
     f = FieldSpec(name="title", type="str")
     assert f.name == "title"
     assert f.type == "str"
+    assert f.is_nested is False
+
+
+def test_field_spec_nested_requires_model_and_fields():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+    )
+    assert f.is_nested is True
+    assert f.model == "blog.models.Project"
+    assert f.fields is not None
+    assert f.many is False
+
+
+def test_field_spec_nested_without_model_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="require `model` and `fields`"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            fields=[FieldSpec(name="id", type="uuid")],
+        )
+
+
+def test_field_spec_nested_without_fields_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="require `model` and `fields`"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+        )
+
+
+def test_field_spec_nested_empty_fields_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="must be non-empty"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+            fields=[],
+        )
+
+
+def test_field_spec_scalar_with_model_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="only allowed when"):
+        FieldSpec(name="project", type="str", model="blog.models.Project")
+
+
+def test_field_spec_many_on_scalar_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="only meaningful when"):
+        FieldSpec(name="project", type="str", many=True)
+
+
+def test_field_spec_nested_many_allowed():
+    f = FieldSpec(
+        name="articles",
+        type="nested",
+        model="blog.models.Article",
+        fields=[FieldSpec(name="id", type="uuid")],
+        many=True,
+    )
+    assert f.many is True
+
+
+def test_field_spec_nested_load_defaults_to_selectin():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+    )
+    assert f.load == "selectin"
+
+
+def test_field_spec_nested_load_override():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+        load="joined",
+    )
+    assert f.load == "joined"
+
+
+def test_field_spec_load_on_scalar_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="`load` is only meaningful"):
+        FieldSpec(name="title", type="str", load="joined")
 
 
 # ---------------------------------------------------------------------------

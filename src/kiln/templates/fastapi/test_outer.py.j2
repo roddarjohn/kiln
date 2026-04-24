@@ -31,13 +31,17 @@ def _sample(py_type: str) -> object:
 
 
 def _mock_row() -> MagicMock:
-    """Create a mock ORM row with typed attributes."""
+    """Create a mock ORM row with typed attributes.
+
+    Nested scalar relationships are populated via dotted paths
+    (``row.author.id``); nested collections are intentionally left
+    as raw ``MagicMock`` instances because iterating one yields an
+    empty sequence, which downstream list serializers accept.
+    """
     row = MagicMock()
-{% if has_serializer_test|default(false) %}
-{% for f in serializer_fields|default([]) %}
-    row.{{ f.name }} = _sample("{{ f.py_type }}")
+{% for line in mock_row_lines|default([]) %}
+    {{ line }}
 {% endfor %}
-{% endif %}
     return row
 
 
@@ -264,10 +268,7 @@ async def test_{{ fn_name }}_unauthorized(
 
 def test_to_{{ model_lower }}_resource_maps_fields() -> None:
     """Verify serializer maps all fields from ORM to schema."""
-    obj = MagicMock()
-{% for f in serializer_fields %}
-    obj.{{ f.name }} = _sample("{{ f.py_type }}")
-{% endfor %}
+    obj = _mock_row()
     result = to_{{ model_lower }}_resource(obj)
 {% for f in serializer_fields %}
     assert result.{{ f.name }} == obj.{{ f.name }}

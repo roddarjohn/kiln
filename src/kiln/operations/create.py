@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln.config.schema import PYTHON_TYPES
+from kiln.config.schema import PYTHON_TYPES, FieldType
 from kiln.operations.types import (
     FieldsOptions,
     RouteHandler,
@@ -83,8 +83,13 @@ class Create:
             status_invalid=422,
             has_request_body=True,
             request_schema=request_schema,
+            # _field_dicts above already rejects nested FieldSpecs, so every
+            # entry here is guaranteed to carry a scalar ``type``.
             request_fields=[
-                {"name": f.name, "py_type": PYTHON_TYPES[f.type]}
+                {
+                    "name": f.name,
+                    "py_type": PYTHON_TYPES[cast("FieldType", f.type)],
+                }
                 for f in options.fields
             ],
         )

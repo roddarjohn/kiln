@@ -55,6 +55,7 @@ class Order:
             members=[(f.upper(), f) for f in options.fields],
             base="str, Enum",
         )
+
         yield SchemaClass(
             name=model.suffixed("SortClause"),
             body_template="fastapi/schema_parts/sort_clause.py.j2",

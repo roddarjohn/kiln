@@ -13,8 +13,7 @@ from kiln.operations.types import (
     RouteHandler,
     RouteParam,
     TestCase,
-    _construct_response_schema,
-    _construct_serializer,
+    _construct_dump,
 )
 
 if TYPE_CHECKING:
@@ -50,15 +49,22 @@ class Get:
             "ResourceConfig",
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
-        _, model = Name.from_dotted(resource.model)
+        model_module, model = Name.from_dotted(resource.model)
 
-        schema = _construct_response_schema(
-            model, options.fields, suffix="Resource"
+        dump = _construct_dump(
+            model,
+            model_module,
+            options.fields,
+            suffix="Resource",
+            stem="resource",
         )
-        serializer = _construct_serializer(model, schema, stem="resource")
 
-        yield schema
-        yield serializer
+        # Nested sub-schemas / sub-serializers are ordered deepest-first
+        # so they render before the parent class that references them.
+        yield from dump.nested_schemas
+        yield dump.main_schema
+        yield from dump.nested_serializers
+        yield dump.main_serializer
 
         yield RouteHandler(
             method="GET",
@@ -70,12 +76,17 @@ class Get:
                     annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
-            response_model=schema.name,
-            serializer_fn=serializer.function_name,
-            return_type=schema.name,
+            response_model=dump.main_schema.name,
+            serializer_fn=dump.main_serializer.function_name,
+            return_type=dump.main_schema.name,
             doc=f"Get a {model.pascal} by {resource.pk}.",
             body_template="fastapi/ops/get.py.j2",
-            extra_imports=[("sqlalchemy", "select"), *utils_imports()],
+            body_context={"load_options": dump.load_options},
+            extra_imports=[
+                ("sqlalchemy", "select"),
+                *utils_imports(),
+                *dump.load_imports,
+            ],
         )
 
         yield TestCase(
@@ -84,5 +95,5 @@ class Get:
             path=f"/{{{resource.pk}}}",
             status_success=200,
             status_not_found=404,
-            response_schema=schema.name,
+            response_schema=dump.main_schema.name,
         )

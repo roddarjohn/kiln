@@ -170,6 +170,74 @@ Each entry in a resource's ``operations`` list is either:
   foundry generates a ``POST /{id}/publish`` handler that calls
   ``blog.actions.publish``.
 
+Nested (related-model) fields
+-----------------------------
+
+Read ops (``get`` / ``list``) can dump a related SQLAlchemy model
+inline by giving a field ``type: "nested"``:
+
+.. code-block:: jsonnet
+
+   {
+     name: "get",
+     fields: [
+       { name: "id",    type: "uuid" },
+       { name: "title", type: "str" },
+       {
+         name: "author",
+         type: "nested",
+         model: "blog.models.Author",
+         fields: [
+           { name: "id",   type: "uuid" },
+           { name: "name", type: "str" },
+         ],
+       },
+     ],
+   }
+
+kiln emits a scoped sub-schema (``ArticleResourceAuthorNested``) and
+a sub-serializer (``to_article_resource_author_nested``), and attaches
+a ``selectinload(Article.author)`` to the handler's ``select(...)`` so
+the relationship is eagerly loaded -- lazy access in async SQLAlchemy
+would otherwise raise ``MissingGreenlet``.
+
+Collections use ``many: true``; the outer type becomes
+``list[...Nested]`` and the serializer list-comprehends:
+
+.. code-block:: jsonnet
+
+   {
+     name: "articles", type: "nested",
+     model: "blog.models.Article",
+     fields: [ { name: "id", type: "uuid" }, { name: "title", type: "str" } ],
+     many: true,
+   }
+
+Override the loader strategy per field with ``load:
+"selectin" | "joined" | "subquery"`` -- default is ``"selectin"``.
+Strategies mix across nesting levels, producing chains like
+``joinedload(Task.project).selectinload(Project.owner)`` on the
+outer ``select(...)``.  See :ref:`nested-fields` in the reference
+for all keys.
+
+The :mod:`kiln/fields.libsonnet` helper shortens the common shape:
+
+.. code-block:: jsonnet
+
+   local fields = import "kiln/fields.libsonnet";
+
+   fields: [
+     fields.id(),
+     { name: "title", type: "str" },
+     fields.nested("author", "blog.models.Author", [
+       fields.id(),
+       { name: "name", type: "str" },
+     ]),
+   ]
+
+Nested fields are read-only: ``create`` / ``update`` request bodies
+must use scalar fields.
+
 Built-in operations
 -------------------
 
@@ -247,6 +315,8 @@ See :doc:`reference` for the full stdlib list.  The most common:
 
 * ``kiln/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
 * ``kiln/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
+* ``kiln/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
+  and ``fields.nested(name, model, fields, many=false, load="selectin")``.
 
 Testing the generated code
 --------------------------

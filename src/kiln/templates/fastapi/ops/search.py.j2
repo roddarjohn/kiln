@@ -1,6 +1,13 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
     stmt = select({{ model_name }})
+{% if load_options|default([]) %}
+    stmt = stmt.options(
+{% for opt in load_options %}
+        {{ opt }},
+{% endfor %}
+    )
+{% endif %}
 {% if has_filter %}
     if body.filter is not None:
         stmt = apply_filters(stmt, body.filter, {{ model_name }})

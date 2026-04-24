@@ -25,8 +25,7 @@ from kiln.operations.types import (
     SchemaClass,
     SerializerFn,
     TestCase,
-    _construct_response_schema,
-    _construct_serializer,
+    _construct_dump,
 )
 
 if TYPE_CHECKING:
@@ -98,14 +97,18 @@ class List:
             "ResourceConfig",
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
-        _, model = Name.from_dotted(resource.model)
+        model_module, model = Name.from_dotted(resource.model)
         pk_name = getattr(resource, "pk", "id")
 
-        list_item = _construct_response_schema(
-            model, options.fields, suffix="ListItem"
+        dump = _construct_dump(
+            model,
+            model_module,
+            options.fields,
+            suffix="ListItem",
+            stem="list_item",
         )
-
-        serializer = _construct_serializer(model, list_item, stem="list_item")
+        list_item = dump.main_schema
+        serializer = dump.main_serializer
         search_request_name = model.suffixed("SearchRequest")
         search_request = SchemaClass(
             name=search_request_name,
@@ -142,8 +145,9 @@ class List:
                 "default_sort_dir": "asc",
                 "max_page_size": 100,
                 "cursor_field": pk_name,
+                "load_options": dump.load_options,
             },
-            extra_imports=[("sqlalchemy", "select")],
+            extra_imports=[("sqlalchemy", "select"), *dump.load_imports],
         )
 
         test_case = TestCase(
@@ -156,7 +160,11 @@ class List:
             is_list_response=True,
         )
 
+        # Nested sub-schemas / sub-serializers are ordered deepest-first
+        # so they render before the parent class that references them.
+        yield from dump.nested_schemas
         yield list_item
+        yield from dump.nested_serializers
         yield serializer
         yield search_request
         yield handler
@@ -190,5 +198,7 @@ def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
         "ResourceConfig",
         ctx.store.ancestor_of(ctx.instance_id, "resource"),
     )
+
     _, model = Name.from_dotted(resource.model)
+
     return model

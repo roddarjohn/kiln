@@ -31,6 +31,7 @@ from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.list import ListResult
 from kiln.operations.types import (
     EnumClass,
+    Field,
     RouteHandler,
     SchemaClass,
     SerializerFn,
@@ -325,6 +326,35 @@ def _handler_context(
     }
 
 
+def _mock_row_lines(fields: list[Field], target: str) -> list[str]:
+    """Emit ``_mock_row()`` assignment lines for ``fields`` under ``target``.
+
+    Scalars become ``{target}.{name} = _sample("{py_type}")``.
+
+    Scalar-nested fields descend via dotted paths
+    (``row.author.id = _sample(...)``) — ``MagicMock`` auto-creates
+    the intermediate attribute.
+
+    Collection-nested fields (``many=True``) are intentionally left
+    unset: ``MagicMock`` supports ``__iter__`` returning an empty
+    iterator by default, so the generated list comprehension
+    ``[to_sub(x) for x in obj.tags]`` produces ``[]`` without any
+    explicit fixture plumbing.  Pydantic accepts an empty
+    ``list[Nested]``, so the route test still passes.
+    """
+    lines: list[str] = []
+    for f in fields:
+        if f.nested_serializer is not None and f.many:
+            continue
+        if f.nested_serializer is not None:
+            lines.extend(
+                _mock_row_lines(f.nested_fields or [], f"{target}.{f.name}")
+            )
+            continue
+        lines.append(f'{target}.{f.name} = _sample("{f.py_type}")')
+    return lines
+
+
 @registry.renders(SerializerFn)
 def _serializer_fragment(
     ser: SerializerFn, ctx: RenderCtx
@@ -333,7 +363,7 @@ def _serializer_fragment(
     ser_path = f"{info.app}/serializers/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
-    imports.add_from(info.model_module, info.model.pascal)
+    imports.add_from(ser.model_module, ser.model_name)
     schema_mod = prefix_import(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
@@ -352,7 +382,14 @@ def _serializer_fragment(
             "function_name": ser.function_name,
             "model_name": ser.model_name,
             "schema_name": ser.schema_name,
-            "fields": [{"name": f.name} for f in ser.fields],
+            "fields": [
+                {
+                    "name": f.name,
+                    "nested_serializer": f.nested_serializer,
+                    "many": f.many,
+                }
+                for f in ser.fields
+            ],
         },
         imports=imports,
     )
@@ -372,10 +409,19 @@ def _serializer_fragment(
         yield FileFragment(
             path=test_path,
             template="fastapi/test_outer.py.j2",
-            context={"has_serializer_test": True},
+            context={
+                "has_serializer_test": True,
+                "mock_row_lines": _mock_row_lines(ser.fields, "row"),
+            },
             imports=test_imports,
         )
         for f in ser.fields:
+            # Nested fields don't roundtrip through the naive mock-row
+            # serializer test (the test compares ORM attrs to schema
+            # attrs directly; nested fields go through a sub-serializer
+            # and produce a different object).
+            if f.nested_serializer is not None:
+                continue
             yield SnippetFragment(
                 path=test_path,
                 slot="serializer_fields",

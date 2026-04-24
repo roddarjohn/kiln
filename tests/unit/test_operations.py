@@ -541,6 +541,20 @@ class TestCrudHelpers:
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
 
+    def test_field_dicts_rejects_nested(self):
+        import pytest
+
+        fields = [
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+            ),
+        ]
+        with pytest.raises(ValueError, match="only supported on read"):
+            _field_dicts(fields)
+
 
 # -------------------------------------------------------------------
 # Get
@@ -611,6 +625,376 @@ class TestGet:
         assert handler.path == "/{user_id}"
         assert handler.params[0].name == "user_id"
         assert handler.params[0].annotation == "int"
+
+    def test_get_with_nested_field_emits_sub_schema_and_serializer(self):
+        """A nested field adds its own schema + serializer alongside main."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(name="title", type="str"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(name="name", type="str"),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        # Parent schema's project field references the nested class name.
+        parent = schemas[1]
+        project_field = next(f for f in parent.fields if f.name == "project")
+        assert project_field.py_type == "TaskResourceProjectNested"
+        assert project_field.nested_serializer == (
+            "to_task_resource_project_nested"
+        )
+        assert project_field.many is False
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+        nested_ser = sers[0]
+        assert nested_ser.model_name == "Project"
+        assert nested_ser.model_module == "blog.models"
+        assert nested_ser.schema_name == "TaskResourceProjectNested"
+        assert [f.name for f in nested_ser.fields] == ["id", "name"]
+
+        main_ser = sers[1]
+        assert main_ser.model_module == "blog.models"
+        assert main_ser.model_name == "Task"
+
+    def test_get_with_nested_many_wraps_in_list(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="articles",
+                type="nested",
+                model="blog.models.Article",
+                fields=[FieldSpec(name="id", type="uuid")],
+                many=True,
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Author")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        parent = next(
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.name == "AuthorResource"
+        )
+        articles = next(f for f in parent.fields if f.name == "articles")
+        assert articles.py_type == "list[AuthorResourceArticlesNested]"
+        assert articles.many is True
+
+    def test_get_with_nested_emits_selectinload_by_default(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)",
+        ]
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
+
+    def test_get_with_nested_load_override(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+                load="joined",
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "joinedload(Task.project)",
+        ]
+        assert ("sqlalchemy.orm", "joinedload") in handler.extra_imports
+
+    def test_get_with_nested_in_nested_builds_chain(self):
+        """Chains go parent→related→deeper; related model gets imported."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[FieldSpec(name="name", type="str")],
+                        load="joined",
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project).joinedload(Project.owner)",
+        ]
+        # Both loader funcs and the intermediate model class are needed.
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
+        assert ("sqlalchemy.orm", "joinedload") in handler.extra_imports
+        assert ("blog.models", "Project") in handler.extra_imports
+
+    def test_get_without_nested_has_empty_load_options(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == []
+        assert not any(
+            mod == "sqlalchemy.orm" for mod, _ in handler.extra_imports
+        )
+
+    def test_get_with_nested_in_nested(self):
+        """Nested fields recurse: names accumulate down the path."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[FieldSpec(name="name", type="str")],
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        # Deepest-first: owner, then project, then parent.
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectOwnerNested",
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_owner_nested",
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+    def test_get_with_four_levels_of_nesting(self):
+        """Recursion scales: 4 levels produce 4 sub-schemas + 4 sub-serializers.
+
+        Tests that path accumulation, schema ordering (deepest-first),
+        sub-serializer wiring, and the load-chain builder all compose
+        down a 4-deep nested path with mixed load strategies at every
+        level.
+        """
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[
+                            FieldSpec(
+                                name="team",
+                                type="nested",
+                                model="blog.models.Team",
+                                fields=[
+                                    FieldSpec(
+                                        name="org",
+                                        type="nested",
+                                        model="blog.models.Org",
+                                        fields=[
+                                            FieldSpec(name="id", type="uuid"),
+                                        ],
+                                        load="subquery",
+                                    ),
+                                ],
+                                load="joined",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        # Every level contributes one schema + one serializer; deepest first.
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectOwnerTeamOrgNested",
+            "TaskResourceProjectOwnerTeamNested",
+            "TaskResourceProjectOwnerNested",
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_owner_team_org_nested",
+            "to_task_resource_project_owner_team_nested",
+            "to_task_resource_project_owner_nested",
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+        # Every intermediate sub-serializer references the next one down.
+        project_ser = next(
+            s for s in sers if s.function_name.endswith("_project_nested")
+        )
+        project_owner_field = next(
+            f for f in project_ser.fields if f.name == "owner"
+        )
+        assert project_owner_field.nested_serializer == (
+            "to_task_resource_project_owner_nested"
+        )
+
+        # Load chain spans all four levels, each with its configured strategy.
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)"
+            ".selectinload(Project.owner)"
+            ".joinedload(User.team)"
+            ".subqueryload(Team.org)",
+        ]
+
+        # Every loader and every intermediate model class is imported.
+        imports = handler.extra_imports
+        assert ("sqlalchemy.orm", "selectinload") in imports
+        assert ("sqlalchemy.orm", "joinedload") in imports
+        assert ("sqlalchemy.orm", "subqueryload") in imports
+        assert ("blog.models", "Project") in imports
+        assert ("blog.models", "User") in imports
+        assert ("blog.models", "Team") in imports
+
+    def test_get_with_branching_nested_fields(self):
+        """Multiple nested siblings at the same level each get their own chain.
+
+        Sibling nested fields shouldn't interfere: their schemas,
+        serializers, and load chains should all coexist independently.
+        """
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="name", type="str")],
+            ),
+            FieldSpec(
+                name="tags",
+                type="nested",
+                model="blog.models.Tag",
+                fields=[FieldSpec(name="name", type="str")],
+                many=True,
+            ),
+            FieldSpec(
+                name="owner",
+                type="nested",
+                model="blog.models.User",
+                fields=[FieldSpec(name="email", type="email")],
+                load="joined",
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schema_names = {
+            s.name
+            for s in result
+            if isinstance(s, SchemaClass) and s.body_template is None
+        }
+        assert {
+            "TaskResource",
+            "TaskResourceProjectNested",
+            "TaskResourceTagsNested",
+            "TaskResourceOwnerNested",
+        } <= schema_names
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)",
+            "selectinload(Task.tags)",
+            "joinedload(Task.owner)",
+        ]
+
+    def test_get_with_nested_in_nested_many_chain(self):
+        """``many=true`` inside a nested chain still produces a single chain."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(
+                        name="tasks",
+                        type="nested",
+                        model="blog.models.Subtask",
+                        fields=[FieldSpec(name="id", type="uuid")],
+                        many=True,
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project).selectinload(Project.tasks)",
+        ]
 
 
 # -------------------------------------------------------------------
@@ -745,6 +1129,60 @@ class TestList:
         assert tests[0].method == "post"
         assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
+
+    def test_list_with_nested_emits_load_options(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="assignees",
+                type="nested",
+                model="blog.models.User",
+                fields=[FieldSpec(name="id", type="uuid")],
+                many=True,
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.assignees)",
+        ]
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
+
+    def test_list_with_nested_field_emits_scoped_sub_schema(self):
+        """List-item nested schema is scoped under ListItem, not Resource."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="name", type="str")],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=fields)))
+
+        schemas = [
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.body_template is None
+        ]
+        # Scoping under the list item keeps names distinct from a Get
+        # op's nested schemas on the same resource.
+        assert [s.name for s in schemas] == [
+            "TaskListItemProjectNested",
+            "TaskListItem",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_list_item_project_nested",
+            "to_task_list_item",
+        ]
 
 
 class TestFilter:
