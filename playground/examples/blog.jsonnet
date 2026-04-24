@@ -9,8 +9,8 @@
 //   - Custom CRUD with per-operation auth and uuid PK (Article)
 //   - Actions with params
 
-local resource = import "kiln/resources/presets.libsonnet";
 local fields = import "kiln/fields.libsonnet";
+local resource = import "kiln/resources/presets.libsonnet";
 
 {
   version: "1",
