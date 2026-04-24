@@ -232,11 +232,23 @@ _TRANSPORTS: dict[Source, type[_Transport]] = {
 }
 
 
+async def _no_token() -> str | None:
+    """Stand-in extractor for a source that isn't configured.
+
+    Lets :func:`session_auth` expose a uniform ``(bearer, cookie)``
+    signature regardless of which sources are actually in use.
+    FastAPI doesn't add a security scheme for a plain
+    ``Depends(_no_token)``, so OpenAPI still advertises only the
+    configured sources.
+    """
+    return None
+
+
 def _build_transports(
     sources: Sequence[Source],
     **config: Any,
-) -> list[_Transport]:
-    """Build transport instances from the public ``sources`` spec.
+) -> dict[Source, _Transport]:
+    """Build transport instances keyed on source name.
 
     Dispatches through :data:`_TRANSPORTS` so each subclass owns
     its own config-extraction rules via
@@ -252,7 +264,7 @@ def _build_transports(
     if not sources:
         msg = f"sources must contain at least one of {sorted(_TRANSPORTS)}"
         raise ValueError(msg)
-    return [_TRANSPORTS[src].from_config(**config) for src in sources]
+    return {src: _TRANSPORTS[src].from_config(**config) for src in sources}
 
 
 def encode_jwt(
