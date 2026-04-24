@@ -10,10 +10,14 @@ Two transports are supported:
   for SPA / server-rendered frontends and keeps the token out of
   reach of JS (mitigating XSS token theft).
 
-Both transports sign the same JWT with the same secret; only the
-carrier differs.  Generated ``auth/dependencies.py`` and
-``auth/router.py`` files are thin wiring that binds one of the two
-dependency factories below and one of the two token-issuance helpers.
+Both transports sign the same JWT with the same secret and carry the
+same typed session payload; only the carrier differs.
+
+The session is a caller-supplied Pydantic model.
+:func:`bearer_auth` / :func:`cookie_auth` return a dependency that
+parses validated JWT claims into an instance of that model;
+:func:`issue_bearer_token` / :func:`set_auth_cookie` accept an
+instance of the same model and dump it into the token.
 
 The secret is read from an environment variable named by the caller
 (typically ``JWT_SECRET``) so that the rendered source never embeds
@@ -29,9 +33,10 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import jwt
 from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from fastapi import Response
 
@@ -113,84 +118,92 @@ def decode_jwt(
 
 
 def bearer_auth(
+    schema: type[SessionT],
     *,
     token_url: str,
     secret_env: str,
     algorithm: str,
-) -> Callable[..., Any]:
-    """Build a ``get_current_user`` dependency for bearer-token auth.
+) -> Callable[..., Awaitable[SessionT]]:
+    """Build a ``get_session`` dependency for bearer-token auth.
 
     The returned callable is suitable for ``Depends(...)`` and reads
     the token via :class:`fastapi.security.OAuth2PasswordBearer`, so
-    Swagger's *Authorize* flow wires up automatically.
+    Swagger's *Authorize* flow wires up automatically.  The JWT
+    claims are validated into an instance of *schema* before the
+    dep returns.
 
     Args:
+        schema: Pydantic model describing the session payload.
         token_url: Path of the login endpoint, surfaced to OpenAPI.
         secret_env: Environment variable holding the signing secret.
         algorithm: Expected signing algorithm.
 
     Returns:
-        An async dependency that yields the decoded JWT payload.
+        An async dependency that yields a *schema* instance.
 
     """
     oauth2_scheme = OAuth2PasswordBearer(tokenUrl=token_url)
 
-    async def get_current_user(
+    async def get_session(
         token: Annotated[str, Depends(oauth2_scheme)],
-    ) -> dict[str, Any]:
-        return decode_jwt(
+    ) -> SessionT:
+        claims = decode_jwt(
             token,
             secret_env=secret_env,
             algorithm=algorithm,
         )
+        return schema.model_validate(claims)
 
-    return get_current_user
+    return get_session
 
 
 def cookie_auth(
+    schema: type[SessionT],
     *,
     cookie_name: str,
     secret_env: str,
     algorithm: str,
-) -> Callable[..., Any]:
-    """Build a ``get_current_user`` dependency for cookie-based auth.
+) -> Callable[..., Awaitable[SessionT]]:
+    """Build a ``get_session`` dependency for cookie-based auth.
 
     Reads the JWT from a named cookie using :class:`fastapi.Cookie`.
     A missing cookie maps to HTTP 401 with the same
     ``WWW-Authenticate: Bearer`` header used by the header-based
     transport, so clients see a consistent failure shape regardless
-    of transport.
+    of transport.  Validated claims are parsed into *schema*.
 
     Args:
+        schema: Pydantic model describing the session payload.
         cookie_name: Name of the cookie carrying the JWT.
         secret_env: Environment variable holding the signing secret.
         algorithm: Expected signing algorithm.
 
     Returns:
-        An async dependency that yields the decoded JWT payload.
+        An async dependency that yields a *schema* instance.
 
     """
 
-    async def get_current_user(
+    async def get_session(
         token: Annotated[str | None, Cookie(alias=cookie_name)] = None,
-    ) -> dict[str, Any]:
+    ) -> SessionT:
         if token is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return decode_jwt(
+        claims = decode_jwt(
             token,
             secret_env=secret_env,
             algorithm=algorithm,
         )
+        return schema.model_validate(claims)
 
-    return get_current_user
+    return get_session
 
 
 def issue_bearer_token(
-    payload: dict[str, Any] | None,
+    session: BaseModel | None,
     *,
     secret_env: str,
     algorithm: str,
@@ -198,12 +211,12 @@ def issue_bearer_token(
 ) -> dict[str, str]:
     """Return an OAuth2-shaped token response for a login endpoint.
 
-    Collapses the "verify returned None" case into a 401 so login
+    Collapses the "validate returned None" case into a 401 so login
     handlers stay one-liners.  Callers pass the result of their
-    credential-verification function directly.
+    validation function directly.
 
     Args:
-        payload: Claims returned by the verifier, or ``None`` when
+        session: Validated session model, or ``None`` when
             credentials did not match.
         secret_env: Environment variable holding the signing secret.
         algorithm: JWT signing algorithm.
@@ -213,17 +226,17 @@ def issue_bearer_token(
         ``{"access_token": <jwt>, "token_type": "bearer"}``.
 
     Raises:
-        HTTPException: 401 if *payload* is ``None``.
+        HTTPException: 401 if *session* is ``None``.
 
     """
-    if payload is None:
+    if session is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = encode_jwt(
-        payload,
+        session.model_dump(mode="json"),
         secret_env=secret_env,
         algorithm=algorithm,
         ttl=ttl,
@@ -233,7 +246,7 @@ def issue_bearer_token(
 
 def set_auth_cookie(
     response: Response,
-    payload: dict[str, Any] | None,
+    session: BaseModel | None,
     *,
     cookie_name: str,
     secret_env: str,
@@ -251,7 +264,7 @@ def set_auth_cookie(
 
     Args:
         response: The FastAPI response that will carry the cookie.
-        payload: Claims from the verifier, or ``None`` on failure.
+        session: Validated session model, or ``None`` on failure.
         cookie_name: Name of the cookie.
         secret_env: Environment variable holding the signing secret.
         algorithm: JWT signing algorithm.
@@ -260,17 +273,17 @@ def set_auth_cookie(
         samesite: SameSite attribute value.
 
     Raises:
-        HTTPException: 401 if *payload* is ``None``.
+        HTTPException: 401 if *session* is ``None``.
 
     """
-    if payload is None:
+    if session is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = encode_jwt(
-        payload,
+        session.model_dump(mode="json"),
         secret_env=secret_env,
         algorithm=algorithm,
         ttl=ttl,

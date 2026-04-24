@@ -125,6 +125,7 @@ class AuthScaffold:
         )
 
         creds_module, creds_name = auth.credentials_schema.rsplit(".", 1)
+        session_module, session_name = auth.session_schema.rsplit(".", 1)
         validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
         yield StaticFile(
             path="auth/router.py",
@@ -132,6 +133,8 @@ class AuthScaffold:
             context={
                 "creds_module": creds_module,
                 "creds_name": creds_name,
+                "session_module": session_module,
+                "session_name": session_name,
                 "validate_module": validate_module,
                 "validate_name": validate_name,
                 "transport": auth.type,

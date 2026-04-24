@@ -79,15 +79,17 @@ class Auth:
         """
         auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
         gs_module, gs_name = auth_cfg.get_session_fn.rsplit(".", 1)
-        import_name = (
+        gs_import_name = (
             gs_name if gs_name == "get_session" else f"{gs_name} as get_session"
         )
+        session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(
-                "session: Annotated[dict, Depends(get_session)],"
+                f"session: Annotated[{session_name}, Depends(get_session)],"
             )
-            handler.extra_imports.append((gs_module, import_name))
+            handler.extra_imports.append((gs_module, gs_import_name))
+            handler.extra_imports.append((session_module, session_name))
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
             test.requires_auth = True

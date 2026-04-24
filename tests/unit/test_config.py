@@ -52,6 +52,7 @@ def test_project_config_apps_mode_untouched():
 def test_auth_config_defaults():
     auth = AuthConfig(
         credentials_schema="myapp.auth.LoginCredentials",
+        session_schema="myapp.auth.Session",
         validate_fn="myapp.auth.validate",
         get_session_fn="myapp.auth.get_session",
     )
@@ -62,9 +63,16 @@ def test_auth_config_defaults():
 
 
 def test_auth_config_all_fns_required():
-    for missing in ("credentials_schema", "validate_fn", "get_session_fn"):
+    fields = (
+        "credentials_schema",
+        "session_schema",
+        "validate_fn",
+        "get_session_fn",
+    )
+    for missing in fields:
         kwargs = {
             "credentials_schema": "myapp.auth.LoginCredentials",
+            "session_schema": "myapp.auth.Session",
             "validate_fn": "myapp.auth.validate",
             "get_session_fn": "myapp.auth.get_session",
         }

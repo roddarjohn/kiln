@@ -3,12 +3,12 @@
 {% set _extra %}
 The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
 and passed to ``{{ validate_module }}.{{ validate_name }}``, which
-must return a ``dict`` of session data on success or ``None`` on
-failure.
+must return a ``{{ session_module }}.{{ session_name }}`` instance on
+success or ``None`` on failure.
 
-On success, the JWT is set as an ``httpOnly`` cookie named
-``{{ cookie_name }}``.  A ``POST {{ token_url }}/logout`` endpoint
-clears it.
+On success, a JWT encoding the session is set as an ``httpOnly``
+cookie named ``{{ cookie_name }}``.  A ``POST {{ token_url }}/logout``
+endpoint clears it.
 
 Mount this router in your application::
 
@@ -72,15 +72,20 @@ def logout(response: Response) -> dict[str, bool]:
 {% set _extra %}
 The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
 and passed to ``{{ validate_module }}.{{ validate_name }}``, which
-must return a ``dict`` of session data on success or ``None`` on
-failure.
+must return a ``{{ session_module }}.{{ session_name }}`` instance on
+success or ``None`` on failure.
+
+A ``POST {{ token_url }}/logout`` endpoint is generated for parity
+with the cookie transport; for bearer tokens it is a client-side
+concern (clients discard the token), so the server response is a
+no-op ``{"ok": True}``.
 
 Mount this router in your application::
 
     from auth.router import router as auth_router
     app.include_router(auth_router)
 {% endset %}
-{{ file_header("JWT auth endpoint", extra=_extra) }}
+{{ file_header("JWT auth endpoints", extra=_extra) }}
 
 from __future__ import annotations
 
@@ -112,4 +117,15 @@ def create_token(credentials: {{ creds_name }}) -> dict[str, str]:
         secret_env="{{ secret_env }}",
         algorithm="{{ algorithm }}",
     )
+
+
+@router.post("{{ token_url }}/logout")
+def logout() -> dict[str, bool]:
+    """Acknowledge logout for bearer clients.
+
+    Bearer logout is a client-side concern (the client discards the
+    token); this endpoint exists so frontends have one consistent
+    logout URL regardless of the configured transport.
+    """
+    return {"ok": True}
 {% endif %}

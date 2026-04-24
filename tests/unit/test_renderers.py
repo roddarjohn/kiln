@@ -502,6 +502,7 @@ def test_testcase_fragment_with_tests(registry):
             _resource(generate_tests=True),
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
             ),

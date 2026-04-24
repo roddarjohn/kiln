@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import jwt
 import pytest
 from fastapi import HTTPException
+from pydantic import BaseModel
 
 from ingot.auth import (
     bearer_auth,
@@ -22,6 +23,13 @@ from ingot.auth import (
 SECRET = "test-secret-at-least-32-bytes-long-for-hs256"  # noqa: S105
 ENV_VAR = "INGOT_TEST_JWT_SECRET"
 ALG = "HS256"
+
+
+class Session(BaseModel):
+    """Test session model — typical minimal shape."""
+
+    sub: str
+    roles: list[str] = []
 
 
 @pytest.fixture(autouse=True)
@@ -100,18 +108,26 @@ class TestEncodeDecode:
 class TestBearerAuth:
     """Header-based dependency factory."""
 
-    async def test_returns_decoded_payload(self) -> None:
+    async def test_returns_schema_instance(self) -> None:
         dep = bearer_auth(
+            Session,
             token_url="/auth/token",  # noqa: S106
             secret_env=ENV_VAR,
             algorithm=ALG,
         )
-        token = encode_jwt({"sub": "alice"}, secret_env=ENV_VAR, algorithm=ALG)
-        payload = await dep(token)
-        assert payload["sub"] == "alice"
+        token = encode_jwt(
+            {"sub": "alice", "roles": ["admin"]},
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+        )
+        session = await dep(token)
+        assert isinstance(session, Session)
+        assert session.sub == "alice"
+        assert session.roles == ["admin"]
 
     async def test_invalid_token_raises_401(self) -> None:
         dep = bearer_auth(
+            Session,
             token_url="/auth/token",  # noqa: S106
             secret_env=ENV_VAR,
             algorithm=ALG,
@@ -129,17 +145,28 @@ class TestBearerAuth:
 class TestCookieAuth:
     """Cookie-based dependency factory."""
 
-    async def test_returns_decoded_payload(self) -> None:
+    async def test_returns_schema_instance(self) -> None:
         dep = cookie_auth(
-            cookie_name="session", secret_env=ENV_VAR, algorithm=ALG
+            Session,
+            cookie_name="session",
+            secret_env=ENV_VAR,
+            algorithm=ALG,
         )
-        token = encode_jwt({"sub": "alice"}, secret_env=ENV_VAR, algorithm=ALG)
-        payload = await dep(token)
-        assert payload["sub"] == "alice"
+        token = encode_jwt(
+            {"sub": "alice"},
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+        )
+        session = await dep(token)
+        assert isinstance(session, Session)
+        assert session.sub == "alice"
 
     async def test_missing_cookie_is_401(self) -> None:
         dep = cookie_auth(
-            cookie_name="session", secret_env=ENV_VAR, algorithm=ALG
+            Session,
+            cookie_name="session",
+            secret_env=ENV_VAR,
+            algorithm=ALG,
         )
         with pytest.raises(HTTPException) as exc:
             await dep(None)
@@ -148,7 +175,10 @@ class TestCookieAuth:
 
     async def test_invalid_cookie_is_401(self) -> None:
         dep = cookie_auth(
-            cookie_name="session", secret_env=ENV_VAR, algorithm=ALG
+            Session,
+            cookie_name="session",
+            secret_env=ENV_VAR,
+            algorithm=ALG,
         )
         with pytest.raises(HTTPException) as exc:
             await dep("not-a-jwt")
@@ -165,7 +195,7 @@ class TestIssueBearerToken:
 
     def test_returns_oauth2_shape(self) -> None:
         out = issue_bearer_token(
-            {"sub": "alice"}, secret_env=ENV_VAR, algorithm=ALG
+            Session(sub="alice"), secret_env=ENV_VAR, algorithm=ALG
         )
         assert out["token_type"] == "bearer"  # noqa: S105
         decoded = decode_jwt(
@@ -173,7 +203,7 @@ class TestIssueBearerToken:
         )
         assert decoded["sub"] == "alice"
 
-    def test_none_payload_raises_401(self) -> None:
+    def test_none_session_raises_401(self) -> None:
         with pytest.raises(HTTPException) as exc:
             issue_bearer_token(None, secret_env=ENV_VAR, algorithm=ALG)
         assert exc.value.status_code == 401
@@ -186,7 +216,7 @@ class TestSetAuthCookie:
         response = MagicMock()
         set_auth_cookie(
             response,
-            {"sub": "alice"},
+            Session(sub="alice"),
             cookie_name="session",
             secret_env=ENV_VAR,
             algorithm=ALG,
@@ -204,7 +234,7 @@ class TestSetAuthCookie:
         decoded = decode_jwt(kwargs["value"], secret_env=ENV_VAR, algorithm=ALG)
         assert decoded["sub"] == "alice"
 
-    def test_none_payload_raises_401(self) -> None:
+    def test_none_session_raises_401(self) -> None:
         response = MagicMock()
         with pytest.raises(HTTPException) as exc:
             set_auth_cookie(

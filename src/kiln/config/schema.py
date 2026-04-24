@@ -100,15 +100,22 @@ class AuthConfig(BaseModel):
     type alias) accepted as the JSON request body of the login
     endpoint, e.g. ``"myapp.auth.LoginCredentials"``."""
 
+    session_schema: str
+    """Dotted path to the Pydantic model carried in the token and
+    returned by :attr:`get_session_fn`, e.g. ``"myapp.auth.Session"``.
+    Fields must be JSON-serializable so Pydantic can round-trip the
+    model through the JWT claims."""
+
     validate_fn: str
-    """Dotted path to a function ``(creds) -> dict | None`` where
-    ``creds`` is the parsed :attr:`credentials_schema` instance.
-    Returns the session dict on success or ``None`` to reject."""
+    """Dotted path to a function ``(creds) -> Session | None`` where
+    ``creds`` is the parsed :attr:`credentials_schema` instance and
+    ``Session`` is the :attr:`session_schema` model.  Returns the
+    session on success or ``None`` to reject."""
 
     get_session_fn: str
     """Dotted path to the FastAPI dependency that validates the
-    incoming token or cookie and returns the session dict,
-    e.g. ``"myapp.auth.get_session"``."""
+    incoming token or cookie and returns a :attr:`session_schema`
+    instance, e.g. ``"myapp.auth.get_session"``."""
 
     type: Literal["jwt", "cookie"] = "jwt"
     secret_env: str = "JWT_SECRET"  # noqa: S105

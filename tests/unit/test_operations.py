@@ -185,6 +185,7 @@ class TestScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
             )
@@ -213,6 +214,7 @@ class TestAuthScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
             )
@@ -225,6 +227,7 @@ class TestAuthScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
             )
@@ -239,6 +242,7 @@ class TestAuthScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate_login",
                 get_session_fn="myapp.auth.get_session",
             )
@@ -248,6 +252,8 @@ class TestAuthScaffold:
         router = next(f for f in result if f.path == "auth/router.py")
         assert router.context["creds_module"] == "myapp.auth"
         assert router.context["creds_name"] == "LoginCredentials"
+        assert router.context["session_module"] == "myapp.auth"
+        assert router.context["session_name"] == "Session"
         assert router.context["validate_module"] == "myapp.auth"
         assert router.context["validate_name"] == "validate_login"
 
@@ -256,6 +262,7 @@ class TestAuthScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
             )
@@ -271,6 +278,7 @@ class TestAuthScaffold:
             auth=AuthConfig(
                 type="cookie",
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
                 cookie_name="session",
@@ -294,6 +302,7 @@ class TestAuthScaffold:
             AuthConfig(
                 type="cookie",
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
                 get_session_fn="myapp.auth.get_session",
                 cookie_samesite="none",
@@ -557,6 +566,7 @@ class TestProjectRouter:
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
                 validate_fn="myapp.verify",
                 get_session_fn="myapp.auth.get_session",
             ),
