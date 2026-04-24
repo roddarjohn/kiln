@@ -31,6 +31,7 @@ from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.list import ListResult
 from kiln.operations.types import (
     EnumClass,
+    Field,
     RouteHandler,
     SchemaClass,
     SerializerFn,
@@ -325,6 +326,35 @@ def _handler_context(
     }
 
 
+def _mock_row_lines(fields: list[Field], target: str) -> list[str]:
+    """Emit ``_mock_row()`` assignment lines for ``fields`` under ``target``.
+
+    Scalars become ``{target}.{name} = _sample("{py_type}")``.
+
+    Scalar-nested fields descend via dotted paths
+    (``row.author.id = _sample(...)``) — ``MagicMock`` auto-creates
+    the intermediate attribute.
+
+    Collection-nested fields (``many=True``) are intentionally left
+    unset: ``MagicMock`` supports ``__iter__`` returning an empty
+    iterator by default, so the generated list comprehension
+    ``[to_sub(x) for x in obj.tags]`` produces ``[]`` without any
+    explicit fixture plumbing.  Pydantic accepts an empty
+    ``list[Nested]``, so the route test still passes.
+    """
+    lines: list[str] = []
+    for f in fields:
+        if f.nested_serializer is not None and f.many:
+            continue
+        if f.nested_serializer is not None:
+            lines.extend(
+                _mock_row_lines(f.nested_fields or [], f"{target}.{f.name}")
+            )
+            continue
+        lines.append(f'{target}.{f.name} = _sample("{f.py_type}")')
+    return lines
+
+
 @registry.renders(SerializerFn)
 def _serializer_fragment(
     ser: SerializerFn, ctx: RenderCtx
@@ -379,7 +409,10 @@ def _serializer_fragment(
         yield FileFragment(
             path=test_path,
             template="fastapi/test_outer.py.j2",
-            context={"has_serializer_test": True},
+            context={
+                "has_serializer_test": True,
+                "mock_row_lines": _mock_row_lines(ser.fields, "row"),
+            },
             imports=test_imports,
         )
         for f in ser.fields:

@@ -66,6 +66,11 @@ class Field:
     """When ``True`` with ``nested_serializer`` set, the source
     attribute is a collection and each element is serialized through
     ``nested_serializer``."""
+    nested_fields: list[Field] | None = None
+    """Sub-field list when this is a nested field.  Carried through
+    so renderers can walk the full nested structure (e.g. generated
+    test fixtures need to populate scalar-nested paths like
+    ``row.author.id`` on the mock ORM row)."""
 
 
 @dataclass
@@ -393,6 +398,7 @@ def _expand_field_specs(
                 py_type=py_type,
                 nested_serializer=nested_fn_name,
                 many=fs.many,
+                nested_fields=inner_fields,
             )
         )
 
