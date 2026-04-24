@@ -28,6 +28,19 @@ Source = Literal["bearer", "cookie"]
 SameSite = Literal["lax", "strict", "none"]
 
 
+class LoginResponse(BaseModel):
+    """OAuth2-shaped login body for the bearer case."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"  # noqa: S105 -- not a secret
+
+
+class OkResponse(BaseModel):
+    """Minimal ack body for cookie-only login and every logout."""
+
+    ok: Literal[True] = True
+
+
 class SessionStore(Protocol):
     """Hook pair for server-side session state (deny-list, sessions, ...).
 
@@ -69,16 +82,16 @@ def _revoked() -> HTTPException:
 class _Transport:
     """One way a JWT rides the request/response pair.
 
-    Each subclass owns three operations:
-
-    * :meth:`extract_dep` -- FastAPI dep returning the token from
-      this transport, or ``None`` if absent.
-    * :meth:`emit` -- write a freshly-minted token to the
-      transport on login.  Returns a dict to become the response
-      body, or ``None`` when the transport lives entirely in
-      headers.
-    * :meth:`clear` -- tear the transport down on logout.
+    Subclasses register themselves against a :data:`Source` value
+    via :data:`_TRANSPORTS`; adding a third source (e.g. a header
+    carrying an API key) means writing a subclass and dropping an
+    entry in that dict -- no changes to the public functions.
     """
+
+    @classmethod
+    def from_config(cls, **kwargs: Any) -> "_Transport":
+        """Build an instance from the loose config kwargs."""
+        raise NotImplementedError
 
     def extract_dep(self) -> Callable[..., Awaitable[str | None]]:
         raise NotImplementedError
@@ -88,7 +101,13 @@ class _Transport:
         response: Response,
         token: str,
         ttl: datetime.timedelta,
-    ) -> dict[str, Any] | None:
+    ) -> LoginResponse | None:
+        """Write the token to this transport on login.
+
+        Returning a :class:`LoginResponse` makes it the response
+        body (the bearer case); returning ``None`` means the
+        transport lives in headers only (the cookie case).
+        """
         raise NotImplementedError
 
     def clear(self, response: Response) -> None:
@@ -98,10 +117,10 @@ class _Transport:
 class _BearerTransport(_Transport):
     """``Authorization: Bearer`` header.
 
-    Holds ``token_url`` only to feed :class:`OAuth2PasswordBearer`
-    (surfaces to OpenAPI for Swagger's Authorize button).  Runtime
-    extraction doesn't actually GET that URL, so ``issue_session``
-    and ``clear_session`` pass ``None``.
+    ``token_url`` only surfaces to OpenAPI via
+    :class:`OAuth2PasswordBearer`; runtime extraction reads the
+    header.  ``issue_session`` / ``clear_session`` don't call
+    :meth:`extract_dep` so they pass ``None``.
     """
 
     def __init__(self, token_url: str | None) -> None:
@@ -110,6 +129,10 @@ class _BearerTransport(_Transport):
             if token_url is not None
             else None
         )
+
+    @classmethod
+    def from_config(cls, **kwargs: Any) -> "_BearerTransport":
+        return cls(kwargs.get("token_url"))
 
     def extract_dep(self) -> Callable[..., Awaitable[str | None]]:
         if self._oauth is None:  # pragma: no cover -- session_auth pre-guards
@@ -129,11 +152,11 @@ class _BearerTransport(_Transport):
         response: Response,  # noqa: ARG002
         token: str,
         ttl: datetime.timedelta,  # noqa: ARG002
-    ) -> dict[str, Any] | None:
-        return {"access_token": token, "token_type": "bearer"}
+    ) -> LoginResponse | None:
+        return LoginResponse(access_token=token)
 
     def clear(self, response: Response) -> None:  # noqa: ARG002
-        # Bearer logout is client-side — clients discard the token.
+        # Bearer logout is client-side -- clients discard the token.
         return
 
 
@@ -141,8 +164,8 @@ class _CookieTransport(_Transport):
     """``httpOnly`` cookie.
 
     ``secure`` / ``samesite`` must match between :meth:`emit` and
-    :meth:`clear` — browsers refuse to overwrite an existing
-    cookie when those attributes differ.
+    :meth:`clear` -- browsers refuse to overwrite an existing
+    cookie when either attribute differs.
     """
 
     def __init__(
@@ -155,6 +178,18 @@ class _CookieTransport(_Transport):
         self._name = name
         self._secure = secure
         self._samesite = samesite
+
+    @classmethod
+    def from_config(cls, **kwargs: Any) -> "_CookieTransport":
+        name = kwargs.get("cookie_name")
+        if name is None:
+            msg = "cookie_name is required when 'cookie' is in sources"
+            raise ValueError(msg)
+        return cls(
+            name,
+            secure=kwargs.get("cookie_secure", True),
+            samesite=kwargs.get("cookie_samesite", "lax"),
+        )
 
     def extract_dep(self) -> Callable[..., Awaitable[str | None]]:
         name = self._name
@@ -171,7 +206,7 @@ class _CookieTransport(_Transport):
         response: Response,
         token: str,
         ttl: datetime.timedelta,
-    ) -> dict[str, Any] | None:
+    ) -> LoginResponse | None:
         response.set_cookie(
             key=self._name,
             value=token,
@@ -191,47 +226,33 @@ class _CookieTransport(_Transport):
         )
 
 
-_ALLOWED_SOURCES: tuple[Source, ...] = ("bearer", "cookie")
+_TRANSPORTS: dict[Source, type[_Transport]] = {
+    "bearer": _BearerTransport,
+    "cookie": _CookieTransport,
+}
 
 
 def _build_transports(
     sources: Sequence[Source],
-    *,
-    token_url: str | None = None,
-    cookie_name: str | None = None,
-    cookie_secure: bool = True,
-    cookie_samesite: SameSite = "lax",
+    **config: Any,
 ) -> list[_Transport]:
-    """Turn the public ``sources`` spec into transport instances.
+    """Build transport instances from the public ``sources`` spec.
 
-    Validates the args needed by the transports chosen; does *not*
-    enforce ``token_url`` for bearer, since ``issue_session`` /
-    ``clear_session`` construct bearer transports without one.
-    :func:`session_auth` guards that separately.
+    Dispatches through :data:`_TRANSPORTS` so each subclass owns
+    its own config-extraction rules via
+    :meth:`_Transport.from_config`.  ``session_auth`` still guards
+    the bearer-needs-``token_url`` case separately because
+    ``issue_session`` / ``clear_session`` build bearer transports
+    without one (they don't call :meth:`extract_dep`).
     """
-    unknown = [s for s in sources if s not in _ALLOWED_SOURCES]
+    unknown = [s for s in sources if s not in _TRANSPORTS]
     if unknown:
         msg = f"unknown source(s): {sorted(set(unknown))}"
         raise ValueError(msg)
     if not sources:
-        msg = "sources must contain at least one of 'bearer' or 'cookie'"
+        msg = f"sources must contain at least one of {sorted(_TRANSPORTS)}"
         raise ValueError(msg)
-    out: list[_Transport] = []
-    for src in sources:
-        if src == "bearer":
-            out.append(_BearerTransport(token_url))
-        else:
-            if cookie_name is None:
-                msg = "cookie_name is required when 'cookie' is in sources"
-                raise ValueError(msg)
-            out.append(
-                _CookieTransport(
-                    cookie_name,
-                    secure=cookie_secure,
-                    samesite=cookie_samesite,
-                )
-            )
-    return out
+    return [_TRANSPORTS[src].from_config(**config) for src in sources]
 
 
 def encode_jwt(
@@ -352,16 +373,13 @@ def issue_session(
     cookie_name: str | None = None,
     cookie_secure: bool = True,
     cookie_samesite: SameSite = "lax",
-) -> dict[str, Any]:
+) -> LoginResponse | OkResponse:
     """Mint a JWT and emit it to every configured transport.
 
     Collapses ``session is None`` (validate rejected the creds)
     to HTTP 401 so login handlers stay one-liners.  The JWT is
     encoded once and reused across transports; when both are
     configured the cookie and response body carry the same token.
-
-    Returns ``{"access_token", "token_type"}`` when bearer is in
-    *sources*, else ``{"ok": True}``.
     """
     transports = _build_transports(
         sources,
@@ -384,7 +402,7 @@ def issue_session(
         ttl=ttl,
     )
 
-    body: dict[str, Any] = {"ok": True}
+    body: LoginResponse | OkResponse = OkResponse()
     for t in transports:
         result = t.emit(response, token, ttl)
         if result is not None:
@@ -399,7 +417,7 @@ def clear_session(
     cookie_name: str | None = None,
     cookie_secure: bool = True,
     cookie_samesite: SameSite = "lax",
-) -> dict[str, bool]:
+) -> OkResponse:
     """Delete the session cookie if configured; ack for bearer.
 
     ``cookie_secure`` and ``cookie_samesite`` must match the values
@@ -414,4 +432,4 @@ def clear_session(
     )
     for t in transports:
         t.clear(response)
-    return {"ok": True}
+    return OkResponse()

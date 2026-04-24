@@ -11,6 +11,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ingot.auth import (
+    LoginResponse,
+    OkResponse,
     clear_session,
     decode_jwt,
     encode_jwt,
@@ -231,9 +233,10 @@ class TestIssueSession:
             secret_env=ENV_VAR,
             algorithm=ALG,
         )
-        assert out["token_type"] == "bearer"  # noqa: S105
+        assert isinstance(out, LoginResponse)
+        assert out.token_type == "bearer"  # noqa: S105
         decoded = decode_jwt(
-            out["access_token"], secret_env=ENV_VAR, algorithm=ALG
+            out.access_token, secret_env=ENV_VAR, algorithm=ALG
         )
         assert decoded["sub"] == "alice"
         response.set_cookie.assert_not_called()
@@ -250,7 +253,7 @@ class TestIssueSession:
             cookie_secure=True,
             cookie_samesite="strict",
         )
-        assert out == {"ok": True}
+        assert isinstance(out, OkResponse)
         response.set_cookie.assert_called_once()
         kwargs = response.set_cookie.call_args.kwargs
         assert kwargs["key"] == "session"
@@ -269,9 +272,9 @@ class TestIssueSession:
             algorithm=ALG,
             cookie_name="session",
         )
-        assert out["token_type"] == "bearer"  # noqa: S105
+        assert isinstance(out, LoginResponse)
         cookie_value = response.set_cookie.call_args.kwargs["value"]
-        assert cookie_value == out["access_token"]
+        assert cookie_value == out.access_token
 
     def test_none_session_raises_401(self) -> None:
         response = MagicMock()
@@ -315,7 +318,7 @@ class TestClearSession:
             cookie_secure=False,
             cookie_samesite="lax",
         )
-        assert out == {"ok": True}
+        assert isinstance(out, OkResponse)
         response.delete_cookie.assert_called_once_with(
             key="session",
             httponly=True,
@@ -326,7 +329,7 @@ class TestClearSession:
     def test_bearer_only_is_noop(self) -> None:
         response = MagicMock()
         out = clear_session(response, sources=["bearer"])
-        assert out == {"ok": True}
+        assert isinstance(out, OkResponse)
         response.delete_cookie.assert_not_called()
 
     def test_cookie_without_name_rejected(self) -> None:

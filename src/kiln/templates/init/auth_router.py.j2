@@ -38,7 +38,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 
-from ingot.auth import clear_session, issue_session
+from ingot.auth import (
+    LoginResponse,
+    OkResponse,
+    clear_session,
+    issue_session,
+)
 
 from {{ creds_module }} import {{ creds_name }}
 from {{ validate_module }} import {{ validate_name }}
@@ -56,20 +61,10 @@ router = APIRouter()
 def create_token(
     response: Response,
     credentials: {{ creds_name }},
-) -> dict:
+) -> LoginResponse | OkResponse:
     """Validate credentials and issue a session token.
 
-    Args:
-        response: Outgoing response; receives Set-Cookie when
-            ``"cookie"`` is in the configured sources.
-        credentials: Parsed login request body.
-
-    Returns:
-        OAuth2-shaped body when ``"bearer"`` is in sources,
-        otherwise ``{"ok": True}``.
-
-    Raises:
-        HTTPException: 401 if ``{{ validate_name }}`` returns ``None``.
+    Raises HTTP 401 if ``{{ validate_name }}`` returns ``None``.
     """
     return issue_session(
         response,
@@ -91,11 +86,10 @@ def read_session(
 ) -> {{ session_name }}:
     """Return the current authenticated session as JSON.
 
-    The shared ``get_session`` dep enforces authentication and
-    (when a :class:`ingot.auth.SessionStore` is wired in) the
-    deny-list, so no extra work is needed here -- a missing,
-    invalid, or revoked token yields HTTP 401 before this body
-    runs.
+    ``get_session`` enforces auth (and the deny-list when a
+    :class:`ingot.auth.SessionStore` is wired in) before this
+    body runs, so a missing, invalid, or revoked token yields
+    HTTP 401.
     """
     return session
 
@@ -105,12 +99,11 @@ def read_session(
 async def logout(
     response: Response,
     session: Annotated[{{ session_name }}, Depends(get_session)],
-) -> dict:
-    """Revoke the session server-side, then clear the transport.
+) -> OkResponse:
+    """Revoke server-side, then clear the transport.
 
-    Calls ``{{ store_name }}.revoke(session)`` before
-    :func:`ingot.auth.clear_session`; revoke-first means a failure
-    leaves the token non-verifying rather than zombie-valid.
+    Revoke-before-clear: a revoke failure leaves the token
+    non-verifying rather than zombie-valid.
     """
     await {{ store_name }}.revoke(session)
     return clear_session(
@@ -123,11 +116,11 @@ async def logout(
 {%- endif %}
     )
 {%- else -%}
-def logout(response: Response) -> dict:
-    """Clear the session.
+def logout(response: Response) -> OkResponse:
+    """Clear the session transport.
 
-    For the cookie source the Set-Cookie header deletes the cookie;
-    for bearer the client is expected to discard its token.
+    Cookie source: ``Set-Cookie`` header deletes the cookie.
+    Bearer source: client discards its token.
     """
     return clear_session(
         response,
