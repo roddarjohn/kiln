@@ -117,13 +117,13 @@ def decode_jwt(
         ) from exc
 
 
-def bearer_auth(
-    schema: type[SessionT],
+def bearer_auth[T: BaseModel](
+    schema: type[T],
     *,
     token_url: str,
     secret_env: str,
     algorithm: str,
-) -> Callable[..., Awaitable[SessionT]]:
+) -> Callable[..., Awaitable[T]]:
     """Build a ``get_session`` dependency for bearer-token auth.
 
     The returned callable is suitable for ``Depends(...)`` and reads
@@ -146,7 +146,7 @@ def bearer_auth(
 
     async def get_session(
         token: Annotated[str, Depends(oauth2_scheme)],
-    ) -> SessionT:
+    ) -> T:
         claims = decode_jwt(
             token,
             secret_env=secret_env,
@@ -157,13 +157,13 @@ def bearer_auth(
     return get_session
 
 
-def cookie_auth(
-    schema: type[SessionT],
+def cookie_auth[T: BaseModel](
+    schema: type[T],
     *,
     cookie_name: str,
     secret_env: str,
     algorithm: str,
-) -> Callable[..., Awaitable[SessionT]]:
+) -> Callable[..., Awaitable[T]]:
     """Build a ``get_session`` dependency for cookie-based auth.
 
     Reads the JWT from a named cookie using :class:`fastapi.Cookie`.
@@ -185,7 +185,7 @@ def cookie_auth(
 
     async def get_session(
         token: Annotated[str | None, Cookie(alias=cookie_name)] = None,
-    ) -> SessionT:
+    ) -> T:
         if token is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
