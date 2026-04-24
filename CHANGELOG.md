@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.1...kiln-v0.7.2) (2026-04-24)
+
+
+### Features
+
+* auth extensions ([#35](https://github.com/roddarjohn/kiln/issues/35)) ([3d84a0d](https://github.com/roddarjohn/kiln/commit/3d84a0deda3d616a451a8cf1f05be88468e2e94d))
+* related models ([#34](https://github.com/roddarjohn/kiln/issues/34)) ([8ff7014](https://github.com/roddarjohn/kiln/commit/8ff7014791aab86ce304b0346a62aeba716758e0))
+
 ## [0.7.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.0...kiln-v0.7.1) (2026-04-24)
 
 
