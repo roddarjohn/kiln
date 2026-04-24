@@ -62,7 +62,6 @@ class _ResourceInfo:
     pk_name: str
     pk_py_type: str
     has_auth: bool
-    get_session_fn: str
     session_module: str
     get_db_fn: str
     generate_tests: bool
@@ -102,11 +101,6 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[resource.pk_type],
         has_auth=getattr(config, "auth", None) is not None,
-        get_session_fn=(
-            config.auth.get_session_fn
-            if getattr(config, "auth", None) is not None
-            else ""
-        ),
         session_module=db.session_module,
         get_db_fn=db.get_db_fn,
         generate_tests=getattr(resource, "generate_tests", False),
@@ -412,13 +406,10 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        gs_module, gs_name = info.get_session_fn.rsplit(".", 1)
-        imports.add_from(
-            gs_module,
-            gs_name
-            if gs_name == "get_session"
-            else f"{gs_name} as get_session",
+        deps_module = prefix_import(
+            info.package_prefix, "auth", "dependencies"
         )
+        imports.add_from(deps_module, "get_session")
 
     yield FileFragment(
         path=test_path,

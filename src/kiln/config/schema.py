@@ -42,56 +42,34 @@ generated Pydantic schemas and route handlers.
 class AuthConfig(BaseModel):
     """Authentication configuration.
 
-    kiln does not scaffold an auth module — the consumer owns that.
-    This config points kiln at three consumer-provided symbols and
-    tells it how to shape the generated ``POST {token_url}`` endpoint.
+    kiln owns the auth *package* (dependency + login/logout routes);
+    the consumer owns the three types that characterise their domain:
 
-    The consumer provides:
+    * :attr:`credentials_schema` -- Pydantic model (or discriminated
+      union via ``Annotated[A | B, Field(discriminator="type")]``)
+      used as the JSON request body of the login endpoint.  Not
+      restricted to username/password — can describe API keys,
+      magic-link tokens, OAuth codes, whatever.
+    * :attr:`session_schema` -- Pydantic model describing what the
+      token carries (user id, tenant, roles, ...).  Flows through
+      protected routes as ``session: <Schema>``.
+    * :attr:`validate_fn` -- ``(creds) -> Session | None``.  The
+      consumer's business logic for deciding a login is valid.
 
-    * :attr:`credentials_schema` -- a Pydantic model (or a
-      discriminated union via ``Annotated[A | B,
-      Field(discriminator="type")]``) used as the JSON request body
-      of the login endpoint.  This is NOT restricted to
-      username/password; it can describe API keys, magic-link
-      tokens, OAuth codes, or anything else.
-    * :attr:`session_schema` -- a Pydantic model describing what
-      the token carries (user id, tenant, roles, whatever).  This
-      is the type that flows through validated requests: every
-      protected route receives ``session: <Schema>``.
-    * :attr:`validate_fn` -- called with the parsed credentials
-      instance.  Returns a :attr:`session_schema` instance on
-      success, or ``None`` to reject with HTTP 401.
-    * :attr:`get_session_fn` -- a FastAPI dependency that validates
-      the incoming token/cookie and returns a :attr:`session_schema`
-      instance.  Every protected route gets ``Depends(...)`` on
-      this.  A thin implementation using :mod:`ingot.auth` looks
-      like::
+    :attr:`sources` controls which transports carry the token:
 
-          # myapp/auth.py
-          from ingot.auth import bearer_auth
-          from myapp.auth import Session
-
-          get_session = bearer_auth(
-              Session,
-              token_url="/auth/token",
-              secret_env="JWT_SECRET",
-              algorithm="HS256",
-          )
-
-    Token-endpoint transport:
-
-    * ``type: "jwt"`` -- the endpoint returns an OAuth2-shaped JSON
-      body (``{"access_token": ..., "token_type": "bearer"}``).
-    * ``type: "cookie"`` -- the endpoint sets an ``httpOnly`` cookie
-      named :attr:`cookie_name` and a ``POST {token_url}/logout``
-      route clears it.
+    * ``["bearer"]`` -- login returns an OAuth2-shaped JSON body;
+      ``get_session`` reads the ``Authorization`` header.
+    * ``["cookie"]`` -- login sets an ``httpOnly`` cookie;
+      ``get_session`` reads it.
+    * ``["bearer", "cookie"]`` -- login does both, so the same
+      endpoint serves both web and API clients; ``get_session``
+      accepts either.
 
     Note:
         OAuth2 password-flow form bodies (as used by Swagger's
         *Authorize* button) are not supported yet — the login
-        endpoint always accepts JSON.  Consumers who need the
-        password-grant form can mount their own route alongside
-        and still use :mod:`ingot.auth` for token issuance.
+        endpoint always accepts JSON.
 
     """
 
@@ -101,28 +79,29 @@ class AuthConfig(BaseModel):
     endpoint, e.g. ``"myapp.auth.LoginCredentials"``."""
 
     session_schema: str
-    """Dotted path to the Pydantic model carried in the token and
-    returned by :attr:`get_session_fn`, e.g. ``"myapp.auth.Session"``.
-    Fields must be JSON-serializable so Pydantic can round-trip the
-    model through the JWT claims."""
+    """Dotted path to the Pydantic model carried in the token,
+    e.g. ``"myapp.auth.Session"``.  Fields must be JSON-serializable
+    so Pydantic can round-trip the model through the JWT claims."""
 
     validate_fn: str
     """Dotted path to a function ``(creds) -> Session | None`` where
     ``creds`` is the parsed :attr:`credentials_schema` instance and
     ``Session`` is the :attr:`session_schema` model.  Returns the
-    session on success or ``None`` to reject."""
+    session on success or ``None`` to reject with HTTP 401."""
 
-    get_session_fn: str
-    """Dotted path to the FastAPI dependency that validates the
-    incoming token or cookie and returns a :attr:`session_schema`
-    instance, e.g. ``"myapp.auth.get_session"``."""
+    sources: list[Literal["bearer", "cookie"]] = Field(
+        default_factory=lambda: ["bearer"],
+        min_length=1,
+    )
+    """Ordered list of token transports.  At least one required;
+    any subset of ``{"bearer", "cookie"}`` in any order."""
 
-    type: Literal["jwt", "cookie"] = "jwt"
     secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
     cookie_name: str = "access_token"
-    """Name of the cookie carrying the JWT when ``type == "cookie"``."""
+    """Name of the cookie carrying the JWT when ``"cookie"`` is in
+    :attr:`sources`."""
     cookie_secure: bool = True
     """When ``True`` (default), the cookie is only sent over HTTPS.
     Set to ``False`` for local HTTP development."""
@@ -131,9 +110,16 @@ class AuthConfig(BaseModel):
     requires ``cookie_secure=True`` per RFC 6265bis."""
 
     @model_validator(mode="after")
+    def _sources_unique(self) -> AuthConfig:
+        if len(set(self.sources)) != len(self.sources):
+            msg = f"sources must not contain duplicates: {self.sources}"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _samesite_none_requires_secure(self) -> AuthConfig:
         if (
-            self.type == "cookie"
+            "cookie" in self.sources
             and self.cookie_samesite == "none"
             and not self.cookie_secure
         ):

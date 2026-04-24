@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from foundry.naming import prefix_import
 from foundry.operation import operation
 from kiln.operations.types import RouteHandler, TestCase
 
@@ -78,17 +79,16 @@ class Auth:
 
         """
         auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
-        gs_module, gs_name = auth_cfg.get_session_fn.rsplit(".", 1)
-        gs_import_name = (
-            gs_name if gs_name == "get_session" else f"{gs_name} as get_session"
-        )
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
+        deps_module = prefix_import(
+            ctx.package_prefix, "auth", "dependencies"
+        )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(
                 f"session: Annotated[{session_name}, Depends(get_session)],"
             )
-            handler.extra_imports.append((gs_module, gs_import_name))
+            handler.extra_imports.append((deps_module, "get_session"))
             handler.extra_imports.append((session_module, session_name))
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):

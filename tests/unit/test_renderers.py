@@ -504,7 +504,6 @@ def test_testcase_fragment_with_tests(registry):
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
             ),
         ),
     )
@@ -517,8 +516,9 @@ def test_testcase_fragment_with_tests(registry):
     assert len(cases) == 1
     assert cases[0]["op_name"] == "get"
     assert cases[0]["status_not_found"] == 404
-    assert "from myapp.auth import get_session" in shell.imports.format(
-        "python"
+    assert (
+        "from _generated.auth.dependencies import get_session"
+        in shell.imports.format("python")
     )
 
 

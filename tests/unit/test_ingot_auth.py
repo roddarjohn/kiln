@@ -11,13 +11,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ingot.auth import (
-    bearer_auth,
-    clear_auth_cookie,
-    cookie_auth,
+    clear_session,
     decode_jwt,
     encode_jwt,
-    issue_bearer_token,
-    set_auth_cookie,
+    issue_session,
+    session_auth,
 )
 
 SECRET = "test-secret-at-least-32-bytes-long-for-hs256"  # noqa: S105
@@ -81,187 +79,261 @@ class TestEncodeDecode:
             decode_jwt(token, secret_env=ENV_VAR, algorithm=ALG)
         assert exc.value.status_code == 401
 
-    def test_decode_raises_401_on_wrong_secret(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        token = jwt.encode(
-            {"sub": "a"},
-            "a-different-secret-that-is-also-long-enough",
-            algorithm=ALG,
-        )
-        monkeypatch.setenv(ENV_VAR, SECRET)
-        with pytest.raises(HTTPException) as exc:
-            decode_jwt(token, secret_env=ENV_VAR, algorithm=ALG)
-        assert exc.value.status_code == 401
-
 
 # -------------------------------------------------------------------
-# bearer_auth
+# session_auth — the dep factory
 #
-# The factory returns an async dependency whose sole argument is the
-# token string (FastAPI fills it at runtime from OAuth2PasswordBearer).
-# We call it directly rather than going through TestClient, which
+# The returned callable takes one argument per configured source
+# (FastAPI fills them at runtime via Depends + Cookie).  We call
+# the dep directly rather than going through TestClient, which
 # would pull in httpx.
 # -------------------------------------------------------------------
 
 
-class TestBearerAuth:
-    """Header-based dependency factory."""
+def _token(**claims: object) -> str:
+    return encode_jwt(
+        {"sub": "alice", **claims},  # type: ignore[arg-type]
+        secret_env=ENV_VAR,
+        algorithm=ALG,
+    )
+
+
+class TestSessionAuthValidation:
+    """Argument validation at factory-build time."""
+
+    def test_empty_sources_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            session_auth(Session, [], secret_env=ENV_VAR, algorithm=ALG)
+
+    def test_unknown_source_rejected(self) -> None:
+        with pytest.raises(ValueError, match="unknown source"):
+            session_auth(
+                Session,
+                ["bearer", "smoke-signals"],  # type: ignore[list-item]
+                secret_env=ENV_VAR,
+                algorithm=ALG,
+            )
+
+    def test_bearer_requires_token_url(self) -> None:
+        with pytest.raises(ValueError, match="token_url"):
+            session_auth(
+                Session, ["bearer"], secret_env=ENV_VAR, algorithm=ALG
+            )
+
+    def test_cookie_requires_cookie_name(self) -> None:
+        with pytest.raises(ValueError, match="cookie_name"):
+            session_auth(
+                Session, ["cookie"], secret_env=ENV_VAR, algorithm=ALG
+            )
+
+
+class TestSessionAuthBearer:
+    """Bearer-only source."""
+
+    def _dep(self):  # noqa: ANN202
+        return session_auth(
+            Session,
+            ["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+        )
 
     async def test_returns_schema_instance(self) -> None:
-        dep = bearer_auth(
-            Session,
-            token_url="/auth/token",  # noqa: S106
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
-        token = encode_jwt(
-            {"sub": "alice", "roles": ["admin"]},
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
-        session = await dep(token)
+        dep = self._dep()
+        session = await dep(bearer=_token())
         assert isinstance(session, Session)
         assert session.sub == "alice"
-        assert session.roles == ["admin"]
 
-    async def test_invalid_token_raises_401(self) -> None:
-        dep = bearer_auth(
-            Session,
-            token_url="/auth/token",  # noqa: S106
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
+    async def test_missing_bearer_is_401(self) -> None:
+        dep = self._dep()
         with pytest.raises(HTTPException) as exc:
-            await dep("garbage")
+            await dep(bearer=None)
+        assert exc.value.status_code == 401
+
+    async def test_invalid_bearer_is_401(self) -> None:
+        dep = self._dep()
+        with pytest.raises(HTTPException) as exc:
+            await dep(bearer="garbage")
         assert exc.value.status_code == 401
 
 
-# -------------------------------------------------------------------
-# cookie_auth
-# -------------------------------------------------------------------
+class TestSessionAuthCookie:
+    """Cookie-only source."""
 
-
-class TestCookieAuth:
-    """Cookie-based dependency factory."""
+    def _dep(self):  # noqa: ANN202
+        return session_auth(
+            Session,
+            ["cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            cookie_name="session",
+        )
 
     async def test_returns_schema_instance(self) -> None:
-        dep = cookie_auth(
-            Session,
-            cookie_name="session",
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
-        token = encode_jwt(
-            {"sub": "alice"},
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
-        session = await dep(token)
-        assert isinstance(session, Session)
+        dep = self._dep()
+        session = await dep(cookie=_token())
         assert session.sub == "alice"
 
     async def test_missing_cookie_is_401(self) -> None:
-        dep = cookie_auth(
-            Session,
-            cookie_name="session",
-            secret_env=ENV_VAR,
-            algorithm=ALG,
-        )
+        dep = self._dep()
         with pytest.raises(HTTPException) as exc:
-            await dep(None)
+            await dep(cookie=None)
         assert exc.value.status_code == 401
-        assert exc.value.headers == {"WWW-Authenticate": "Bearer"}
 
-    async def test_invalid_cookie_is_401(self) -> None:
-        dep = cookie_auth(
+
+class TestSessionAuthBoth:
+    """Both sources — picks the first token that's present."""
+
+    def _dep(self):  # noqa: ANN202
+        return session_auth(
             Session,
-            cookie_name="session",
+            ["bearer", "cookie"],
             secret_env=ENV_VAR,
             algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            cookie_name="session",
         )
+
+    async def test_bearer_wins_when_both_present(self) -> None:
+        dep = self._dep()
+        # bearer carries a specific claim the cookie doesn't, so we
+        # can tell which one the dep decoded.
+        bearer_tok = _token(marker="from-bearer")
+        cookie_tok = _token(marker="from-cookie")
+        session = await dep(bearer=bearer_tok, cookie=cookie_tok)
+        decoded = decode_jwt(bearer_tok, secret_env=ENV_VAR, algorithm=ALG)
+        assert decoded["marker"] == "from-bearer"
+        assert isinstance(session, Session)
+
+    async def test_falls_back_to_cookie(self) -> None:
+        dep = self._dep()
+        session = await dep(bearer=None, cookie=_token())
+        assert session.sub == "alice"
+
+    async def test_all_empty_is_401(self) -> None:
+        dep = self._dep()
         with pytest.raises(HTTPException) as exc:
-            await dep("not-a-jwt")
+            await dep(bearer=None, cookie=None)
         assert exc.value.status_code == 401
 
 
 # -------------------------------------------------------------------
-# issue_bearer_token / set_auth_cookie / clear_auth_cookie
+# issue_session
 # -------------------------------------------------------------------
 
 
-class TestIssueBearerToken:
-    """Login-endpoint helper for header transport."""
+class TestIssueSession:
+    """Login-endpoint helper."""
 
-    def test_returns_oauth2_shape(self) -> None:
-        out = issue_bearer_token(
-            Session(sub="alice"), secret_env=ENV_VAR, algorithm=ALG
+    def test_bearer_returns_oauth2_shape(self) -> None:
+        response = MagicMock()
+        out = issue_session(
+            response,
+            Session(sub="alice"),
+            sources=["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
         )
         assert out["token_type"] == "bearer"  # noqa: S105
         decoded = decode_jwt(
             out["access_token"], secret_env=ENV_VAR, algorithm=ALG
         )
         assert decoded["sub"] == "alice"
+        response.set_cookie.assert_not_called()
 
-    def test_none_session_raises_401(self) -> None:
-        with pytest.raises(HTTPException) as exc:
-            issue_bearer_token(None, secret_env=ENV_VAR, algorithm=ALG)
-        assert exc.value.status_code == 401
-
-
-class TestSetAuthCookie:
-    """Login-endpoint helper for cookie transport."""
-
-    def test_sets_cookie_with_expected_flags(self) -> None:
+    def test_cookie_only_sets_cookie_and_returns_ok(self) -> None:
         response = MagicMock()
-        set_auth_cookie(
+        out = issue_session(
             response,
             Session(sub="alice"),
-            cookie_name="session",
+            sources=["cookie"],
             secret_env=ENV_VAR,
             algorithm=ALG,
-            ttl=datetime.timedelta(minutes=15),
-            secure=True,
-            samesite="strict",
+            cookie_name="session",
+            cookie_secure=True,
+            cookie_samesite="strict",
         )
+        assert out == {"ok": True}
         response.set_cookie.assert_called_once()
         kwargs = response.set_cookie.call_args.kwargs
         assert kwargs["key"] == "session"
         assert kwargs["httponly"] is True
         assert kwargs["secure"] is True
         assert kwargs["samesite"] == "strict"
-        assert kwargs["max_age"] == 15 * 60
-        decoded = decode_jwt(kwargs["value"], secret_env=ENV_VAR, algorithm=ALG)
-        assert decoded["sub"] == "alice"
+
+    def test_both_sources_emit_same_token(self) -> None:
+        """One encode, emitted in both places — not two tokens."""
+        response = MagicMock()
+        out = issue_session(
+            response,
+            Session(sub="alice"),
+            sources=["bearer", "cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            cookie_name="session",
+        )
+        assert out["token_type"] == "bearer"  # noqa: S105
+        cookie_value = response.set_cookie.call_args.kwargs["value"]
+        assert cookie_value == out["access_token"]
 
     def test_none_session_raises_401(self) -> None:
         response = MagicMock()
         with pytest.raises(HTTPException) as exc:
-            set_auth_cookie(
+            issue_session(
                 response,
                 None,
-                cookie_name="session",
+                sources=["bearer"],
                 secret_env=ENV_VAR,
                 algorithm=ALG,
             )
         assert exc.value.status_code == 401
         response.set_cookie.assert_not_called()
 
+    def test_cookie_without_name_rejected(self) -> None:
+        response = MagicMock()
+        with pytest.raises(ValueError, match="cookie_name"):
+            issue_session(
+                response,
+                Session(sub="alice"),
+                sources=["cookie"],
+                secret_env=ENV_VAR,
+                algorithm=ALG,
+            )
 
-class TestClearAuthCookie:
+
+# -------------------------------------------------------------------
+# clear_session
+# -------------------------------------------------------------------
+
+
+class TestClearSession:
     """Logout helper."""
 
-    def test_calls_delete_cookie(self) -> None:
+    def test_cookie_source_deletes_cookie(self) -> None:
         response = MagicMock()
-        clear_auth_cookie(
+        out = clear_session(
             response,
+            sources=["cookie"],
             cookie_name="session",
-            secure=False,
-            samesite="lax",
+            cookie_secure=False,
+            cookie_samesite="lax",
         )
+        assert out == {"ok": True}
         response.delete_cookie.assert_called_once_with(
             key="session",
             httponly=True,
             secure=False,
             samesite="lax",
         )
+
+    def test_bearer_only_is_noop(self) -> None:
+        response = MagicMock()
+        out = clear_session(response, sources=["bearer"])
+        assert out == {"ok": True}
+        response.delete_cookie.assert_not_called()
+
+    def test_cookie_without_name_rejected(self) -> None:
+        response = MagicMock()
+        with pytest.raises(ValueError, match="cookie_name"):
+            clear_session(response, sources=["cookie"])

@@ -187,7 +187,6 @@ class TestScaffold:
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
@@ -216,26 +215,28 @@ class TestAuthScaffold:
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         assert AuthScaffold().when(ctx) is True
 
     def test_auth_files(self):
-        """Auth config produces the auth package init + token router."""
+        """Auth config emits __init__, dependencies, and router."""
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
-        assert paths == ["auth/__init__.py", "auth/router.py"]
+        assert paths == [
+            "auth/__init__.py",
+            "auth/dependencies.py",
+            "auth/router.py",
+        ]
 
     def test_router_context_splits_user_dotted_paths(self):
         """The router template gets the credentials schema + validator split."""
@@ -244,7 +245,6 @@ class TestAuthScaffold:
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate_login",
-                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
@@ -257,30 +257,30 @@ class TestAuthScaffold:
         assert router.context["validate_module"] == "myapp.auth"
         assert router.context["validate_name"] == "validate_login"
 
-    def test_bearer_transport_in_context(self):
-        """Default bearer mode sets transport='jwt' on the router."""
+    def test_default_sources_bearer_only(self):
+        """Default sources=['bearer'] flows into deps + router context."""
         config = MinimalConfig(
             auth=AuthConfig(
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
+        deps = next(f for f in result if f.path == "auth/dependencies.py")
         router = next(f for f in result if f.path == "auth/router.py")
-        assert router.context["transport"] == "jwt"
+        assert deps.context["sources"] == ["bearer"]
+        assert router.context["sources"] == ["bearer"]
 
-    def test_cookie_transport_in_context(self):
-        """type='cookie' threads cookie fields through to the router."""
+    def test_sources_both_thread_cookie_fields(self):
+        """sources=['bearer','cookie'] carries cookie_* into the router."""
         config = MinimalConfig(
             auth=AuthConfig(
-                type="cookie",
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
+                sources=["bearer", "cookie"],
                 cookie_name="session",
                 cookie_secure=False,
                 cookie_samesite="strict",
@@ -289,7 +289,7 @@ class TestAuthScaffold:
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
         router = next(f for f in result if f.path == "auth/router.py")
-        assert router.context["transport"] == "cookie"
+        assert router.context["sources"] == ["bearer", "cookie"]
         assert router.context["cookie_name"] == "session"
         assert router.context["cookie_secure"] is False
         assert router.context["cookie_samesite"] == "strict"
@@ -300,11 +300,10 @@ class TestAuthScaffold:
 
         with pytest.raises(ValueError, match="cookie_samesite='none'"):
             AuthConfig(
-                type="cookie",
+                sources=["cookie"],
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.auth.validate",
-                get_session_fn="myapp.auth.get_session",
                 cookie_samesite="none",
                 cookie_secure=False,
             )
@@ -568,7 +567,6 @@ class TestProjectRouter:
                 credentials_schema="myapp.auth.LoginCredentials",
                 session_schema="myapp.auth.Session",
                 validate_fn="myapp.verify",
-                get_session_fn="myapp.auth.get_session",
             ),
             apps=[App(config=app_config, prefix="/blog")],
         )

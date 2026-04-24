@@ -134,11 +134,9 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
         tmp_path,
         _project_with(
             auth={
-                "type": "jwt",
                 "credentials_schema": "myapp.auth.LoginCredentials",
                 "session_schema": "myapp.auth.Session",
                 "validate_fn": "myapp.auth.validate",
-                "get_session_fn": "myapp.auth.get_session",
             },
         ),
     )
@@ -156,11 +154,9 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
         tmp_path,
         _project_with(
             auth={
-                "type": "jwt",
                 "credentials_schema": "myapp.auth.LoginCredentials",
                 "session_schema": "myapp.auth.Session",
                 "validate_fn": "myapp.auth.validate",
-                "get_session_fn": "myapp.auth.get_session",
             },
         ),
     )
@@ -207,11 +203,9 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
         tmp_path,
         {
             "auth": {
-                "type": "jwt",
                 "credentials_schema": "myapp.auth.LoginCredentials",
                 "session_schema": "myapp.auth.Session",
                 "validate_fn": "myapp.auth.validate",
-                "get_session_fn": "myapp.auth.get_session",
             },
             "databases": [{"key": "primary", "default": True}],
             "apps": [

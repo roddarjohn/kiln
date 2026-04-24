@@ -1,27 +1,25 @@
 {% from "_macros.j2" import file_header %}
-{% if transport == "cookie" %}
 {% set _extra %}
 The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
 and passed to ``{{ validate_module }}.{{ validate_name }}``, which
 must return a ``{{ session_module }}.{{ session_name }}`` instance on
 success or ``None`` on failure.
 
-On success, a JWT encoding the session is set as an ``httpOnly``
-cookie named ``{{ cookie_name }}``.  A ``POST {{ token_url }}/logout``
-endpoint clears it.
+Token sources: {{ sources | join(", ") }}.  The same JWT is emitted
+to every configured source on login and cleared by ``logout``.
 
 Mount this router in your application::
 
     from auth.router import router as auth_router
     app.include_router(auth_router)
 {% endset %}
-{{ file_header("Cookie-JWT auth endpoints", extra=_extra) }}
+{{ file_header("Session auth endpoints", extra=_extra) }}
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Response
 
-from ingot.auth import clear_auth_cookie, set_auth_cookie
+from ingot.auth import clear_session, issue_session
 
 from {{ creds_module }} import {{ creds_name }}
 from {{ validate_module }} import {{ validate_name }}
@@ -33,99 +31,48 @@ router = APIRouter()
 def create_token(
     response: Response,
     credentials: {{ creds_name }},
-) -> dict[str, bool]:
-    """Validate credentials and set an httpOnly auth cookie.
+) -> dict:
+    """Validate credentials and issue a session token.
 
     Args:
-        response: Outgoing response; receives the Set-Cookie header.
+        response: Outgoing response; receives Set-Cookie when
+            ``"cookie"`` is in the configured sources.
         credentials: Parsed login request body.
 
     Returns:
-        ``{"ok": True}`` on success.
+        OAuth2-shaped body when ``"bearer"`` is in sources,
+        otherwise ``{"ok": True}``.
 
     Raises:
         HTTPException: 401 if ``{{ validate_name }}`` returns ``None``.
     """
-    set_auth_cookie(
+    return issue_session(
         response,
         {{ validate_name }}(credentials),
-        cookie_name="{{ cookie_name }}",
+        sources={{ sources }},
         secret_env="{{ secret_env }}",
         algorithm="{{ algorithm }}",
-        secure={{ cookie_secure }},
-        samesite="{{ cookie_samesite }}",
-    )
-    return {"ok": True}
-
-
-@router.post("{{ token_url }}/logout")
-def logout(response: Response) -> dict[str, bool]:
-    """Clear the auth cookie."""
-    clear_auth_cookie(
-        response,
+{%- if "cookie" in sources %}
         cookie_name="{{ cookie_name }}",
-        secure={{ cookie_secure }},
-        samesite="{{ cookie_samesite }}",
-    )
-    return {"ok": True}
-{% else %}
-{% set _extra %}
-The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
-and passed to ``{{ validate_module }}.{{ validate_name }}``, which
-must return a ``{{ session_module }}.{{ session_name }}`` instance on
-success or ``None`` on failure.
-
-A ``POST {{ token_url }}/logout`` endpoint is generated for parity
-with the cookie transport; for bearer tokens it is a client-side
-concern (clients discard the token), so the server response is a
-no-op ``{"ok": True}``.
-
-Mount this router in your application::
-
-    from auth.router import router as auth_router
-    app.include_router(auth_router)
-{% endset %}
-{{ file_header("JWT auth endpoints", extra=_extra) }}
-
-from __future__ import annotations
-
-from fastapi import APIRouter
-
-from ingot.auth import issue_bearer_token
-
-from {{ creds_module }} import {{ creds_name }}
-from {{ validate_module }} import {{ validate_name }}
-
-router = APIRouter()
-
-
-@router.post("{{ token_url }}")
-def create_token(credentials: {{ creds_name }}) -> dict[str, str]:
-    """Validate credentials and return an OAuth2-shaped JWT response.
-
-    Args:
-        credentials: Parsed login request body.
-
-    Returns:
-        ``{"access_token": <jwt>, "token_type": "bearer"}`` on success.
-
-    Raises:
-        HTTPException: 401 if ``{{ validate_name }}`` returns ``None``.
-    """
-    return issue_bearer_token(
-        {{ validate_name }}(credentials),
-        secret_env="{{ secret_env }}",
-        algorithm="{{ algorithm }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
     )
 
 
 @router.post("{{ token_url }}/logout")
-def logout() -> dict[str, bool]:
-    """Acknowledge logout for bearer clients.
+def logout(response: Response) -> dict:
+    """Clear the session.
 
-    Bearer logout is a client-side concern (the client discards the
-    token); this endpoint exists so frontends have one consistent
-    logout URL regardless of the configured transport.
+    For the cookie source the Set-Cookie header deletes the cookie;
+    for bearer the client is expected to discard its token.
     """
-    return {"ok": True}
-{% endif %}
+    return clear_session(
+        response,
+        sources={{ sources }},
+{%- if "cookie" in sources %}
+        cookie_name="{{ cookie_name }}",
+        cookie_secure={{ cookie_secure }},
+        cookie_samesite="{{ cookie_samesite }}",
+{%- endif %}
+    )

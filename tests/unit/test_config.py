@@ -54,31 +54,44 @@ def test_auth_config_defaults():
         credentials_schema="myapp.auth.LoginCredentials",
         session_schema="myapp.auth.Session",
         validate_fn="myapp.auth.validate",
-        get_session_fn="myapp.auth.get_session",
     )
-    assert auth.type == "jwt"
+    assert auth.sources == ["bearer"]
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
     assert auth.token_url == "/auth/token"  # noqa: S105
 
 
-def test_auth_config_all_fns_required():
-    fields = (
-        "credentials_schema",
-        "session_schema",
-        "validate_fn",
-        "get_session_fn",
-    )
+def test_auth_config_fields_required():
+    fields = ("credentials_schema", "session_schema", "validate_fn")
     for missing in fields:
         kwargs = {
             "credentials_schema": "myapp.auth.LoginCredentials",
             "session_schema": "myapp.auth.Session",
             "validate_fn": "myapp.auth.validate",
-            "get_session_fn": "myapp.auth.get_session",
         }
         del kwargs[missing]
         with pytest.raises(ValueError, match=missing):
             AuthConfig(**kwargs)
+
+
+def test_auth_config_empty_sources_rejected():
+    with pytest.raises(ValueError, match="at least 1"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=[],
+        )
+
+
+def test_auth_config_duplicate_sources_rejected():
+    with pytest.raises(ValueError, match="duplicates"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=["bearer", "bearer"],
+        )
 
 
 def test_database_config_session_names():

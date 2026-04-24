@@ -1,14 +1,14 @@
-"""Scaffold operations: db sessions and the auth token endpoint.
+"""Scaffold operations: db sessions and the auth package.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
 infrastructure files.  Split into two operations:
 
 * :class:`Scaffold` -- always runs; emits the ``db/`` tree.
 * :class:`AuthScaffold` -- runs only when the project config has
-  ``auth`` set, via :meth:`AuthScaffold.when`.  Emits the generated
-  ``POST {token_url}`` route (and, for cookie transport, a logout
-  route).  The consumer's ``get_session`` dependency is *not*
-  scaffolded; its dotted path is imported directly at use-sites.
+  ``auth`` set, via :meth:`AuthScaffold.when`.  Emits the
+  session-dep and login/logout routes (three files under
+  ``auth/``); the consumer provides only the session/credentials
+  schemas and the credential-validation function.
 """
 
 from __future__ import annotations
@@ -75,16 +75,18 @@ class Scaffold:
 
 @operation("auth_scaffold", scope="project")
 class AuthScaffold:
-    """Generate the token-issuance route.
+    """Generate the ``auth/`` package.
 
-    Emits a single :class:`StaticFile` at ``auth/router.py`` whose
-    ``POST {token_url}`` handler parses the consumer's
-    :attr:`~kiln.config.schema.AuthConfig.credentials_schema`,
-    hands the instance to
-    :attr:`~kiln.config.schema.AuthConfig.validate_fn`, and either
-    returns an OAuth2-shaped JSON body (``type == "jwt"``) or sets
-    an ``httpOnly`` cookie (``type == "cookie"``, which also gets
-    a matching logout route).
+    Emits three :class:`StaticFile` objects:
+
+    * ``auth/__init__.py`` -- package marker.
+    * ``auth/dependencies.py`` -- binds :func:`ingot.auth.session_auth`
+      against the consumer's :attr:`session_schema` to produce the
+      ``get_session`` FastAPI dependency used by every protected
+      route.
+    * ``auth/router.py`` -- login (``POST {token_url}``) and logout
+      (``POST {token_url}/logout``) handlers that call
+      :func:`ingot.auth.issue_session` / :func:`clear_session`.
     """
 
     def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
@@ -127,6 +129,21 @@ class AuthScaffold:
         creds_module, creds_name = auth.credentials_schema.rsplit(".", 1)
         session_module, session_name = auth.session_schema.rsplit(".", 1)
         validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
+
+        yield StaticFile(
+            path="auth/dependencies.py",
+            template="init/auth_dependencies.py.j2",
+            context={
+                "session_module": session_module,
+                "session_name": session_name,
+                "sources": list(auth.sources),
+                "secret_env": auth.secret_env,
+                "algorithm": auth.algorithm,
+                "token_url": auth.token_url,
+                "cookie_name": auth.cookie_name,
+            },
+        )
+
         yield StaticFile(
             path="auth/router.py",
             template="init/auth_router.py.j2",
@@ -137,7 +154,7 @@ class AuthScaffold:
                 "session_name": session_name,
                 "validate_module": validate_module,
                 "validate_name": validate_name,
-                "transport": auth.type,
+                "sources": list(auth.sources),
                 "secret_env": auth.secret_env,
                 "algorithm": auth.algorithm,
                 "token_url": auth.token_url,

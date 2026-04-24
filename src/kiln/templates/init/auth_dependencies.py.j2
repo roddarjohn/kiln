@@ -1,0 +1,29 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+``get_session`` is built from :func:`ingot.auth.session_auth` against
+the configured sources ({{ sources | join(", ") }}).  Protected
+route handlers receive the validated session via
+``Depends(get_session)``.
+{% endset %}
+{{ file_header("FastAPI session dependency", extra=_extra) }}
+
+from __future__ import annotations
+
+from ingot.auth import session_auth
+
+from {{ session_module }} import {{ session_name }}
+
+get_session = session_auth(
+    {{ session_name }},
+    {{ sources }},
+    secret_env="{{ secret_env }}",
+    algorithm="{{ algorithm }}",
+{%- if "bearer" in sources %}
+    token_url="{{ token_url }}",
+{%- endif %}
+{%- if "cookie" in sources %}
+    cookie_name="{{ cookie_name }}",
+{%- endif %}
+)
+
+__all__ = ["get_session"]
