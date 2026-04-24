@@ -257,7 +257,7 @@ def _build_transports(
     ``issue_session`` / ``clear_session`` build bearer transports
     without one (they don't call :meth:`extract_dep`).
     """
-    unknown = [s for s in sources if s not in _TRANSPORTS]
+    unknown = [src for src in sources if src not in _TRANSPORTS]
     if unknown:
         msg = f"unknown source(s): {sorted(set(unknown))}"
         raise ValueError(msg)
@@ -398,10 +398,10 @@ def issue_session(
     )
 
     body: LoginResponse | OkResponse = OkResponse()
-    for t in transports:
-        result = t.emit(response, token, ttl)
-        if result is not None:
-            body = result
+    for transport in transports.values():
+        emitted = transport.emit(response, token, ttl)
+        if emitted is not None:
+            body = emitted
     return body
 
 
@@ -425,6 +425,6 @@ def clear_session(
         cookie_secure=cookie_secure,
         cookie_samesite=cookie_samesite,
     )
-    for t in transports:
-        t.clear(response)
+    for transport in transports.values():
+        transport.clear(response)
     return OkResponse()
