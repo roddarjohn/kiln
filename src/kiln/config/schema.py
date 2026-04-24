@@ -54,19 +54,25 @@ class AuthConfig(BaseModel):
       of the login endpoint.  This is NOT restricted to
       username/password; it can describe API keys, magic-link
       tokens, OAuth codes, or anything else.
-    * :attr:`validate_fn` -- called with the parsed schema instance.
-      Returns a ``dict`` of session data (encoded into the token) on
-      success, or ``None`` to reject with HTTP 401.  The dict can
-      carry any JSON-serializable fields the consumer wants on the
-      session.
+    * :attr:`session_schema` -- a Pydantic model describing what
+      the token carries (user id, tenant, roles, whatever).  This
+      is the type that flows through validated requests: every
+      protected route receives ``session: <Schema>``.
+    * :attr:`validate_fn` -- called with the parsed credentials
+      instance.  Returns a :attr:`session_schema` instance on
+      success, or ``None`` to reject with HTTP 401.
     * :attr:`get_session_fn` -- a FastAPI dependency that validates
-      the incoming token/cookie and returns the session dict.
-      Every protected route gets ``Depends(...)`` on this.  A thin
-      implementation using :mod:`ingot.auth` looks like::
+      the incoming token/cookie and returns a :attr:`session_schema`
+      instance.  Every protected route gets ``Depends(...)`` on
+      this.  A thin implementation using :mod:`ingot.auth` looks
+      like::
 
           # myapp/auth.py
           from ingot.auth import bearer_auth
+          from myapp.auth import Session
+
           get_session = bearer_auth(
+              Session,
               token_url="/auth/token",
               secret_env="JWT_SECRET",
               algorithm="HS256",
