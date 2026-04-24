@@ -10,6 +10,24 @@ from __future__ import annotations
 from {{ gcu_module }} import {{ gcu_name }} as get_current_user
 
 __all__ = ["get_current_user"]
+{% elif transport == "cookie" %}
+{% set _extra %}
+The JWT is read from the ``{{ cookie_name }}`` cookie.  The secret is
+read from the ``{{ secret_env }}`` environment variable.
+{% endset %}
+{{ file_header("FastAPI cookie-JWT authentication dependency", extra=_extra) }}
+
+from __future__ import annotations
+
+from ingot.auth import cookie_auth
+
+get_current_user = cookie_auth(
+    cookie_name="{{ cookie_name }}",
+    secret_env="{{ secret_env }}",
+    algorithm="{{ algorithm }}",
+)
+
+__all__ = ["get_current_user"]
 {% else %}
 {% set _extra %}
 The secret is read from the ``{{ secret_env }}`` environment variable.
@@ -18,38 +36,13 @@ The secret is read from the ``{{ secret_env }}`` environment variable.
 
 from __future__ import annotations
 
-import os
-from typing import Annotated
+from ingot.auth import bearer_auth
 
-import jwt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+get_current_user = bearer_auth(
+    token_url="{{ token_url }}",
+    secret_env="{{ secret_env }}",
+    algorithm="{{ algorithm }}",
+)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="{{ token_url }}")
-
-
-async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
-) -> dict:
-    """Validate a JWT bearer token and return the decoded payload.
-
-    Args:
-        token: Bearer token extracted by FastAPI's security scheme.
-
-    Returns:
-        Decoded JWT payload as a plain dict.
-
-    Raises:
-        HTTPException: 401 if the token is invalid or the secret
-            env var is not set.
-    """
-    try:
-        secret = os.environ["{{ secret_env }}"]
-        return jwt.decode(token, secret, algorithms=["{{ algorithm }}"])
-    except (jwt.InvalidTokenError, KeyError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+__all__ = ["get_current_user"]
 {% endif %}

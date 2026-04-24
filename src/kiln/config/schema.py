@@ -40,9 +40,19 @@ generated Pydantic schemas and route handlers.
 
 
 class AuthConfig(BaseModel):
-    """JWT authentication configuration."""
+    """JWT authentication configuration.
 
-    type: Literal["jwt"] = "jwt"
+    Both transports use the same signed JWT; only the carrier
+    differs:
+
+    * ``type: "jwt"`` -- token in the ``Authorization: Bearer``
+      header, wired through :class:`~fastapi.security.OAuth2PasswordBearer`.
+    * ``type: "cookie"`` -- token in an ``httpOnly`` cookie named by
+      :attr:`cookie_name`.  The ``cookie_*`` fields only apply in
+      this mode.
+    """
+
+    type: Literal["jwt", "cookie"] = "jwt"
     secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
@@ -51,6 +61,14 @@ class AuthConfig(BaseModel):
         "/openapi.json",
         "/health",
     ]
+    cookie_name: str = "access_token"
+    """Name of the cookie carrying the JWT when ``type == "cookie"``."""
+    cookie_secure: bool = True
+    """When ``True`` (default), the cookie is only sent over HTTPS.
+    Set to ``False`` for local HTTP development."""
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    """SameSite attribute applied to the auth cookie.  ``"none"``
+    requires ``cookie_secure=True`` per RFC 6265bis."""
     get_current_user_fn: str | None = None
     """Dotted import path to a custom ``get_current_user`` dependency,
     e.g. ``"myapp.auth.custom.get_current_user"``.  When set, the
@@ -77,6 +95,21 @@ class AuthConfig(BaseModel):
                 "verify_credentials_fn is required when using "
                 "the default JWT auth flow "
                 "(get_current_user_fn is not set)"
+            )
+            raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def _samesite_none_requires_secure(self) -> AuthConfig:
+        if (
+            self.type == "cookie"
+            and self.cookie_samesite == "none"
+            and not self.cookie_secure
+        ):
+            msg = (
+                "cookie_samesite='none' requires cookie_secure=True "
+                "(browsers reject non-Secure SameSite=None cookies)"
             )
             raise ValueError(msg)
 

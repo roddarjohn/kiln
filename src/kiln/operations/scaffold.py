@@ -123,9 +123,11 @@ class AuthScaffold:
             context={
                 "gcu_module": gcu_module,
                 "gcu_name": gcu_name,
+                "transport": auth.type,
                 "secret_env": auth.secret_env,
                 "algorithm": auth.algorithm,
                 "token_url": auth.token_url,
+                "cookie_name": auth.cookie_name,
             },
         )
 
@@ -138,8 +140,12 @@ class AuthScaffold:
                 context={
                     "vcf_module": vcf_module,
                     "vcf_name": vcf_name,
+                    "transport": auth.type,
                     "secret_env": auth.secret_env,
                     "algorithm": auth.algorithm,
                     "token_url": auth.token_url,
+                    "cookie_name": auth.cookie_name,
+                    "cookie_secure": auth.cookie_secure,
+                    "cookie_samesite": auth.cookie_samesite,
                 },
             )

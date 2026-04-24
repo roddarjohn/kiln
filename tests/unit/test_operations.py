@@ -256,6 +256,53 @@ class TestAuthScaffold:
         assert deps.context["gcu_module"] == "myapp.auth.custom"
         assert deps.context["gcu_name"] == "get_user"
 
+    def test_bearer_transport_in_context(self):
+        """Default bearer mode sets transport='jwt' in both files."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                verify_credentials_fn="myapp.auth.verify",
+            )
+        )
+        ctx = _project_ctx(config)
+        result = list(AuthScaffold().build(ctx, _Empty()))
+        deps = next(f for f in result if f.path == "auth/dependencies.py")
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert deps.context["transport"] == "jwt"
+        assert router.context["transport"] == "jwt"
+
+    def test_cookie_transport_in_context(self):
+        """type='cookie' threads cookie fields through to the router."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                type="cookie",
+                verify_credentials_fn="myapp.auth.verify",
+                cookie_name="session",
+                cookie_secure=False,
+                cookie_samesite="strict",
+            )
+        )
+        ctx = _project_ctx(config)
+        result = list(AuthScaffold().build(ctx, _Empty()))
+        paths = [f.path for f in result]
+        assert "auth/router.py" in paths
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert router.context["transport"] == "cookie"
+        assert router.context["cookie_name"] == "session"
+        assert router.context["cookie_secure"] is False
+        assert router.context["cookie_samesite"] == "strict"
+
+    def test_samesite_none_requires_secure(self):
+        """Config validator rejects SameSite=None without Secure."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cookie_samesite='none'"):
+            AuthConfig(
+                type="cookie",
+                verify_credentials_fn="myapp.auth.verify",
+                cookie_samesite="none",
+                cookie_secure=False,
+            )
+
 
 # -------------------------------------------------------------------
 # Router

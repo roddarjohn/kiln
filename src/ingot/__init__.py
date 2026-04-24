@@ -11,6 +11,15 @@ the generated app.
 
 from __future__ import annotations
 
+from ingot.auth import (
+    bearer_auth,
+    clear_auth_cookie,
+    cookie_auth,
+    decode_jwt,
+    encode_jwt,
+    issue_bearer_token,
+    set_auth_cookie,
+)
 from ingot.filters import FilterOp, apply_filters
 from ingot.ordering import SortDirection, apply_ordering
 from ingot.pagination import apply_keyset_pagination, apply_offset_pagination
@@ -24,5 +33,12 @@ __all__ = [
     "apply_offset_pagination",
     "apply_ordering",
     "assert_rowcount",
+    "bearer_auth",
+    "clear_auth_cookie",
+    "cookie_auth",
+    "decode_jwt",
+    "encode_jwt",
     "get_object_from_query_or_404",
+    "issue_bearer_token",
+    "set_auth_cookie",
 ]
