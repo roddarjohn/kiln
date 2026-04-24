@@ -17,20 +17,21 @@ from kiln.config.schema import (
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
+    FilterConfig,
+    ModifierConfig,
     OperationConfig,
+    OrderConfig,
+    PaginateConfig,
     ProjectConfig,
     ResourceConfig,
 )
-from kiln.operations._list_config import (
-    FilterConfig,
-    OrderConfig,
-    PaginateConfig,
-)
-from kiln.operations._shared import _field_dicts
 from kiln.operations.create import Create
 from kiln.operations.delete import Delete
+from kiln.operations.filter import Filter
 from kiln.operations.get import Get
 from kiln.operations.list import List
+from kiln.operations.order import Order
+from kiln.operations.paginate import Paginate
 from kiln.operations.routing import ProjectRouter, Router
 from kiln.operations.scaffold import AuthScaffold, Scaffold
 from kiln.operations.types import (
@@ -40,6 +41,7 @@ from kiln.operations.types import (
     SchemaClass,
     SerializerFn,
     TestCase,
+    _field_dicts,
 )
 from kiln.operations.update import Update
 
@@ -68,7 +70,14 @@ OPERATION_SCOPE = Scope(
     config_key="operations",
     parent=RESOURCE_SCOPE,
 )
-SCOPE_TREE = ScopeTree([PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE])
+MODIFIER_SCOPE = Scope(
+    name="modifier",
+    config_key="modifiers",
+    parent=OPERATION_SCOPE,
+)
+SCOPE_TREE = ScopeTree(
+    [PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE, MODIFIER_SCOPE],
+)
 
 
 def _resource_ctx(
@@ -618,33 +627,116 @@ def _templated_schemas(result: list[object]) -> list[SchemaClass]:
     ]
 
 
-class TestList:
-    """Tests for List operation."""
+def _drive_list(
+    resource: ResourceConfig,
+    *,
+    fields: list[FieldSpec] | None = None,
+    store: BuildStore | None = None,
+) -> BuildContext:
+    """Run List at ``.operations.0`` and register its outputs.
 
-    def test_list_emits_schema_and_handler(self):
-        """List emits its own ``{Model}ListItem`` schema + serializer."""
+    Extension-op tests call this first so ``find_list_outputs``
+    has a SearchRequest and RouteHandler to amend.
+    """
+    effective_fields = fields or _FIELDS
+    op_config = OperationConfig(
+        name="list",
+        fields=[f.model_dump() for f in effective_fields],
+    )
+    ctx = _operation_ctx(resource, op_config, store=store)
+    outputs = list(
+        List().build(ctx, List.Options(fields=effective_fields)),
+    )
+    ctx.store.add(ctx.instance_id, "list", *outputs)
+    return ctx
+
+
+def _drive_extension(
+    parent_ctx: BuildContext,
+    *,
+    type_name: str,
+    op_instance: object,
+    options: BaseModel,
+    extra_config: dict | None = None,
+) -> list[object]:
+    """Run a modifier op at the next free modifier-scope slot.
+
+    Modifiers nest inside the parent list op (``parent_ctx``'s
+    instance).  Registers the modifier under the list's
+    instance_id so ``find_list_outputs`` resolves the parent
+    correctly.  Returns the op's yielded outputs; any amendments
+    it made to the parent's outputs are visible on the store.
+    """
+    store = parent_ctx.store
+    list_id = parent_ctx.instance_id
+    n = 0
+    while f"{list_id}.modifiers.{n}" in store._instances:
+        n += 1
+    ext_id = f"{list_id}.modifiers.{n}"
+
+    ext_config = ModifierConfig(type=type_name, **(extra_config or {}))
+    store.register_instance(ext_id, ext_config, parent=list_id)
+    ext_ctx = BuildContext(
+        config=parent_ctx.config,
+        scope=MODIFIER_SCOPE,
+        instance=ext_config,
+        instance_id=ext_id,
+        store=store,
+    )
+    outputs = list(op_instance.build(ext_ctx, options))
+    store.add(ext_id, type_name, *outputs)
+    return outputs
+
+
+class TestList:
+    """Tests for the bare List op (no extensions)."""
+
+    def test_emits_list_item_schema_and_serializer(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 1
-        assert schemas[0].name == "UserListItem"
+        assert {s.name for s in schemas} == {
+            "UserListItem",
+            "UserSearchRequest",
+        }
 
         sers = [r for r in result if isinstance(r, SerializerFn)]
         assert len(sers) == 1
         assert sers[0].function_name == "to_user_list_item"
-        assert sers[0].schema_name == "UserListItem"
+
+    def test_search_request_starts_empty(self):
+        """With no extensions, SearchRequest is an empty Pydantic model."""
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
+
+        search_req = next(
+            s
+            for s in result
+            if isinstance(s, SchemaClass) and s.name == "UserSearchRequest"
+        )
+        assert search_req.body_context["has_filter"] is False
+        assert search_req.body_context["has_sort"] is False
+        assert search_req.body_context["pagination_mode"] is None
+
+    def test_handler_is_bare_post_search(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.method == "POST"
         assert handler.path == "/search"
         assert handler.function_name == "list_users"
+        assert handler.request_schema == "UserSearchRequest"
         assert handler.response_model == "list[UserListItem]"
-        assert handler.return_type == "list[UserListItem]"
-        assert handler.serializer_fn == "to_user_list_item"
+        assert handler.body_context["pagination_mode"] is None
+        assert ("sqlalchemy", "select") in handler.extra_imports
+        assert not any(mod == "ingot" for mod, _ in handler.extra_imports)
 
-    def test_list_test_case(self):
+    def test_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
@@ -654,145 +746,224 @@ class TestList:
         assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
 
-    def test_list_without_extensions_has_single_bodyless_search(self):
-        """Bare list op emits only one POST /search with no body."""
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        assert handlers[0].method == "POST"
-        assert handlers[0].path == "/search"
-        assert handlers[0].params == []
-        assert handlers[0].request_schema is None
-        assert _templated_schemas(result) == []
-        assert not any(isinstance(r, EnumClass) for r in result)
+class TestFilter:
+    """Tests for the Filter extension op."""
 
-    def test_list_with_filters_emits_filter_schemas(self):
+    def test_emits_filter_condition_schema(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            filters=FilterConfig(fields=["name"]),
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        result = list(List().build(ctx, opts))
+        schemas = [r for r in outputs if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == ["UserFilterCondition"]
+        assert schemas[0].body_context["allowed_fields"] == ["name"]
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserFilterCondition" in ext_names
-        assert "UserSearchRequest" in ext_names
-        assert "UserPage" not in ext_names  # no pagination configured
-
-    def test_list_with_ordering_emits_sort_field_enum_and_clause(self):
+    def test_amends_search_request_and_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            ordering=OrderConfig(fields=["name", "age"], default="name"),
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        result = list(List().build(ctx, opts))
+        search_req = _find_output(
+            list_ctx.store, SchemaClass, name="UserSearchRequest"
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert search_req.body_context["has_filter"] is True
+        assert handler.body_context["has_filter"] is True
+        assert ("ingot", "apply_filters") in handler.extra_imports
 
-        enums = [r for r in result if isinstance(r, EnumClass)]
+    def test_empty_fields_defaults_to_list_fields(self):
+        """FilterConfig() with no fields list uses all list fields."""
+        resource = ResourceConfig(
+            model="app.models.User",
+            operations=[
+                OperationConfig(
+                    name="list",
+                    fields=[f.model_dump() for f in _FIELDS],
+                ),
+            ],
+        )
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(),
+        )
+        schema = next(
+            s
+            for s in outputs
+            if isinstance(s, SchemaClass) and s.name == "UserFilterCondition"
+        )
+        assert schema.body_context["allowed_fields"] == ["name", "age"]
+
+
+class TestOrder:
+    """Tests for the Order extension op."""
+
+    def test_emits_sort_field_enum_and_clause(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(fields=["name", "age"], default="name"),
+        )
+        enums = [r for r in outputs if isinstance(r, EnumClass)]
         assert len(enums) == 1
         assert enums[0].name == "UserSortField"
         assert enums[0].members == [("NAME", "name"), ("AGE", "age")]
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserSortClause" in ext_names
-        assert "UserSearchRequest" in ext_names
-
-    def test_list_with_keyset_pagination_emits_page_and_search_handler(self):
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            pagination=PaginateConfig(mode="keyset", cursor_field="id"),
+        clause = next(
+            r
+            for r in outputs
+            if isinstance(r, SchemaClass) and r.name == "UserSortClause"
         )
-        result = list(List().build(ctx, opts))
+        assert clause.body_template.endswith("sort_clause.py.j2")
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserPage" in ext_names
-        assert "UserSearchRequest" in ext_names
-
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.method == "POST"
-        assert search.path == "/search"
-        assert search.function_name == "list_users"
-        assert search.response_model == "UserPage"
-        assert search.request_schema == "UserSearchRequest"
-        assert search.body_context["pagination_mode"] == "keyset"
-        assert search.body_context["cursor_field"] == "id"
-        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
-
-    def test_list_with_offset_pagination_uses_offset_helper(self):
+    def test_stamps_sort_defaults_onto_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            pagination=PaginateConfig(mode="offset"),
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(
+                fields=["name"],
+                default="name",
+                default_dir="desc",
+            ),
         )
-        result = list(List().build(ctx, opts))
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["has_sort"] is True
+        assert handler.body_context["default_sort_field"] == "name"
+        assert handler.body_context["default_sort_dir"] == "desc"
+        assert ("ingot", "apply_ordering") in handler.extra_imports
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.body_context["pagination_mode"] == "offset"
-        assert ("ingot", "apply_offset_pagination") in search.extra_imports
-        assert ("ingot", "apply_keyset_pagination") not in search.extra_imports
 
-    def test_list_with_all_extensions_emits_everything(self):
+class TestPaginate:
+    """Tests for the Paginate extension op."""
+
+    def test_keyset_emits_page_and_wires_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            filters=FilterConfig(),
-            ordering=OrderConfig(fields=["name"]),
-            pagination=PaginateConfig(mode="keyset"),
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset", cursor_field="id"),
         )
-        result = list(List().build(ctx, opts))
+        page = next(
+            r
+            for r in outputs
+            if isinstance(r, SchemaClass) and r.name == "UserPage"
+        )
+        assert page.body_context["mode"] == "keyset"
 
-        ext_names = {r.name for r in _templated_schemas(result)}
-        assert ext_names == {
-            "UserFilterCondition",
-            "UserSortClause",
-            "UserSearchRequest",
-            "UserPage",
-        }
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.response_model == "UserPage"
+        assert handler.return_type == "UserPage"
+        assert handler.body_context["pagination_mode"] == "keyset"
+        assert handler.body_context["cursor_field"] == "id"
+        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.body_context["has_filter"] is True
-        assert search.body_context["has_sort"] is True
-        assert search.body_context["pagination_mode"] == "keyset"
-        assert ("ingot", "apply_filters") in search.extra_imports
-        assert ("ingot", "apply_ordering") in search.extra_imports
-        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
+    def test_offset_uses_offset_helper(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="offset"),
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["pagination_mode"] == "offset"
+        assert ("ingot", "apply_offset_pagination") in handler.extra_imports
+        assert ("ingot", "apply_keyset_pagination") not in handler.extra_imports
 
-        tests = [r for r in result if isinstance(r, TestCase)]
-        assert len(tests) == 1
-        tc = tests[0]
-        assert tc.method == "post"
-        assert tc.path == "/search"
-        assert tc.has_request_body is True
-        assert tc.request_schema == "UserSearchRequest"
+    def test_flips_list_test_case_is_list_response(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset"),
+        )
+        tc = next(
+            t
+            for t in list_ctx.store.outputs_under(
+                "project.apps.0.resources.0", TestCase
+            )
+            if t.op_name == "list"
+        )
         assert tc.is_list_response is False
 
-    def test_list_filters_default_to_all_list_fields(self):
-        """FilterConfig with no fields uses the list op's full field set."""
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(fields=_FIELDS, filters=FilterConfig())
-        result = list(List().build(ctx, opts))
 
-        filter_schema = next(
-            r
-            for r in _templated_schemas(result)
-            if r.name == "UserFilterCondition"
+class TestListExtensionsCompose:
+    """All three extensions together on one list."""
+
+    def test_filter_order_paginate_all_wire_in(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        assert filter_schema.body_context["allowed_fields"] == ["name", "age"]
+        _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(fields=["name"], default="name"),
+        )
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset"),
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["has_filter"] is True
+        assert handler.body_context["has_sort"] is True
+        assert handler.body_context["pagination_mode"] == "keyset"
+        assert ("ingot", "apply_filters") in handler.extra_imports
+        assert ("ingot", "apply_ordering") in handler.extra_imports
+        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        assert handler.response_model == "UserPage"
+
+
+def _find_output(store: BuildStore, output_type: type, *, name: str):
+    """Find a single output by type + .name in a store."""
+    matches = [
+        o
+        for o in store.outputs_under("project.apps.0.resources.0", output_type)
+        if getattr(o, "name", None) == name
+    ]
+    assert len(matches) == 1, (
+        f"expected one {output_type.__name__} named {name}"
+    )
+    return matches[0]
+
+
+def _find_handler(store: BuildStore, *, path: str) -> RouteHandler:
+    matches = [
+        h
+        for h in store.outputs_under("project.apps.0.resources.0", RouteHandler)
+        if h.path == path
+    ]
+    assert len(matches) == 1, f"expected one handler at {path}"
+    return matches[0]
 
 
 # -------------------------------------------------------------------
@@ -828,6 +999,13 @@ class TestCreate:
         assert tests[0].status_invalid == 422
         assert tests[0].has_request_body is True
         assert tests[0].request_schema == "UserCreateRequest"
+        # Required fields must be carried through so the generated
+        # success test posts a valid body (regression: empty-dict
+        # bodies were returning 422 for non-empty CreateRequests).
+        assert tests[0].request_fields == [
+            {"name": "name", "py_type": "str"},
+            {"name": "age", "py_type": "int"},
+        ]
 
 
 # -------------------------------------------------------------------
@@ -927,11 +1105,14 @@ class TestAction:
         class _Info:
             is_object_action: bool = True
             response_class: str | None = "PostResult"
+            response_module: str = "blog.actions"
             request_class: str | None = "PostRequest"
+            request_module: str | None = "blog.actions"
             model_param_name: str | None = "post"
 
         op_config = OperationConfig(
             name="publish",
+            type="action",
             fn="blog.actions.publish",
         )
         ctx = _operation_ctx(resource, op_config)
@@ -950,6 +1131,8 @@ class TestAction:
         assert handler.path == "/{id}/publish"
         assert handler.function_name == "publish_action"
         assert handler.response_model == "PostResult"
+        assert handler.request_schema_module == "blog.actions"
+        assert handler.response_schema_module == "blog.actions"
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found == 404
@@ -963,11 +1146,14 @@ class TestAction:
         class _Info:
             is_object_action: bool = False
             response_class: str | None = None
+            response_module: str = "blog.actions"
             request_class: str | None = None
+            request_module: str | None = None
             model_param_name: str | None = None
 
         op_config = OperationConfig(
             name="bulk_import",
+            type="action",
             fn="blog.actions.bulk_import",
         )
         ctx = _operation_ctx(resource, op_config)

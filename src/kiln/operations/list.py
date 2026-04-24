@@ -1,7 +1,17 @@
-"""List operation: POST /search -- list/filter/sort/paginate resources."""
+"""List operation: POST /search -- bare list endpoint.
+
+Emits an always-present ``POST /search`` route plus the schemas
+and serializer every list op needs.  Modifier ops (Filter / Order
+/ Paginate) nest inside a list op's config and reach its outputs
+via a :class:`ListResult` bundle that List yields alongside the
+individual outputs.  The bundle carries direct references to each
+emitted object, so modifiers amend fields on the bundle rather
+than searching the store by name or shape.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -9,66 +19,79 @@ from pydantic import BaseModel
 from foundry.naming import Name
 from foundry.operation import operation
 from kiln.config.schema import FieldSpec  # noqa: TC001
-from kiln.operations._list_config import (  # noqa: TC001
-    FilterConfig,
-    OrderConfig,
-    PaginateConfig,
-)
-from kiln.operations._shared import (
-    _construct_response_schema,
-    _construct_serializer,
-)
 from kiln.operations.types import (
-    EnumClass,
     RouteHandler,
     RouteParam,
     SchemaClass,
+    SerializerFn,
     TestCase,
+    _construct_response_schema,
+    _construct_serializer,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig, ResourceConfig
+    from kiln.config.schema import (
+        ModifierConfig,
+        OperationConfig,
+        ResourceConfig,
+    )
 
 
-@operation("list", scope="operation", dispatch_on="name", requires=["get"])
+@dataclass
+class ListResult:
+    """Direct references to everything the list op emits.
+
+    Not a rendered output (see the no-op renderer registered in
+    :mod:`kiln.operations.renderers`) — just a typed handle that
+    modifier ops fetch to amend specific objects by name rather
+    than scanning the store.
+    """
+
+    list_item: SchemaClass
+    serializer: SerializerFn
+    search_request: SchemaClass
+    handler: RouteHandler
+    test_case: TestCase
+
+
+@operation("list", scope="operation", dispatch_on="name")
 class List:
-    """POST /search -- list/filter/sort/paginate resources.
+    """POST /search -- list resources.
 
-    Always emits a single ``POST /search`` route; never a GET.
-    When ``filters``, ``ordering``, or ``pagination`` is configured,
-    a ``SearchRequest`` body carries the query, the handler calls
-    the matching ingot helpers, and (for pagination) a ``Page``
-    schema wraps the response.  With no extensions configured,
-    the handler takes no body and returns ``list[{Model}ListItem]``.
+    Always emits:
+
+    * ``{Model}ListItem`` response schema + matching serializer.
+    * ``{Model}SearchRequest`` request schema (empty unless an
+      extension op — Filter / Order / Paginate — fills it in).
+    * ``POST /search`` route handler and its test case.
+
+    Extension ops run after this one (they declare
+    ``requires=["list"]``) and amend the SearchRequest + handler
+    in place.
     """
 
     class Options(BaseModel):
         """Options for the list operation."""
 
         fields: list[FieldSpec]
-        filters: FilterConfig | None = None
-        ordering: OrderConfig | None = None
-        pagination: PaginateConfig | None = None
 
     def build(
         self,
         ctx: BuildContext[OperationConfig],
         options: Options,
     ) -> Iterable[object]:
-        """Produce output for POST /search.
+        """Emit the list schemas, serializer, handler, and test case.
 
         Args:
-            ctx: Build context for the ``"list"`` operation entry.
-            options: Parsed ``Options``.
+            ctx: Build context for the ``"list"`` op entry.
+            options: Parsed ``Options`` (just the field list).
 
         Yields:
-            The ``{Model}ListItem`` schema, its serializer, and the
-            POST ``/search`` handler + test case.  Additionally
-            yields extension schemas (filter / sort / search-request
-            / page) when the corresponding options are configured.
+            ListItem schema, serializer, SearchRequest schema,
+            search RouteHandler, and TestCase.
 
         """
         resource = cast(
@@ -77,90 +100,34 @@ class List:
         )
         _, model = Name.from_dotted(resource.model)
         pk_name = getattr(resource, "pk", "id")
-        list_item_schema = _construct_response_schema(
+
+        list_item = _construct_response_schema(
             model, options.fields, suffix="ListItem"
         )
-        serializer = _construct_serializer(
-            model, list_item_schema, stem="list_item"
-        )
-        yield list_item_schema
-        yield serializer
 
-        filters = options.filters
-        ordering = options.ordering
-        pagination = options.pagination
-        pagination_mode = pagination.mode if pagination is not None else None
-        has_extensions = (
-            filters is not None
-            or ordering is not None
-            or pagination is not None
-        )
-
-        if filters is not None:
-            yield from _filter_schemas(
-                model=model,
-                filters=filters,
-                field_names=[f.name for f in options.fields],
-            )
-
-        if ordering is not None:
-            yield from _sort_schemas(model=model, ordering=ordering)
-
-        search_request_name: str | None = None
-        if has_extensions:
-            search_request_name = model.suffixed("SearchRequest")
-            yield SchemaClass(
-                name=search_request_name,
-                body_template="fastapi/schema_parts/search_request.py.j2",
-                body_context={
-                    "model_name": model.pascal,
-                    "has_filter": filters is not None,
-                    "has_sort": ordering is not None,
-                    "pagination_mode": pagination_mode,
-                    "default_page_size": (
-                        pagination.default_page_size
-                        if pagination is not None
-                        else 20
-                    ),
-                },
-            )
-
-        response_model = f"list[{list_item_schema.name}]"
-        if pagination_mode is not None:
-            page_name = model.suffixed("Page")
-            yield SchemaClass(
-                name=page_name,
-                body_template="fastapi/schema_parts/page.py.j2",
-                body_context={
-                    "model_name": model.pascal,
-                    "item_type": list_item_schema.name,
-                    "mode": pagination_mode,
-                },
-            )
-            response_model = page_name
-
-        default_sort_field = ordering.default if ordering is not None else None
-        default_sort_dir = (
-            ordering.default_dir if ordering is not None else "asc"
-        )
-        max_page_size = (
-            pagination.max_page_size if pagination is not None else 100
-        )
-        cursor_field = (
-            pagination.cursor_field if pagination is not None else pk_name
+        serializer = _construct_serializer(model, list_item, stem="list_item")
+        search_request_name = model.suffixed("SearchRequest")
+        search_request = SchemaClass(
+            name=search_request_name,
+            body_template="fastapi/schema_parts/search_request.py.j2",
+            body_context={
+                "model_name": model.pascal,
+                "has_filter": False,
+                "has_sort": False,
+                "pagination_mode": None,
+                "default_page_size": 20,
+            },
         )
 
-        params = (
-            [RouteParam(name="body", annotation=search_request_name)]
-            if search_request_name is not None
-            else []
-        )
+        response_model = f"list[{list_item.name}]"
 
-        yield RouteHandler(
+        handler = RouteHandler(
             method="POST",
             path="/search",
             function_name=f"list_{model.lower}s",
-            params=params,
+            params=[
+                RouteParam(name="body", annotation=search_request_name),
+            ],
             response_model=response_model,
             return_type=response_model,
             serializer_fn=serializer.function_name,
@@ -168,89 +135,90 @@ class List:
             doc=f"List {model.pascal} records.",
             body_template="fastapi/ops/search.py.j2",
             body_context={
-                "has_filter": filters is not None,
-                "has_sort": ordering is not None,
-                "pagination_mode": pagination_mode,
-                "default_sort_field": default_sort_field or pk_name,
-                "default_sort_dir": default_sort_dir,
-                "max_page_size": max_page_size,
-                "cursor_field": cursor_field,
+                "has_filter": False,
+                "has_sort": False,
+                "pagination_mode": None,
+                "default_sort_field": pk_name,
+                "default_sort_dir": "asc",
+                "max_page_size": 100,
+                "cursor_field": pk_name,
             },
-            extra_imports=_search_runtime_imports(
-                has_filter=filters is not None,
-                has_sort=ordering is not None,
-                pagination_mode=pagination_mode,
-            ),
+            extra_imports=[("sqlalchemy", "select")],
         )
 
-        yield TestCase(
+        test_case = TestCase(
             op_name="list",
             method="post",
             path="/search",
             status_success=200,
-            has_request_body=has_extensions,
+            has_request_body=True,
             request_schema=search_request_name,
-            is_list_response=pagination_mode is None,
+            is_list_response=True,
+        )
+
+        yield list_item
+        yield serializer
+        yield search_request
+        yield handler
+        yield test_case
+        yield ListResult(
+            list_item=list_item,
+            serializer=serializer,
+            search_request=search_request,
+            handler=handler,
+            test_case=test_case,
         )
 
 
-def _filter_schemas(
-    *,
-    model: Name,
-    filters: FilterConfig,
-    field_names: list[str],
-) -> Iterable[object]:
-    """Emit FilterCondition and FilterExpression schemas."""
-    allowed = filters.fields or field_names
-    yield SchemaClass(
-        name=model.suffixed("FilterCondition"),
-        body_template="fastapi/schema_parts/filter_node.py.j2",
-        body_context={
-            "model_name": model.pascal,
-            "allowed_fields": allowed,
-        },
-        extra_imports=[
-            ("typing", "Any"),
-            ("typing", "Literal"),
-            ("pydantic", "ConfigDict"),
-            ("pydantic", "Field"),
-        ],
+# -------------------------------------------------------------------
+# Modifier-op lookup
+#
+# Filter / Order / Paginate nest as children of a specific list op
+# in the scope tree.  Each fetches the parent list's
+# :class:`ListResult` bundle and amends fields directly — no store
+# scanning, no name/shape matching.
+# -------------------------------------------------------------------
+
+
+def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
+    """Return the model :class:`Name` for the modifier's resource."""
+    resource = cast(
+        "ResourceConfig",
+        ctx.store.ancestor_of(ctx.instance_id, "resource"),
+    )
+    _, model = Name.from_dotted(resource.model)
+    return model
+
+
+def find_list_result(ctx: BuildContext[ModifierConfig]) -> ListResult:
+    """Return the parent list op's :class:`ListResult` bundle.
+
+    The modifier's enclosing operation-scope instance *is* the
+    parent list op; looking up a ``ListResult`` under that id
+    locates the bundle directly — no name matching, no emitter
+    filter, no sibling scanning.
+
+    Raises:
+        LookupError: If the modifier has no enclosing operation or
+            the parent didn't emit a ``ListResult`` (would indicate
+            the modifier nests inside a non-list op).
+
+    """
+    parent_id = ctx.store.ancestor_id_of(ctx.instance_id, "operation")
+    if parent_id is None:
+        msg = "Modifier op has no enclosing operation."
+        raise LookupError(msg)
+
+    bundle = next(
+        iter(ctx.store.outputs_under(parent_id, ListResult)),
+        None,
     )
 
+    if bundle is None:
+        msg = (
+            "Parent op did not emit a ListResult — modifier must "
+            "nest inside a list op."
+        )
+        raise LookupError(msg)
 
-def _sort_schemas(
-    *,
-    model: Name,
-    ordering: OrderConfig,
-) -> Iterable[object]:
-    """Emit SortField enum and SortClause schema."""
-    yield EnumClass(
-        name=model.suffixed("SortField"),
-        members=[(f.upper(), f) for f in ordering.fields],
-        base="str, Enum",
-    )
-    yield SchemaClass(
-        name=model.suffixed("SortClause"),
-        body_template="fastapi/schema_parts/sort_clause.py.j2",
-        body_context={"model_name": model.pascal},
-        extra_imports=[("typing", "Literal")],
-    )
-
-
-def _search_runtime_imports(
-    *,
-    has_filter: bool,
-    has_sort: bool,
-    pagination_mode: str | None,
-) -> list[tuple[str, str]]:
-    """Return (module, name) import pairs for the search handler."""
-    pairs: list[tuple[str, str]] = [("sqlalchemy", "select")]
-    if has_filter:
-        pairs.append(("ingot", "apply_filters"))
-    if has_sort:
-        pairs.append(("ingot", "apply_ordering"))
-    if pagination_mode == "keyset":
-        pairs.append(("ingot", "apply_keyset_pagination"))
-    elif pagination_mode == "offset":
-        pairs.append(("ingot", "apply_offset_pagination"))
-    return pairs
+    return bundle

@@ -35,21 +35,6 @@ def test_app_config_defaults():
     assert cfg.resources == []
 
 
-def test_project_config_shorthand_wraps_single_app():
-    cfg = ProjectConfig.model_validate(
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [{"model": "myapp.models.Post"}],
-        }
-    )
-    assert len(cfg.apps) == 1
-    app = cfg.apps[0]
-    assert app.prefix == ""
-    assert app.config.module == "myapp"
-    assert app.config.resources[0].model == "myapp.models.Post"
-
-
 def test_project_config_apps_mode_untouched():
     cfg = ProjectConfig.model_validate(
         {
@@ -195,9 +180,11 @@ def test_operation_config_require_auth_override():
 def test_operation_config_action():
     oc = OperationConfig(
         name="publish",
+        type="action",
         fn="blog.actions.publish",
         params=[{"name": "notify", "type": "bool"}],
     )
+    assert oc.type == "action"
     assert oc.options["fn"] == "blog.actions.publish"
     assert oc.options["params"][0]["name"] == "notify"
 
@@ -240,12 +227,22 @@ def _load(path: Path) -> ProjectConfig:
 def test_load_json(tmp_path: Path):
     data = {
         "version": "1",
-        "module": "myapp",
         "databases": [{"key": "primary", "default": True}],
-        "resources": [
+        "apps": [
             {
-                "model": "myapp.models.Widget",
-                "operations": [{"name": "get"}, {"name": "list"}],
+                "config": {
+                    "module": "myapp",
+                    "resources": [
+                        {
+                            "model": "myapp.models.Widget",
+                            "operations": [
+                                {"name": "get"},
+                                {"name": "list"},
+                            ],
+                        }
+                    ],
+                },
+                "prefix": "",
             }
         ],
     }
@@ -268,8 +265,9 @@ def test_load_unsupported_extension(tmp_path: Path):
 
 def test_load_jsonnet(tmp_path: Path):
     jsonnet_src = (
-        '{ module: "jsonnet_app", resources: [], '
-        'databases: [{ key: "primary", default: true }] }'
+        "{ apps: [{ config: { module: 'jsonnet_app', resources: [] }, "
+        "prefix: '' }], "
+        "databases: [{ key: 'primary', default: true }] }"
     )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
@@ -282,7 +280,8 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
     helper.write_text('{ mod: "helper_app" }')
     jsonnet_src = (
         'local h = import "helper.libsonnet"; '
-        '{ module: h.mod, databases: [{ key: "primary", default: true }] }'
+        "{ apps: [{ config: { module: h.mod }, prefix: '' }], "
+        "databases: [{ key: 'primary', default: true }] }"
     )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
@@ -304,19 +303,24 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     src = """
     local resource = import "kiln/resources/presets.libsonnet";
     {
-      module: "blog",
       databases: [{ key: "primary", default: true }],
-      resources: [
-        {
-          model: "blog.models.Article",
-          operations: [
-            resource.action(
-              name="publish",
-              fn="blog.actions.publish",
-            ),
+      apps: [{
+        config: {
+          module: "blog",
+          resources: [
+            {
+              model: "blog.models.Article",
+              operations: [
+                resource.action(
+                  name="publish",
+                  fn="blog.actions.publish",
+                ),
+              ],
+            },
           ],
         },
-      ],
+        prefix: "",
+      }],
     }
     """
     cfg_file = tmp_path / "kiln.jsonnet"
@@ -332,4 +336,5 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     op = operations[0]
     assert not isinstance(op, str)
     assert op.name == "publish"
+    assert op.type == "action"
     assert op.options == {"fn": "blog.actions.publish"}

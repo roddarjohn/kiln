@@ -307,9 +307,7 @@ def _resource(
 
 
 # Scope-instance ids used by :func:`_store_with_resource`.  The
-# shorthand ``{module, resources, ...}`` config is wrapped into a
-# single implicit app by :class:`ProjectConfig`, so the chain is
-# always project → app → resource → operation.
+# scope chain is always project → app → resource → operation.
 _APP_ID = "project.apps.0"
 _RESOURCE_ID = f"{_APP_ID}.resources.0"
 _OP_ID = f"{_RESOURCE_ID}.operations.0"
@@ -322,8 +320,15 @@ def _rctx(
 ) -> RenderCtx:
     config = ProjectConfig.model_validate(
         {
-            "module": "myapp",
-            "resources": [resource.model_dump()],
+            "apps": [
+                {
+                    "config": {
+                        "module": "myapp",
+                        "resources": [resource.model_dump()],
+                    },
+                    "prefix": "",
+                },
+            ],
             "databases": [{"key": "primary", "default": True}],
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }
@@ -425,6 +430,34 @@ def test_serializer_fragment_with_tests(registry):
     assert [s.value for s in field_snippets] == [
         {"name": "id", "py_type": "int"}
     ]
+    # Test file must import the resource serializer so the
+    # generated `test_to_post_resource_maps_fields` can call it.
+    test_block = test_shell.imports.format("python")
+    assert (
+        "from _generated.myapp.serializers.post import to_post_resource"
+        in test_block
+    )
+
+
+def test_serializer_fragment_list_item_skips_test_file(registry):
+    """Only the resource serializer contributes to the test file.
+
+    Regression: list_item contributions duplicated mock-row
+    assignments and serializer-test assertions because they share
+    the `serializer_fields` slot with the resource serializer.
+    """
+    ser = SerializerFn(
+        function_name="to_post_list_item",
+        model_name="Post",
+        schema_name="PostListItem",
+        fields=[Field(name="id", py_type="int")],
+    )
+    fragments = registry.render(
+        ser,
+        _rctx(_resource(generate_tests=True)),
+    )
+    paths = {f.path for f in fragments}
+    assert paths == {"myapp/serializers/post.py"}
 
 
 def test_testcase_fragment_skipped_when_tests_disabled(registry):
@@ -821,6 +854,37 @@ def test_response_schema_name_list_envelope():
         response_model="list[PostListItem]",
     )
     assert _response_schema_name(handler) == "PostListItem"
+
+
+def test_handler_schema_module_overrides(registry):
+    """Action handlers import request/response from the user module.
+
+    Regression: action request/response classes live in the
+    consumer's source, not the generated schemas file.  When the
+    handler supplies ``request_schema_module`` /
+    ``response_schema_module``, the renderer must import from
+    those instead of the default ``{app}.schemas.{model}`` path.
+    """
+    handler = RouteHandler(
+        method="POST",
+        path="/{id}/publish",
+        function_name="publish_action",
+        request_schema="PublishRequest",
+        request_schema_module="myapp.actions",
+        response_model="PublishResponse",
+        response_schema_module="myapp.actions",
+        body_template="fastapi/ops/action.py.j2",
+        body_context={
+            "is_object_action": True,
+            "fn_name": "publish",
+            "model_param_name": "post",
+            "has_request_body": True,
+        },
+    )
+    fragments = registry.render(handler, _rctx(_resource()))
+    block = _unioned_imports(fragments).format("python")
+    assert "from myapp.actions import PublishRequest, PublishResponse" in block
+    assert "from _generated.myapp.schemas.post import" not in block
 
 
 # -------------------------------------------------------------------

@@ -22,7 +22,11 @@
   // ``"myapp.actions.publish"``.  The callable's type annotations are
   // inspected at generation time to determine the request body and
   // response model.
+  //
+  // ``type: "action"`` tells the engine to dispatch this entry to the
+  // Action op regardless of ``name`` (actions have user-defined names).
   action(name, fn, require_auth=true):: {
+    type: "action",
     name: name,
     fn: fn,
     [if require_auth != true then "require_auth"]: require_auth,
