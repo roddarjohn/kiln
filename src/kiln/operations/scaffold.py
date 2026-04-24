@@ -7,8 +7,8 @@ infrastructure files.  Split into two operations:
 * :class:`AuthScaffold` -- runs only when the project config has
   ``auth`` set, via :meth:`AuthScaffold.when`.  Emits the generated
   ``POST {token_url}`` route (and, for cookie transport, a logout
-  route).  The consumer's ``get_current_user`` is *not* scaffolded;
-  its dotted path is imported directly at use-sites.
+  route).  The consumer's ``get_session`` dependency is *not*
+  scaffolded; its dotted path is imported directly at use-sites.
 """
 
 from __future__ import annotations
@@ -78,11 +78,13 @@ class AuthScaffold:
     """Generate the token-issuance route.
 
     Emits a single :class:`StaticFile` at ``auth/router.py`` whose
-    ``POST {token_url}`` handler calls the consumer's
-    :attr:`~kiln.config.schema.AuthConfig.verify_credentials_fn`
-    and returns either an OAuth2 JSON body (``type == "jwt"``) or
-    sets an ``httpOnly`` cookie (``type == "cookie"``, which also
-    gets a matching logout route).
+    ``POST {token_url}`` handler parses the consumer's
+    :attr:`~kiln.config.schema.AuthConfig.credentials_schema`,
+    hands the instance to
+    :attr:`~kiln.config.schema.AuthConfig.validate_fn`, and either
+    returns an OAuth2-shaped JSON body (``type == "jwt"``) or sets
+    an ``httpOnly`` cookie (``type == "cookie"``, which also gets
+    a matching logout route).
     """
 
     def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
@@ -122,13 +124,16 @@ class AuthScaffold:
             context={},
         )
 
-        vcf_module, vcf_name = auth.verify_credentials_fn.rsplit(".", 1)
+        creds_module, creds_name = auth.credentials_schema.rsplit(".", 1)
+        validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
         yield StaticFile(
             path="auth/router.py",
             template="init/auth_router.py.j2",
             context={
-                "vcf_module": vcf_module,
-                "vcf_name": vcf_name,
+                "creds_module": creds_module,
+                "creds_name": creds_name,
+                "validate_module": validate_module,
+                "validate_name": validate_name,
                 "transport": auth.type,
                 "secret_env": auth.secret_env,
                 "algorithm": auth.algorithm,

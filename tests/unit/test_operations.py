@@ -184,7 +184,9 @@ class TestScaffold:
         """Scaffold never emits auth files -- that's AuthScaffold's job."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
@@ -210,64 +212,57 @@ class TestAuthScaffold:
         """when() returns True when auth is configured."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         assert AuthScaffold().when(ctx) is True
 
     def test_auth_files(self):
-        """Auth config produces auth directory files."""
+        """Auth config produces the auth package init + token router."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
-        assert "auth/__init__.py" in paths
-        assert "auth/dependencies.py" in paths
-        assert "auth/router.py" in paths
+        assert paths == ["auth/__init__.py", "auth/router.py"]
 
-    def test_auth_custom_gcu_skips_router(self):
-        """Custom get_current_user_fn skips auth router."""
+    def test_router_context_splits_user_dotted_paths(self):
+        """The router template gets the credentials schema + validator split."""
         config = MinimalConfig(
             auth=AuthConfig(
-                get_current_user_fn="myapp.auth.custom.get_user",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate_login",
+                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
-        paths = [f.path for f in result]
-        assert "auth/dependencies.py" in paths
-        assert "auth/router.py" not in paths
-
-    def test_auth_deps_context(self):
-        """Auth deps context has correct module/name split."""
-        config = MinimalConfig(
-            auth=AuthConfig(
-                get_current_user_fn="myapp.auth.custom.get_user",
-            )
-        )
-        ctx = _project_ctx(config)
-        result = list(AuthScaffold().build(ctx, _Empty()))
-        deps = next(f for f in result if f.path == "auth/dependencies.py")
-        assert deps.context["gcu_module"] == "myapp.auth.custom"
-        assert deps.context["gcu_name"] == "get_user"
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert router.context["creds_module"] == "myapp.auth"
+        assert router.context["creds_name"] == "LoginCredentials"
+        assert router.context["validate_module"] == "myapp.auth"
+        assert router.context["validate_name"] == "validate_login"
 
     def test_bearer_transport_in_context(self):
-        """Default bearer mode sets transport='jwt' in both files."""
+        """Default bearer mode sets transport='jwt' on the router."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
-        deps = next(f for f in result if f.path == "auth/dependencies.py")
         router = next(f for f in result if f.path == "auth/router.py")
-        assert deps.context["transport"] == "jwt"
         assert router.context["transport"] == "jwt"
 
     def test_cookie_transport_in_context(self):
@@ -275,7 +270,9 @@ class TestAuthScaffold:
         config = MinimalConfig(
             auth=AuthConfig(
                 type="cookie",
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
                 cookie_name="session",
                 cookie_secure=False,
                 cookie_samesite="strict",
@@ -283,8 +280,6 @@ class TestAuthScaffold:
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
-        paths = [f.path for f in result]
-        assert "auth/router.py" in paths
         router = next(f for f in result if f.path == "auth/router.py")
         assert router.context["transport"] == "cookie"
         assert router.context["cookie_name"] == "session"
@@ -298,7 +293,9 @@ class TestAuthScaffold:
         with pytest.raises(ValueError, match="cookie_samesite='none'"):
             AuthConfig(
                 type="cookie",
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.auth.validate",
+                get_session_fn="myapp.auth.get_session",
                 cookie_samesite="none",
                 cookie_secure=False,
             )
@@ -559,7 +556,9 @@ class TestProjectRouter:
         app_config = AppConfig(module="blog")
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                validate_fn="myapp.verify",
+                get_session_fn="myapp.auth.get_session",
             ),
             apps=[App(config=app_config, prefix="/blog")],
         )

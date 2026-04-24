@@ -51,8 +51,9 @@ def test_project_config_apps_mode_untouched():
 
 def test_auth_config_defaults():
     auth = AuthConfig(
-        get_current_user_fn="myapp.auth.get_current_user",
-        verify_credentials_fn="myapp.auth.verify",
+        credentials_schema="myapp.auth.LoginCredentials",
+        validate_fn="myapp.auth.validate",
+        get_session_fn="myapp.auth.get_session",
     )
     assert auth.type == "jwt"
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
@@ -60,11 +61,16 @@ def test_auth_config_defaults():
     assert auth.token_url == "/auth/token"  # noqa: S105
 
 
-def test_auth_config_both_fns_required():
-    with pytest.raises(ValueError, match="get_current_user_fn"):
-        AuthConfig(verify_credentials_fn="myapp.auth.verify")
-    with pytest.raises(ValueError, match="verify_credentials_fn"):
-        AuthConfig(get_current_user_fn="myapp.auth.get_current_user")
+def test_auth_config_all_fns_required():
+    for missing in ("credentials_schema", "validate_fn", "get_session_fn"):
+        kwargs = {
+            "credentials_schema": "myapp.auth.LoginCredentials",
+            "validate_fn": "myapp.auth.validate",
+            "get_session_fn": "myapp.auth.get_session",
+        }
+        del kwargs[missing]
+        with pytest.raises(ValueError, match=missing):
+            AuthConfig(**kwargs)
 
 
 def test_database_config_session_names():

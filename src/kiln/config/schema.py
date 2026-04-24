@@ -43,47 +43,66 @@ class AuthConfig(BaseModel):
     """Authentication configuration.
 
     kiln does not scaffold an auth module — the consumer owns that.
-    This config points kiln at the consumer's functions and tells
-    it how to shape the generated ``POST {token_url}`` endpoint.
+    This config points kiln at three consumer-provided symbols and
+    tells it how to shape the generated ``POST {token_url}`` endpoint.
 
     The consumer provides:
 
-    * :attr:`get_current_user_fn` -- a FastAPI dependency that
-      validates the incoming request and returns the user.  Every
-      protected route gets ``Depends(...)`` on this function.  A
-      thin implementation using :mod:`ingot.auth` looks like::
+    * :attr:`credentials_schema` -- a Pydantic model (or a
+      discriminated union via ``Annotated[A | B,
+      Field(discriminator="type")]``) used as the JSON request body
+      of the login endpoint.  This is NOT restricted to
+      username/password; it can describe API keys, magic-link
+      tokens, OAuth codes, or anything else.
+    * :attr:`validate_fn` -- called with the parsed schema instance.
+      Returns a ``dict`` of session data (encoded into the token) on
+      success, or ``None`` to reject with HTTP 401.  The dict can
+      carry any JSON-serializable fields the consumer wants on the
+      session.
+    * :attr:`get_session_fn` -- a FastAPI dependency that validates
+      the incoming token/cookie and returns the session dict.
+      Every protected route gets ``Depends(...)`` on this.  A thin
+      implementation using :mod:`ingot.auth` looks like::
 
           # myapp/auth.py
           from ingot.auth import bearer_auth
-          get_current_user = bearer_auth(
+          get_session = bearer_auth(
               token_url="/auth/token",
               secret_env="JWT_SECRET",
               algorithm="HS256",
           )
 
-    * :attr:`verify_credentials_fn` -- business logic that checks
-      a username/password and returns the JWT payload on success
-      or ``None`` on failure.  kiln generates the HTTP route that
-      calls this function and mints the token.
-
     Token-endpoint transport:
 
-    * ``type: "jwt"`` -- the endpoint returns an OAuth2 JSON body
-      (``{"access_token": ..., "token_type": "bearer"}``).
+    * ``type: "jwt"`` -- the endpoint returns an OAuth2-shaped JSON
+      body (``{"access_token": ..., "token_type": "bearer"}``).
     * ``type: "cookie"`` -- the endpoint sets an ``httpOnly`` cookie
       named :attr:`cookie_name` and a ``POST {token_url}/logout``
       route clears it.
+
+    Note:
+        OAuth2 password-flow form bodies (as used by Swagger's
+        *Authorize* button) are not supported yet — the login
+        endpoint always accepts JSON.  Consumers who need the
+        password-grant form can mount their own route alongside
+        and still use :mod:`ingot.auth` for token issuance.
+
     """
 
-    get_current_user_fn: str
-    """Dotted path to the consumer's ``get_current_user`` FastAPI
-    dependency, e.g. ``"myapp.auth.get_current_user"``."""
+    credentials_schema: str
+    """Dotted path to the Pydantic model (or discriminated-union
+    type alias) accepted as the JSON request body of the login
+    endpoint, e.g. ``"myapp.auth.LoginCredentials"``."""
 
-    verify_credentials_fn: str
-    """Dotted path to the consumer's credential-verification function,
-    e.g. ``"myapp.auth.verify_credentials"``.  It must accept
-    ``(username: str, password: str)`` and return a ``dict`` (the
-    JWT payload) on success or ``None`` on failure."""
+    validate_fn: str
+    """Dotted path to a function ``(creds) -> dict | None`` where
+    ``creds`` is the parsed :attr:`credentials_schema` instance.
+    Returns the session dict on success or ``None`` to reject."""
+
+    get_session_fn: str
+    """Dotted path to the FastAPI dependency that validates the
+    incoming token or cookie and returns the session dict,
+    e.g. ``"myapp.auth.get_session"``."""
 
     type: Literal["jwt", "cookie"] = "jwt"
     secret_env: str = "JWT_SECRET"  # noqa: S105

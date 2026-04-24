@@ -1,30 +1,30 @@
 {% from "_macros.j2" import file_header %}
 {% if transport == "cookie" %}
 {% set _extra %}
-The ``{{ vcf_module }}.{{ vcf_name }}`` function is called to verify
-credentials.  It must accept ``(username: str, password: str)`` and
-return a ``dict`` (used as the JWT payload) on success, or ``None``
-on failure.
+The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
+and passed to ``{{ validate_module }}.{{ validate_name }}``, which
+must return a ``dict`` of session data on success or ``None`` on
+failure.
 
 On success, the JWT is set as an ``httpOnly`` cookie named
 ``{{ cookie_name }}``.  A ``POST {{ token_url }}/logout`` endpoint
-clears the cookie.
+clears it.
 
 Mount this router in your application::
 
     from auth.router import router as auth_router
     app.include_router(auth_router)
 {% endset %}
-{{ file_header("FastAPI cookie-JWT auth endpoints", extra=_extra) }}
+{{ file_header("Cookie-JWT auth endpoints", extra=_extra) }}
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Response
 
 from ingot.auth import clear_auth_cookie, set_auth_cookie
 
-from {{ vcf_module }} import {{ vcf_name }}
+from {{ creds_module }} import {{ creds_name }}
+from {{ validate_module }} import {{ validate_name }}
 
 router = APIRouter()
 
@@ -32,23 +32,23 @@ router = APIRouter()
 @router.post("{{ token_url }}")
 def create_token(
     response: Response,
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    credentials: {{ creds_name }},
 ) -> dict[str, bool]:
-    """Verify credentials and set an httpOnly auth cookie.
+    """Validate credentials and set an httpOnly auth cookie.
 
     Args:
         response: Outgoing response; receives the Set-Cookie header.
-        form_data: OAuth2 password grant form fields.
+        credentials: Parsed login request body.
 
     Returns:
         ``{"ok": True}`` on success.
 
     Raises:
-        HTTPException: 401 if credentials are invalid.
+        HTTPException: 401 if ``{{ validate_name }}`` returns ``None``.
     """
     set_auth_cookie(
         response,
-        {{ vcf_name }}(form_data.username, form_data.password),
+        {{ validate_name }}(credentials),
         cookie_name="{{ cookie_name }}",
         secret_env="{{ secret_env }}",
         algorithm="{{ algorithm }}",
@@ -70,47 +70,45 @@ def logout(response: Response) -> dict[str, bool]:
     return {"ok": True}
 {% else %}
 {% set _extra %}
-The ``{{ vcf_module }}.{{ vcf_name }}`` function is called to verify
-credentials.  It must accept ``(username: str, password: str)`` and
-return a ``dict`` (used as the JWT payload) on success, or ``None``
-on failure.
+The request body is parsed into ``{{ creds_module }}.{{ creds_name }}``
+and passed to ``{{ validate_module }}.{{ validate_name }}``, which
+must return a ``dict`` of session data on success or ``None`` on
+failure.
 
 Mount this router in your application::
 
     from auth.router import router as auth_router
     app.include_router(auth_router)
 {% endset %}
-{{ file_header("FastAPI JWT token endpoint", extra=_extra) }}
+{{ file_header("JWT auth endpoint", extra=_extra) }}
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter
 
 from ingot.auth import issue_bearer_token
 
-from {{ vcf_module }} import {{ vcf_name }}
+from {{ creds_module }} import {{ creds_name }}
+from {{ validate_module }} import {{ validate_name }}
 
 router = APIRouter()
 
 
 @router.post("{{ token_url }}")
-def create_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-) -> dict[str, str]:
-    """Exchange username/password credentials for a JWT.
+def create_token(credentials: {{ creds_name }}) -> dict[str, str]:
+    """Validate credentials and return an OAuth2-shaped JWT response.
 
     Args:
-        form_data: OAuth2 password grant form fields.
+        credentials: Parsed login request body.
 
     Returns:
-        A dict with ``access_token`` and ``token_type`` keys.
+        ``{"access_token": <jwt>, "token_type": "bearer"}`` on success.
 
     Raises:
-        HTTPException: 401 if credentials are invalid.
+        HTTPException: 401 if ``{{ validate_name }}`` returns ``None``.
     """
     return issue_bearer_token(
-        {{ vcf_name }}(form_data.username, form_data.password),
+        {{ validate_name }}(credentials),
         secret_env="{{ secret_env }}",
         algorithm="{{ algorithm }}",
     )

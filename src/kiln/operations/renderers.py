@@ -62,7 +62,7 @@ class _ResourceInfo:
     pk_name: str
     pk_py_type: str
     has_auth: bool
-    get_current_user_fn: str
+    get_session_fn: str
     session_module: str
     get_db_fn: str
     generate_tests: bool
@@ -102,8 +102,8 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[resource.pk_type],
         has_auth=getattr(config, "auth", None) is not None,
-        get_current_user_fn=(
-            config.auth.get_current_user_fn
+        get_session_fn=(
+            config.auth.get_session_fn
             if getattr(config, "auth", None) is not None
             else ""
         ),
@@ -412,12 +412,12 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        gcu_module, gcu_name = info.get_current_user_fn.rsplit(".", 1)
+        gs_module, gs_name = info.get_session_fn.rsplit(".", 1)
         imports.add_from(
-            gcu_module,
-            gcu_name
-            if gcu_name == "get_current_user"
-            else f"{gcu_name} as get_current_user",
+            gs_module,
+            gs_name
+            if gs_name == "get_session"
+            else f"{gs_name} as get_session",
         )
 
     yield FileFragment(
@@ -432,9 +432,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
             "has_auth": info.has_auth,
             "get_db_fn": info.get_db_fn,
             "route_module": route_module,
-            "get_current_user_fn": (
-                "get_current_user" if info.has_auth else None
-            ),
+            "get_session_fn": ("get_session" if info.has_auth else None),
         },
         imports=imports,
     )

@@ -1,15 +1,17 @@
-"""Auth operation: augments CRUD handlers with auth dependencies.
+"""Auth operation: augments CRUD handlers with a session dependency.
 
 Auth is a resource-scoped operation that runs *after* the CRUD
 and action operations have produced their route handlers and
 test cases.  When the project has auth configured and the
 current resource opts in, it:
 
-* Appends ``current_user: Annotated[dict, Depends(...)]`` to
-  each :class:`RouteHandler`'s ``extra_deps`` so the template
-  renders the auth dependency.
-* Appends the ``get_current_user`` import to the handler's
-  ``extra_imports`` so the assembler includes it.
+* Appends ``session: Annotated[dict, Depends(...)]`` to each
+  :class:`RouteHandler`'s ``extra_deps`` so the template renders
+  the auth dependency.
+* Appends the ``get_session`` import to the handler's
+  ``extra_imports`` so the assembler includes it.  The imported
+  name is aliased from the consumer's
+  :attr:`~kiln.config.schema.AuthConfig.get_session_fn`.
 * Flips :attr:`TestCase.requires_auth` so the generated tests
   expect a 401 without credentials.
 
@@ -76,17 +78,16 @@ class Auth:
 
         """
         auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
-        gcu_module, gcu_name = auth_cfg.get_current_user_fn.rsplit(".", 1)
+        gs_module, gs_name = auth_cfg.get_session_fn.rsplit(".", 1)
+        import_name = (
+            gs_name if gs_name == "get_session" else f"{gs_name} as get_session"
+        )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(
-                "current_user: Annotated[dict, Depends(get_current_user)],"
+                "session: Annotated[dict, Depends(get_session)],"
             )
-            handler.extra_imports.append(
-                (gcu_module, f"{gcu_name} as get_current_user")
-                if gcu_name != "get_current_user"
-                else (gcu_module, "get_current_user")
-            )
+            handler.extra_imports.append((gs_module, import_name))
 
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
             test.requires_auth = True

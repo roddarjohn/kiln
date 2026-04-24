@@ -135,7 +135,9 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
         _project_with(
             auth={
                 "type": "jwt",
-                "verify_credentials_fn": "myapp.auth.verify",
+                "credentials_schema": "myapp.auth.LoginCredentials",
+                "validate_fn": "myapp.auth.validate",
+                "get_session_fn": "myapp.auth.get_session",
             },
         ),
     )
@@ -145,7 +147,7 @@ def test_generate_with_auth_writes_scaffold(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert (out / "db" / "primary_session.py").exists()
-    assert (out / "auth" / "dependencies.py").exists()
+    assert (out / "auth" / "router.py").exists()
 
 
 def test_generate_overwrites_on_rerun(tmp_path: Path):
@@ -154,13 +156,15 @@ def test_generate_overwrites_on_rerun(tmp_path: Path):
         _project_with(
             auth={
                 "type": "jwt",
-                "verify_credentials_fn": "myapp.auth.verify",
+                "credentials_schema": "myapp.auth.LoginCredentials",
+                "validate_fn": "myapp.auth.validate",
+                "get_session_fn": "myapp.auth.get_session",
             },
         ),
     )
     out = tmp_path / "out"
     runner.invoke(app, ["generate", "--config", str(cfg), "--out", str(out)])
-    sentinel = out / "auth" / "dependencies.py"
+    sentinel = out / "auth" / "router.py"
     sentinel.write_text("# modified")
     runner.invoke(app, ["generate", "--config", str(cfg), "--out", str(out)])
     assert sentinel.read_text() != "# modified"
@@ -202,7 +206,9 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
         {
             "auth": {
                 "type": "jwt",
-                "verify_credentials_fn": "myapp.auth.verify",
+                "credentials_schema": "myapp.auth.LoginCredentials",
+                "validate_fn": "myapp.auth.validate",
+                "get_session_fn": "myapp.auth.get_session",
             },
             "databases": [{"key": "primary", "default": True}],
             "apps": [
@@ -218,7 +224,7 @@ def test_generate_project_mode_writes_all_apps(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert (out / "db" / "primary_session.py").exists()
-    assert (out / "auth" / "dependencies.py").exists()
+    assert (out / "auth" / "router.py").exists()
     assert (out / "blog" / "routes" / "article.py").exists()
     assert (out / "inventory" / "routes" / "product.py").exists()
     assert (out / "routes" / "__init__.py").exists()
