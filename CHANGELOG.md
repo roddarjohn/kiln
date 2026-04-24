@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.2...kiln-v0.7.3) (2026-04-24)
+
+
+### Bug fixes
+
+* fixed require auth issue on actions ([5509be1](https://github.com/roddarjohn/kiln/commit/5509be104d0a39b0e88aadd50d6c2c2753d61b3d))
+
 ## [0.7.2](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.1...kiln-v0.7.2) (2026-04-24)
 
 
