@@ -80,9 +80,7 @@ class Auth:
         """
         auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
-        deps_module = prefix_import(
-            ctx.package_prefix, "auth", "dependencies"
-        )
+        deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             handler.extra_deps.append(

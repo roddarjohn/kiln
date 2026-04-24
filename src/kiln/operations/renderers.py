@@ -406,9 +406,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        deps_module = prefix_import(
-            info.package_prefix, "auth", "dependencies"
-        )
+        deps_module = prefix_import(info.package_prefix, "auth", "dependencies")
         imports.add_from(deps_module, "get_session")
 
     yield FileFragment(

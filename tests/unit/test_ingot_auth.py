@@ -116,15 +116,11 @@ class TestSessionAuthValidation:
 
     def test_bearer_requires_token_url(self) -> None:
         with pytest.raises(ValueError, match="token_url"):
-            session_auth(
-                Session, ["bearer"], secret_env=ENV_VAR, algorithm=ALG
-            )
+            session_auth(Session, ["bearer"], secret_env=ENV_VAR, algorithm=ALG)
 
     def test_cookie_requires_cookie_name(self) -> None:
         with pytest.raises(ValueError, match="cookie_name"):
-            session_auth(
-                Session, ["cookie"], secret_env=ENV_VAR, algorithm=ALG
-            )
+            session_auth(Session, ["cookie"], secret_env=ENV_VAR, algorithm=ALG)
 
 
 class TestSessionAuthBearer:
