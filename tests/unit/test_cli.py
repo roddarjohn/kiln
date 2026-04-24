@@ -372,10 +372,8 @@ def test_targets_list_shows_kiln():
 def test_generate_dry_run_lists_files_without_writing(tmp_path: Path):
     cfg = _write_json_config(
         tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [
+        _project_with(
+            resources=[
                 {
                     "model": "myapp.models.Post",
                     "operations": [
@@ -386,7 +384,7 @@ def test_generate_dry_run_lists_files_without_writing(tmp_path: Path):
                     ],
                 }
             ],
-        },
+        ),
     )
     out = tmp_path / "out"
     result = runner.invoke(
@@ -407,14 +405,7 @@ def test_generate_dry_run_lists_files_without_writing(tmp_path: Path):
 
 
 def test_generate_dry_run_rejects_clean(tmp_path: Path):
-    cfg = _write_json_config(
-        tmp_path,
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [],
-        },
-    )
+    cfg = _write_json_config(tmp_path, _project_with())
     out = tmp_path / "out"
     result = runner.invoke(
         app,
