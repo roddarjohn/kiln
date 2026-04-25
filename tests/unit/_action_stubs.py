@@ -84,3 +84,27 @@ async def action_two_bodies(
 ) -> StubResponse:
     """Action with two BaseModel params — should fail."""
     return StubResponse(ok=True)
+
+
+class StubMixin:
+    """Stand-in for a mixin class shared across resources."""
+
+
+class StubModelWithMixin(StubMixin):
+    """Concrete model that extends the mixin."""
+
+
+async def object_action_supertype(
+    obj: StubMixin,
+    db: AsyncSession,
+) -> StubResponse:
+    """Object action whose model param is a supertype of the model."""
+    return StubResponse(ok=True)
+
+
+async def object_action_object_typed(
+    obj: object,
+    db: AsyncSession,
+) -> StubResponse:
+    """Object action whose first param is typed ``object``."""
+    return StubResponse(ok=True)

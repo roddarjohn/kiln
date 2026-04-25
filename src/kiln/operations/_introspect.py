@@ -92,7 +92,7 @@ def introspect_action_fn(
         if hint is None or _is_async_session(hint):
             continue
 
-        if hint is model_cls:
+        if _matches_model(hint, model_cls):
             model_param_name = param_name
             continue
 
@@ -156,6 +156,29 @@ def _resolve_hints(
     except Exception as exc:
         msg = f"Cannot resolve type annotations for '{fn_dotted}': {exc}"
         raise ValueError(msg) from exc
+
+
+def _matches_model(hint: object, model_cls: object) -> bool:
+    """Return ``True`` when *hint* is the model class or a supertype.
+
+    The exact-identity case (``hint is model_cls``) is the common one
+    -- a user-written action annotates its first parameter with the
+    same SQLAlchemy class the resource points at.  The subclass case
+    is what lets generic actions live in shared modules: a function
+    annotated ``DocumentMixin`` matches any concrete model that
+    extends ``DocumentMixin``, so :mod:`ingot.documents` can ship
+    reusable upload/download actions.
+
+    ``object`` is rejected explicitly: any class is a subclass of
+    ``object``, so without the guard a parameter typed ``object``
+    would silently be treated as the model param.
+    """
+    return (
+        isinstance(hint, type)
+        and isinstance(model_cls, type)
+        and hint is not object
+        and issubclass(model_cls, hint)
+    )
 
 
 def _is_async_session(hint: object) -> bool:

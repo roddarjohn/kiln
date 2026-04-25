@@ -2,7 +2,7 @@
 
 A *document* is a binary blob (image, PDF, attachment) tracked by a
 metadata row in the consumer's database and a corresponding object
-in S3-compatible storage.  This module ships two pieces:
+in S3-compatible storage.  This module ships three pieces:
 
 * :class:`DocumentMixin` -- a SQLAlchemy 2.0 mixin that supplies
   the columns every document row needs (``id``, ``s3_key``,
@@ -19,6 +19,16 @@ in S3-compatible storage.  This module ships two pieces:
   :func:`default_storage` builds one from ``KILN_S3_*`` env vars
   for the common case.
 
+* Action functions -- :func:`make_request_upload`,
+  :func:`complete_upload`, :func:`download`, and
+  :func:`delete_document`.  These are shaped to plug into kiln's
+  :class:`~kiln.operations.action.Action` operation: the consumer
+  re-exports them from a project-local actions module and points
+  ``resource.action`` entries at them.  The
+  :class:`DocumentMixin`-typed object-action params match any
+  concrete subclass via the introspector's supertype check, so the
+  same four functions serve every document resource in the project.
+
 The split is deliberate: the mixin is pure SQLAlchemy and has no
 runtime dependency on AWS, so consumers who only want the metadata
 shape (e.g. for migrations) don't pay for the storage client.
@@ -34,12 +44,16 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol
 
 import boto3
+from fastapi import HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import BigInteger, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from typing import BinaryIO
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 DEFAULT_PRESIGN_TTL = 900
@@ -296,3 +310,177 @@ def default_storage() -> S3Storage:
         region=os.environ.get("KILN_S3_REGION"),
         endpoint_url=os.environ.get("KILN_S3_ENDPOINT_URL"),
     )
+
+
+# --- Action request/response schemas --------------------------------------
+
+
+class UploadRequest(BaseModel):
+    """Body for the request-upload action.
+
+    Carries everything :func:`make_request_upload` needs to reserve
+    a key and bind the presigned PUT URL to the right content type.
+    """
+
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
+class UploadResponse(BaseModel):
+    """Response for the request-upload action.
+
+    The client PUTs the file bytes to ``upload_url`` (it must send
+    a matching ``Content-Type`` header), then calls the
+    complete-upload action with ``id`` to flip the row out of
+    pending state.
+    """
+
+    id: uuid.UUID
+    key: str
+    upload_url: str
+
+
+class DownloadResponse(BaseModel):
+    """Response for the download action -- a short-lived GET URL."""
+
+    download_url: str
+
+
+class DocumentResponse(BaseModel):
+    """Pydantic projection of a :class:`DocumentMixin` row."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    s3_key: str
+    content_type: str | None
+    size_bytes: int | None
+    original_filename: str | None
+    created_at: datetime.datetime
+    uploaded_at: datetime.datetime | None
+
+
+class DeleteResponse(BaseModel):
+    """Ack body for the delete action."""
+
+    ok: bool = True
+
+
+# --- Action functions -----------------------------------------------------
+
+
+def make_request_upload(
+    model_cls: type[DocumentMixin],
+) -> Callable[..., Awaitable[UploadResponse]]:
+    """Build the request-upload collection action for *model_cls*.
+
+    Returned as a factory because creating a row needs the concrete
+    SQLAlchemy class; collection actions only receive ``db`` and
+    ``body`` from the action handler, so the closure binds the
+    class by reference.
+
+    Consumers re-export the result from a project-local actions
+    module and point a :func:`resource.action` entry at it -- the
+    introspector reads this closure's signature, sees the
+    :class:`UploadRequest` body and no model param, and emits a
+    ``POST /upload`` route.
+    """
+
+    async def request_upload(
+        *,
+        db: AsyncSession,
+        body: UploadRequest,
+    ) -> UploadResponse:
+        """Reserve a key and return a presigned PUT URL.
+
+        The row is created with ``uploaded_at=NULL``; the client
+        confirms the actual byte upload via :func:`complete_upload`.
+        """
+        document_id = uuid.uuid4()
+        # Prefix the key with the document id so collisions on the
+        # consumer-supplied filename can't reach across rows.
+        key = f"{document_id.hex}/{body.filename}"
+        # SQLAlchemy declarative ``__init__`` accepts every mapped
+        # column as a kwarg; pass via dict-unpack so zuban doesn't
+        # validate the kwargs against the mixin's empty signature.
+        document = model_cls(
+            id=document_id,
+            s3_key=key,
+            content_type=body.content_type,
+            size_bytes=body.size_bytes,
+            original_filename=body.filename,
+        )
+        db.add(document)
+        # flush() is what makes the new row visible to a follow-up
+        # complete_upload call inside the same transaction; the
+        # action handler commits after the function returns.
+        await db.flush()
+
+        storage = default_storage()
+        upload_url = storage.presigned_put_url(
+            key,
+            content_type=body.content_type,
+        )
+        return UploadResponse(
+            id=document_id,
+            key=key,
+            upload_url=upload_url,
+        )
+
+    return request_upload
+
+
+async def complete_upload(
+    document: DocumentMixin,
+    *,
+    db: AsyncSession,  # noqa: ARG001 -- action handler passes this
+) -> DocumentResponse:
+    """Mark *document* as uploaded.
+
+    Sets ``uploaded_at`` to now; the action handler commits the
+    session after.  Idempotent -- calling twice just refreshes the
+    timestamp, which is rare enough not to be worth a guard.
+    """
+    document.uploaded_at = _utcnow()
+    return DocumentResponse.model_validate(document)
+
+
+async def download(
+    document: DocumentMixin,
+    *,
+    db: AsyncSession,  # noqa: ARG001 -- action handler passes this
+) -> DownloadResponse:
+    """Return a presigned GET URL for *document*.
+
+    Refuses with 404 when ``uploaded_at is None`` -- the row exists
+    but the client never confirmed the PUT, so the object may not
+    be in S3 and a presigned URL would just 404 noisily.
+    """
+    if document.uploaded_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document upload not complete",
+        )
+    storage = default_storage()
+    return DownloadResponse(
+        download_url=storage.presigned_get_url(document.s3_key),
+    )
+
+
+async def delete_document(
+    document: DocumentMixin,
+    *,
+    db: AsyncSession,
+) -> DeleteResponse:
+    """Cascade-delete *document*: remove the S3 object then the row.
+
+    S3 first because :meth:`S3Storage.delete` is idempotent -- a
+    crash between the two steps leaves an orphan row, which the
+    next delete attempt cleans up.  Reversing the order would
+    instead leak S3 objects, which are harder to find later.
+    """
+    storage = default_storage()
+    storage.delete(document.s3_key)
+    await db.delete(document)
+    return DeleteResponse()
