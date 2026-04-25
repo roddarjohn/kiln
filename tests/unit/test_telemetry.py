@@ -18,11 +18,7 @@ from kiln.config.schema import (
     ResourceConfig,
     TelemetryConfig,
 )
-from kiln.operations.telemetry import (
-    OTEL_CORE_VERSION,
-    OTEL_INSTRUMENTATION_VERSION,
-    TelemetryScaffold,
-)
+from kiln.operations.telemetry import TelemetryScaffold
 
 # ---------------------------------------------------------------------------
 # Schema validation
@@ -153,7 +149,7 @@ class TestTelemetryScaffoldGate:
 
 
 class TestTelemetryScaffoldOutputs:
-    def test_emits_four_files(self):
+    def test_emits_three_files(self):
         cfg = ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
             telemetry=TelemetryConfig(service_name="svc"),
@@ -170,7 +166,6 @@ class TestTelemetryScaffoldOutputs:
             "telemetry/__init__.py",
             "telemetry/setup.py",
             "telemetry/decorators.py",
-            "telemetry/requirements.txt",
         }
 
     def test_setup_context_carries_config_values(self):
@@ -232,26 +227,6 @@ class TestTelemetryScaffoldOutputs:
             o for o in outputs if o.path == "telemetry/decorators.py"
         )
         assert decorators.context["telemetry_module"] == "telemetry"
-
-    def test_requirements_pins_match_constants(self):
-        cfg = ProjectConfig(
-            databases=[DatabaseConfig(key="primary", default=True)],
-            telemetry=TelemetryConfig(service_name="svc"),
-        )
-        outputs = list(
-            TelemetryScaffold().build(
-                _project_ctx(cfg),
-                _options=TelemetryScaffold().Options(),
-            )
-        )
-        reqs = next(
-            o for o in outputs if o.path == "telemetry/requirements.txt"
-        )
-        ctx = reqs.context
-        assert ctx["otel_core_version"] == OTEL_CORE_VERSION
-        assert ctx["otel_instrumentation_version"] == (
-            OTEL_INSTRUMENTATION_VERSION
-        )
 
 
 # ---------------------------------------------------------------------------
