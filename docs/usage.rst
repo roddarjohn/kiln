@@ -317,6 +317,127 @@ See :doc:`reference` for the full stdlib list.  The most common:
 * ``kiln/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
 * ``kiln/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
   and ``fields.nested(name, model, fields, many=false, load="selectin")``.
+* ``kiln/resources/presets.libsonnet`` -- ``resource.action(...)`` and
+  ``resource.documents(...)`` for bundling action operations onto a
+  resource.  See :ref:`document-uploads` for the documents flow.
+
+.. _document-uploads:
+
+Document uploads
+----------------
+
+kiln supports a presigned-URL upload flow on top of the existing
+``action`` machinery -- no new operation type, just a SQLAlchemy mixin
+plus four ready-made action functions in :mod:`ingot.documents`.
+
+The flow:
+
+1. Client ``POST /attachments/upload`` with ``{filename, content_type,
+   size_bytes}``; server creates a ``pending`` row and returns
+   ``{id, key, upload_url}``.
+2. Client ``PUT``s the file bytes to ``upload_url`` (S3 directly --
+   bytes never touch the app server).
+3. Client ``POST /attachments/{id}/complete`` to flip the row out of
+   pending state.  Subsequent ``POST /attachments/{id}/download``
+   calls return short-lived presigned GET URLs.
+4. ``POST /attachments/{id}/delete-document`` cascades: deletes the
+   S3 object, then the row.
+
+The model
+^^^^^^^^^
+
+Add :class:`ingot.documents.DocumentMixin` to a concrete model on
+your own ``Base`` so the table lives in your metadata (foreign keys,
+alembic, multi-schema setups all keep working):
+
+.. code-block:: python
+
+   # myapp/models.py
+   from ingot.documents import DocumentMixin
+   from myapp.db import Base
+
+   class Attachment(Base, DocumentMixin):
+       __tablename__ = "attachments"
+       # add your own columns here, e.g.
+       # owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(...))
+
+The mixin supplies ``id`` (UUID PK), ``s3_key``, ``content_type``,
+``size_bytes``, ``original_filename``, ``created_at``, and
+``uploaded_at`` (NULL until the upload is confirmed).
+
+The actions module
+^^^^^^^^^^^^^^^^^^
+
+Bind :func:`ingot.documents.make_request_upload` to your concrete
+class and re-export the rest as-is:
+
+.. code-block:: python
+
+   # myapp/attachments/actions.py
+   from ingot.documents import (
+       complete_upload,
+       delete_document,
+       download,
+       make_request_upload,
+   )
+   from myapp.models import Attachment
+
+   request_upload = make_request_upload(Attachment)
+
+The factory exists because creating a row needs the concrete class;
+the other three functions accept any :class:`DocumentMixin` subclass
+and the introspector matches them via the supertype check.
+
+The config
+^^^^^^^^^^
+
+Use the ``resource.documents(actions_module)`` preset to bundle all
+four actions onto the resource:
+
+.. code-block:: jsonnet
+
+   local resource = import "kiln/resources/presets.libsonnet";
+
+   {
+     model: "myapp.models.Attachment",
+     pk: "id",
+     pk_type: "uuid",
+     operations: [
+       { name: "get", fields: [
+           { name: "id", type: "uuid" },
+           { name: "original_filename", type: "str" },
+           { name: "content_type", type: "str" },
+       ] },
+     ] + resource.documents("myapp.attachments.actions"),
+   }
+
+Routes generated (relative to the resource prefix):
+
+* ``POST /upload`` -- request_upload (mints presigned PUT URL)
+* ``POST /{id}/complete`` -- complete_upload
+* ``POST /{id}/download`` -- download (returns presigned GET URL)
+* ``POST /{id}/delete-document`` -- delete_document (cascades S3 +
+  row delete)
+
+The download endpoint is ``POST`` rather than ``GET`` because the
+underlying ``action`` operation only supports POST today; the
+response carries the GET URL the client follows.
+
+S3 configuration
+^^^^^^^^^^^^^^^^
+
+The action functions call :func:`ingot.documents.default_storage`
+which reads three env vars:
+
+* ``KILN_S3_BUCKET`` -- bucket name (required).
+* ``KILN_S3_REGION`` -- AWS region; optional, falls back to the
+  boto3 default chain.
+* ``KILN_S3_ENDPOINT_URL`` -- override for MinIO / localstack /
+  other S3-compatible endpoints; optional.
+
+For tests, monkey-patch ``ingot.documents.default_storage`` to
+return a mock ``S3Storage`` (or any object satisfying the
+:class:`ingot.documents.Storage` Protocol).
 
 Testing the generated code
 --------------------------
