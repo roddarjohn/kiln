@@ -552,13 +552,14 @@ wheels = [
 
 [[package]]
 name = "kiln-generator"
-version = "0.6.1"
+version = "0.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "jsonnet" },
     { name = "pydantic" },
+    { name = "pyjwt" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "typer" },
 ]
@@ -601,6 +602,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.0" },
     { name = "jsonnet", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "pyjwt", specifier = ">=2.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.24.1" },
 ]

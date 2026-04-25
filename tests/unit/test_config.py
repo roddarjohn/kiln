@@ -35,21 +35,6 @@ def test_app_config_defaults():
     assert cfg.resources == []
 
 
-def test_project_config_shorthand_wraps_single_app():
-    cfg = ProjectConfig.model_validate(
-        {
-            "module": "myapp",
-            "databases": [{"key": "primary", "default": True}],
-            "resources": [{"model": "myapp.models.Post"}],
-        }
-    )
-    assert len(cfg.apps) == 1
-    app = cfg.apps[0]
-    assert app.prefix == ""
-    assert app.config.module == "myapp"
-    assert app.config.resources[0].model == "myapp.models.Post"
-
-
 def test_project_config_apps_mode_untouched():
     cfg = ProjectConfig.model_validate(
         {
@@ -66,24 +51,47 @@ def test_project_config_apps_mode_untouched():
 
 def test_auth_config_defaults():
     auth = AuthConfig(
-        verify_credentials_fn="myapp.auth.verify",
+        credentials_schema="myapp.auth.LoginCredentials",
+        session_schema="myapp.auth.Session",
+        validate_fn="myapp.auth.validate",
     )
-    assert auth.type == "jwt"
+    assert auth.sources == ["bearer"]
     assert auth.secret_env == "JWT_SECRET"  # noqa: S105
     assert auth.algorithm == "HS256"
-    assert "/docs" in auth.exclude_paths
+    assert auth.token_url == "/auth/token"  # noqa: S105
 
 
-def test_auth_config_verify_credentials_required():
-    with pytest.raises(ValueError, match="verify_credentials_fn"):
-        AuthConfig()
+def test_auth_config_fields_required():
+    fields = ("credentials_schema", "session_schema", "validate_fn")
+    for missing in fields:
+        kwargs = {
+            "credentials_schema": "myapp.auth.LoginCredentials",
+            "session_schema": "myapp.auth.Session",
+            "validate_fn": "myapp.auth.validate",
+        }
+        del kwargs[missing]
+        with pytest.raises(ValueError, match=missing):
+            AuthConfig(**kwargs)
 
 
-def test_auth_config_verify_not_required_with_custom_auth():
-    auth = AuthConfig(
-        get_current_user_fn="myapp.auth.get_user",
-    )
-    assert auth.verify_credentials_fn is None
+def test_auth_config_empty_sources_rejected():
+    with pytest.raises(ValueError, match="at least 1"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=[],
+        )
+
+
+def test_auth_config_duplicate_sources_rejected():
+    with pytest.raises(ValueError, match="duplicates"):
+        AuthConfig(
+            credentials_schema="myapp.auth.LoginCredentials",
+            session_schema="myapp.auth.Session",
+            validate_fn="myapp.auth.validate",
+            sources=["bearer", "bearer"],
+        )
 
 
 def test_database_config_session_names():
@@ -195,9 +203,11 @@ def test_operation_config_require_auth_override():
 def test_operation_config_action():
     oc = OperationConfig(
         name="publish",
+        type="action",
         fn="blog.actions.publish",
         params=[{"name": "notify", "type": "bool"}],
     )
+    assert oc.type == "action"
     assert oc.options["fn"] == "blog.actions.publish"
     assert oc.options["params"][0]["name"] == "notify"
 
@@ -217,6 +227,113 @@ def test_field_spec():
     f = FieldSpec(name="title", type="str")
     assert f.name == "title"
     assert f.type == "str"
+    assert f.is_nested is False
+
+
+def test_field_spec_nested_requires_model_and_fields():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+    )
+    assert f.is_nested is True
+    assert f.model == "blog.models.Project"
+    assert f.fields is not None
+    assert f.many is False
+
+
+def test_field_spec_nested_without_model_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="require `model` and `fields`"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            fields=[FieldSpec(name="id", type="uuid")],
+        )
+
+
+def test_field_spec_nested_without_fields_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="require `model` and `fields`"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+        )
+
+
+def test_field_spec_nested_empty_fields_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="must be non-empty"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+            fields=[],
+        )
+
+
+def test_field_spec_scalar_with_model_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="only allowed when"):
+        FieldSpec(name="project", type="str", model="blog.models.Project")
+
+
+def test_field_spec_many_on_scalar_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="only meaningful when"):
+        FieldSpec(name="project", type="str", many=True)
+
+
+def test_field_spec_nested_many_allowed():
+    f = FieldSpec(
+        name="articles",
+        type="nested",
+        model="blog.models.Article",
+        fields=[FieldSpec(name="id", type="uuid")],
+        many=True,
+    )
+    assert f.many is True
+
+
+def test_field_spec_nested_load_defaults_to_selectin():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+    )
+    assert f.load == "selectin"
+
+
+def test_field_spec_nested_load_override():
+    f = FieldSpec(
+        name="project",
+        type="nested",
+        model="blog.models.Project",
+        fields=[FieldSpec(name="id", type="uuid")],
+        load="joined",
+    )
+    assert f.load == "joined"
+
+
+def test_field_spec_load_on_scalar_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="`load` is only meaningful"):
+        FieldSpec(name="title", type="str", load="joined")
 
 
 # ---------------------------------------------------------------------------
@@ -240,12 +357,22 @@ def _load(path: Path) -> ProjectConfig:
 def test_load_json(tmp_path: Path):
     data = {
         "version": "1",
-        "module": "myapp",
         "databases": [{"key": "primary", "default": True}],
-        "resources": [
+        "apps": [
             {
-                "model": "myapp.models.Widget",
-                "operations": [{"name": "get"}, {"name": "list"}],
+                "config": {
+                    "module": "myapp",
+                    "resources": [
+                        {
+                            "model": "myapp.models.Widget",
+                            "operations": [
+                                {"name": "get"},
+                                {"name": "list"},
+                            ],
+                        }
+                    ],
+                },
+                "prefix": "",
             }
         ],
     }
@@ -268,8 +395,9 @@ def test_load_unsupported_extension(tmp_path: Path):
 
 def test_load_jsonnet(tmp_path: Path):
     jsonnet_src = (
-        '{ module: "jsonnet_app", resources: [], '
-        'databases: [{ key: "primary", default: true }] }'
+        "{ apps: [{ config: { module: 'jsonnet_app', resources: [] }, "
+        "prefix: '' }], "
+        "databases: [{ key: 'primary', default: true }] }"
     )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
@@ -282,7 +410,8 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
     helper.write_text('{ mod: "helper_app" }')
     jsonnet_src = (
         'local h = import "helper.libsonnet"; '
-        '{ module: h.mod, databases: [{ key: "primary", default: true }] }'
+        "{ apps: [{ config: { module: h.mod }, prefix: '' }], "
+        "databases: [{ key: 'primary', default: true }] }"
     )
     cfg_file = tmp_path / "kiln.jsonnet"
     cfg_file.write_text(jsonnet_src)
@@ -304,19 +433,24 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     src = """
     local resource = import "kiln/resources/presets.libsonnet";
     {
-      module: "blog",
       databases: [{ key: "primary", default: true }],
-      resources: [
-        {
-          model: "blog.models.Article",
-          operations: [
-            resource.action(
-              name="publish",
-              fn="blog.actions.publish",
-            ),
+      apps: [{
+        config: {
+          module: "blog",
+          resources: [
+            {
+              model: "blog.models.Article",
+              operations: [
+                resource.action(
+                  name="publish",
+                  fn="blog.actions.publish",
+                ),
+              ],
+            },
           ],
         },
-      ],
+        prefix: "",
+      }],
     }
     """
     cfg_file = tmp_path / "kiln.jsonnet"
@@ -332,4 +466,51 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     op = operations[0]
     assert not isinstance(op, str)
     assert op.name == "publish"
+    assert op.type == "action"
     assert op.options == {"fn": "blog.actions.publish"}
+    assert op.require_auth is True
+
+
+def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
+    """``resource.action`` emits ``require_auth`` for bool values and
+    omits the key only when explicitly passed ``null`` (inherit)."""
+    src = """
+    local resource = import "kiln/resources/presets.libsonnet";
+    {
+      databases: [{ key: "primary", default: true }],
+      apps: [{
+        config: {
+          module: "blog",
+          resources: [
+            {
+              model: "blog.models.Article",
+              require_auth: false,
+              operations: [
+                resource.action(
+                  name="publish",
+                  fn="blog.actions.publish",
+                  require_auth=false,
+                ),
+                resource.action(
+                  name="archive",
+                  fn="blog.actions.archive",
+                  require_auth=null,
+                ),
+              ],
+            },
+          ],
+        },
+        prefix: "",
+      }],
+    }
+    """
+    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file.write_text(src)
+    cfg = _load(cfg_file)
+    ops = cfg.apps[0].config.resources[0].operations
+    assert ops is not None
+    publish, archive = ops[0], ops[1]
+    assert not isinstance(publish, str)
+    assert not isinstance(archive, str)
+    assert publish.require_auth is False
+    assert archive.require_auth is None

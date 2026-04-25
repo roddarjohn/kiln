@@ -93,6 +93,58 @@ The ``type`` field on :class:`~kiln.config.schema.FieldSpec` accepts:
      - ``dict[str, Any]``
      - schemas
      -
+   * - ``nested``
+     - generated sub-schema class
+     - read-op schemas (``get`` / ``list``)
+     - Dumps a related model inline.  Requires ``model`` and
+       ``fields``; see :ref:`nested-fields` below.
+
+.. _nested-fields:
+
+Nested (related-model) fields
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A field with ``type: "nested"`` renders as an inline dump of a
+related SQLAlchemy model.  The generator emits a scoped sub-schema
+(``{ParentSchema}{FieldPascal}Nested``) plus a sub-serializer, and
+attaches a loader to the handler's ``select(...)`` so the
+relationship is eagerly loaded before serialization.
+
+Keys on a nested spec:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Key
+     - Meaning
+   * - ``model``
+     - Dotted import path of the related SQLAlchemy class, e.g.
+       ``"blog.models.Author"``.  **Required.**
+   * - ``fields``
+     - Sub-field list for the dump.  Can itself contain further
+       nested entries.  **Required; must be non-empty.**
+   * - ``many``
+     - ``true`` when the relationship returns a collection.  The
+       generated schema wraps the sub-type in ``list[...]`` and the
+       serializer list-comprehends over ``obj.{field}``.
+   * - ``load``
+     - Eager-loading strategy.  ``"selectin"`` (default) issues one
+       extra SELECT — safe for both scalar and collection
+       relationships and avoids N+1.  ``"joined"`` emits a single
+       JOIN (better for one-to-one / many-to-one scalars).
+       ``"subquery"`` uses an older correlated-subquery load.
+       Mixes freely across nesting levels: a ``"joined"`` outer and
+       a ``"selectin"`` inner compose as
+       ``joinedload(A.b).selectinload(B.c)``.
+
+Nested fields are supported on read ops (``get`` / ``list``) only.
+Write-op request bodies (``create`` / ``update``) must use scalar
+fields.
+
+The :mod:`kiln/fields.libsonnet` helper library exposes a
+:func:`nested` shortcut for common cases — see :doc:`usage` for
+examples.
 
 Built-in operations
 -------------------

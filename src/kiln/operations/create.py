@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln.operations._shared import FieldsOptions, _field_dicts
+from kiln.config.schema import PYTHON_TYPES, FieldType
 from kiln.operations.types import (
+    FieldsOptions,
     RouteHandler,
     RouteParam,
     SchemaClass,
     TestCase,
+    _field_dicts,
 )
 
 if TYPE_CHECKING:
@@ -65,6 +67,7 @@ class Create:
             method="POST",
             path="/",
             function_name=f"create_{model.lower}",
+            op_name=ctx.instance.name,
             params=[RouteParam(name="body", annotation=request_schema)],
             status_code=201,
             doc=f"Create a new {model.pascal}.",
@@ -81,4 +84,13 @@ class Create:
             status_invalid=422,
             has_request_body=True,
             request_schema=request_schema,
+            # _field_dicts above already rejects nested FieldSpecs, so every
+            # entry here is guaranteed to carry a scalar ``type``.
+            request_fields=[
+                {
+                    "name": f.name,
+                    "py_type": PYTHON_TYPES[cast("FieldType", f.type)],
+                }
+                for f in options.fields
+            ],
         )

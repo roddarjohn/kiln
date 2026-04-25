@@ -1,29 +1,36 @@
-// kiln stdlib — JWT auth helper
+// kiln stdlib — auth config helper
 // Usage: local auth = import 'kiln/auth/jwt.libsonnet';
-//        auth.jwt({ secret_env: "MY_SECRET" })
+//        auth.jwt({
+//          credentials_schema: "myapp.auth.LoginCredentials",
+//          session_schema: "myapp.auth.Session",
+//          validate_fn: "myapp.auth.validate_login",
+//          sources: ["bearer", "cookie"],  // optional, defaults to ["bearer"]
+//        })
+//
+// The consumer owns the three types; kiln owns the auth package
+// (get_session dep + login/logout routes).  See ingot.auth for the
+// runtime primitives the generated code composes.
 {
-  jwt(opts={}):: {
-    type: "jwt",
+  jwt(opts):: {
+    // Dotted path to the Pydantic model (or discriminated-union
+    // type alias) accepted as the login request body.
+    credentials_schema: opts.credentials_schema,
+    // Dotted path to the Pydantic model carried in the token.
+    session_schema: opts.session_schema,
+    // Dotted path to `(creds) -> Session | None`.
+    validate_fn: opts.validate_fn,
+    // Ordered list of token transports: subset of {"bearer","cookie"}.
+    sources: std.get(opts, "sources", ["bearer"]),
     secret_env: std.get(opts, "secret_env", "JWT_SECRET"),
     algorithm: std.get(opts, "algorithm", "HS256"),
     token_url: std.get(opts, "token_url", "/auth/token"),
-    exclude_paths: std.get(opts, "exclude_paths", [
-      "/docs",
-      "/openapi.json",
-      "/health",
-    ]),
-    // Optional dotted path to a custom get_current_user dependency.
-    // When set, auth/dependencies.py re-exports this function instead
-    // of containing the default JWT implementation.
-    // e.g. get_current_user_fn: "myapp.auth.custom.get_current_user"
-    [if std.objectHas(opts, "get_current_user_fn") then "get_current_user_fn"]:
-      std.get(opts, "get_current_user_fn"),
-    // Dotted path to a credential-verification function.
-    // Must accept (username, password) and return a dict (JWT
-    // payload) on success or None on failure.
-    // Required when get_current_user_fn is not set.
-    // e.g. verify_credentials_fn: "myapp.auth.verify_credentials"
-    [if std.objectHas(opts, "verify_credentials_fn") then "verify_credentials_fn"]:
-      std.get(opts, "verify_credentials_fn"),
+    cookie_name: std.get(opts, "cookie_name", "access_token"),
+    cookie_secure: std.get(opts, "cookie_secure", true),
+    cookie_samesite: std.get(opts, "cookie_samesite", "lax"),
+    // Optional dotted path to an ingot.auth.SessionStore instance.
+    // When set, the generated get_session dep enforces the store's
+    // deny-list and the generated logout calls store.revoke first.
+    [if std.objectHas(opts, "session_store") then "session_store"]:
+      opts.session_store,
   },
 }

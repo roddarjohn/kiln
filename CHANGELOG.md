@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.7.3](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.2...kiln-v0.7.3) (2026-04-24)
+
+
+### Bug fixes
+
+* fixed require auth issue on actions ([5509be1](https://github.com/roddarjohn/kiln/commit/5509be104d0a39b0e88aadd50d6c2c2753d61b3d))
+
+## [0.7.2](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.1...kiln-v0.7.2) (2026-04-24)
+
+
+### Features
+
+* auth extensions ([#35](https://github.com/roddarjohn/kiln/issues/35)) ([3d84a0d](https://github.com/roddarjohn/kiln/commit/3d84a0deda3d616a451a8cf1f05be88468e2e94d))
+* related models ([#34](https://github.com/roddarjohn/kiln/issues/34)) ([8ff7014](https://github.com/roddarjohn/kiln/commit/8ff7014791aab86ce304b0346a62aeba716758e0))
+
+## [0.7.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.0...kiln-v0.7.1) (2026-04-24)
+
+
+### Features
+
+* simplifying store + docs ([e670000](https://github.com/roddarjohn/kiln/commit/e6700002265c681c573fef23816a86c2281a2472))
+
+## [0.7.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.1...kiln-v0.7.0) (2026-04-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* list extension changes ([#30](https://github.com/roddarjohn/kiln/issues/30))
+
+### Features
+
+* CLI improvements ([#31](https://github.com/roddarjohn/kiln/issues/31)) ([ec5d090](https://github.com/roddarjohn/kiln/commit/ec5d090bd4edd06bd8e9153b3a4715661fefb39a))
+* list extension changes ([#30](https://github.com/roddarjohn/kiln/issues/30)) ([14a6b38](https://github.com/roddarjohn/kiln/commit/14a6b38f9a40e38f4abdf653d90b15085390c5a2))
+
 ## [0.6.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.6.0...kiln-v0.6.1) (2026-04-23)
 
 

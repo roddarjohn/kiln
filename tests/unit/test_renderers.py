@@ -307,9 +307,7 @@ def _resource(
 
 
 # Scope-instance ids used by :func:`_store_with_resource`.  The
-# shorthand ``{module, resources, ...}`` config is wrapped into a
-# single implicit app by :class:`ProjectConfig`, so the chain is
-# always project → app → resource → operation.
+# scope chain is always project → app → resource → operation.
 _APP_ID = "project.apps.0"
 _RESOURCE_ID = f"{_APP_ID}.resources.0"
 _OP_ID = f"{_RESOURCE_ID}.operations.0"
@@ -322,8 +320,15 @@ def _rctx(
 ) -> RenderCtx:
     config = ProjectConfig.model_validate(
         {
-            "module": "myapp",
-            "resources": [resource.model_dump()],
+            "apps": [
+                {
+                    "config": {
+                        "module": "myapp",
+                        "resources": [resource.model_dump()],
+                    },
+                    "prefix": "",
+                },
+            ],
             "databases": [{"key": "primary", "default": True}],
             **({"auth": auth.model_dump()} if auth is not None else {}),
         }
@@ -393,6 +398,7 @@ def test_serializer_fragment_without_tests(registry):
     ser = SerializerFn(
         function_name="to_post_resource",
         model_name="Post",
+        model_module="myapp.models",
         schema_name="PostResource",
         fields=[Field(name="id", py_type="int")],
     )
@@ -405,6 +411,7 @@ def test_serializer_fragment_with_tests(registry):
     ser = SerializerFn(
         function_name="to_post_resource",
         model_name="Post",
+        model_module="myapp.models",
         schema_name="PostResource",
         fields=[Field(name="id", py_type="int")],
     )
@@ -419,12 +426,90 @@ def test_serializer_fragment_with_tests(registry):
     }
     test_shell = _file(fragments, "tests/test_myapp_post.py")
     assert test_shell.context["has_serializer_test"] is True
+    assert test_shell.context["mock_row_lines"] == [
+        'row.id = _sample("int")',
+    ]
     field_snippets = _snippets(
         fragments, "tests/test_myapp_post.py", "serializer_fields"
     )
     assert [s.value for s in field_snippets] == [
         {"name": "id", "py_type": "int"}
     ]
+    # Test file must import the resource serializer so the
+    # generated `test_to_post_resource_maps_fields` can call it.
+    test_block = test_shell.imports.format("python")
+    assert (
+        "from _generated.myapp.serializers.post import to_post_resource"
+        in test_block
+    )
+
+
+def test_serializer_fragment_nested_mock_row_lines(registry):
+    """Mock-row emission follows scalar-nested paths, skips collections.
+
+    Scalar nested relationships need dotted-path population so the
+    sub-serializer finds valid types; collections are left unset
+    because ``MagicMock`` iterates empty by default.
+    """
+    ser = SerializerFn(
+        function_name="to_post_resource",
+        model_name="Post",
+        model_module="myapp.models",
+        schema_name="PostResource",
+        fields=[
+            Field(name="id", py_type="int"),
+            Field(
+                name="author",
+                py_type="PostResourceAuthorNested",
+                nested_serializer="to_post_resource_author_nested",
+                nested_fields=[
+                    Field(name="id", py_type="uuid.UUID"),
+                    Field(name="name", py_type="str"),
+                ],
+            ),
+            Field(
+                name="tags",
+                py_type="list[PostResourceTagsNested]",
+                nested_serializer="to_post_resource_tags_nested",
+                many=True,
+                nested_fields=[Field(name="id", py_type="uuid.UUID")],
+            ),
+        ],
+    )
+    fragments = registry.render(
+        ser,
+        _rctx(_resource(generate_tests=True)),
+    )
+    test_shell = _file(fragments, "tests/test_myapp_post.py")
+    # Scalar nested author descends via dotted paths; nested many
+    # `tags` is absent (MagicMock iterates empty by default).
+    assert test_shell.context["mock_row_lines"] == [
+        'row.id = _sample("int")',
+        'row.author.id = _sample("uuid.UUID")',
+        'row.author.name = _sample("str")',
+    ]
+
+
+def test_serializer_fragment_list_item_skips_test_file(registry):
+    """Only the resource serializer contributes to the test file.
+
+    Regression: list_item contributions duplicated mock-row
+    assignments and serializer-test assertions because they share
+    the `serializer_fields` slot with the resource serializer.
+    """
+    ser = SerializerFn(
+        function_name="to_post_list_item",
+        model_name="Post",
+        model_module="myapp.models",
+        schema_name="PostListItem",
+        fields=[Field(name="id", py_type="int")],
+    )
+    fragments = registry.render(
+        ser,
+        _rctx(_resource(generate_tests=True)),
+    )
+    paths = {f.path for f in fragments}
+    assert paths == {"myapp/serializers/post.py"}
 
 
 def test_testcase_fragment_skipped_when_tests_disabled(registry):
@@ -451,8 +536,8 @@ def test_testcase_fragment_no_auth(registry):
     )
     shell = _file(fragments, "tests/test_myapp_post.py")
     assert shell.context["has_auth"] is False
-    assert shell.context["get_current_user_fn"] is None
-    assert "auth.dependencies" not in shell.imports.format("python")
+    assert shell.context["get_session_fn"] is None
+    assert "get_session" not in shell.imports.format("python")
 
 
 def test_testcase_fragment_with_tests(registry):
@@ -467,19 +552,26 @@ def test_testcase_fragment_with_tests(registry):
         tc,
         _rctx(
             _resource(generate_tests=True),
-            auth=AuthConfig(verify_credentials_fn="myapp.auth.verify"),
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+            ),
         ),
     )
     path = "tests/test_myapp_post.py"
     shell = _file(fragments, path)
     assert shell.context["model_name"] == "Post"
     assert shell.context["has_auth"] is True
-    assert shell.context["get_current_user_fn"] == "get_current_user"
+    assert shell.context["get_session_fn"] == "get_session"
     cases = [s.value for s in _snippets(fragments, path, "test_cases")]
     assert len(cases) == 1
     assert cases[0]["op_name"] == "get"
     assert cases[0]["status_not_found"] == 404
-    assert "from _generated.auth.dependencies" in shell.imports.format("python")
+    assert (
+        "from _generated.auth.dependencies import get_session"
+        in shell.imports.format("python")
+    )
 
 
 def _unioned_imports(fragments):
@@ -821,6 +913,37 @@ def test_response_schema_name_list_envelope():
         response_model="list[PostListItem]",
     )
     assert _response_schema_name(handler) == "PostListItem"
+
+
+def test_handler_schema_module_overrides(registry):
+    """Action handlers import request/response from the user module.
+
+    Regression: action request/response classes live in the
+    consumer's source, not the generated schemas file.  When the
+    handler supplies ``request_schema_module`` /
+    ``response_schema_module``, the renderer must import from
+    those instead of the default ``{app}.schemas.{model}`` path.
+    """
+    handler = RouteHandler(
+        method="POST",
+        path="/{id}/publish",
+        function_name="publish_action",
+        request_schema="PublishRequest",
+        request_schema_module="myapp.actions",
+        response_model="PublishResponse",
+        response_schema_module="myapp.actions",
+        body_template="fastapi/ops/action.py.j2",
+        body_context={
+            "is_object_action": True,
+            "fn_name": "publish",
+            "model_param_name": "post",
+            "has_request_body": True,
+        },
+    )
+    fragments = registry.render(handler, _rctx(_resource()))
+    block = _unioned_imports(fragments).format("python")
+    assert "from myapp.actions import PublishRequest, PublishResponse" in block
+    assert "from _generated.myapp.schemas.post import" not in block
 
 
 # -------------------------------------------------------------------

@@ -17,20 +17,21 @@ from kiln.config.schema import (
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
+    FilterConfig,
+    ModifierConfig,
     OperationConfig,
+    OrderConfig,
+    PaginateConfig,
     ProjectConfig,
     ResourceConfig,
 )
-from kiln.operations._list_config import (
-    FilterConfig,
-    OrderConfig,
-    PaginateConfig,
-)
-from kiln.operations._shared import _field_dicts
 from kiln.operations.create import Create
 from kiln.operations.delete import Delete
+from kiln.operations.filter import Filter
 from kiln.operations.get import Get
 from kiln.operations.list import List
+from kiln.operations.order import Order
+from kiln.operations.paginate import Paginate
 from kiln.operations.routing import ProjectRouter, Router
 from kiln.operations.scaffold import AuthScaffold, Scaffold
 from kiln.operations.types import (
@@ -40,6 +41,7 @@ from kiln.operations.types import (
     SchemaClass,
     SerializerFn,
     TestCase,
+    _field_dicts,
 )
 from kiln.operations.update import Update
 
@@ -68,7 +70,14 @@ OPERATION_SCOPE = Scope(
     config_key="operations",
     parent=RESOURCE_SCOPE,
 )
-SCOPE_TREE = ScopeTree([PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE])
+MODIFIER_SCOPE = Scope(
+    name="modifier",
+    config_key="modifiers",
+    parent=OPERATION_SCOPE,
+)
+SCOPE_TREE = ScopeTree(
+    [PROJECT, APP_SCOPE, RESOURCE_SCOPE, OPERATION_SCOPE, MODIFIER_SCOPE],
+)
 
 
 def _resource_ctx(
@@ -175,7 +184,9 @@ class TestScaffold:
         """Scaffold never emits auth files -- that's AuthScaffold's job."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
             )
         )
         ctx = _project_ctx(config)
@@ -201,51 +212,101 @@ class TestAuthScaffold:
         """when() returns True when auth is configured."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
             )
         )
         ctx = _project_ctx(config)
         assert AuthScaffold().when(ctx) is True
 
     def test_auth_files(self):
-        """Auth config produces auth directory files."""
+        """Auth config emits __init__, dependencies, and router."""
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.auth.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
-        assert "auth/__init__.py" in paths
-        assert "auth/dependencies.py" in paths
-        assert "auth/router.py" in paths
+        assert paths == [
+            "auth/__init__.py",
+            "auth/dependencies.py",
+            "auth/router.py",
+        ]
 
-    def test_auth_custom_gcu_skips_router(self):
-        """Custom get_current_user_fn skips auth router."""
+    def test_router_context_splits_user_dotted_paths(self):
+        """The router template gets the credentials schema + validator split."""
         config = MinimalConfig(
             auth=AuthConfig(
-                get_current_user_fn="myapp.auth.custom.get_user",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate_login",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
-        paths = [f.path for f in result]
-        assert "auth/dependencies.py" in paths
-        assert "auth/router.py" not in paths
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert router.context["creds_module"] == "myapp.auth"
+        assert router.context["creds_name"] == "LoginCredentials"
+        assert router.context["session_module"] == "myapp.auth"
+        assert router.context["session_name"] == "Session"
+        assert router.context["validate_module"] == "myapp.auth"
+        assert router.context["validate_name"] == "validate_login"
 
-    def test_auth_deps_context(self):
-        """Auth deps context has correct module/name split."""
+    def test_default_sources_bearer_only(self):
+        """Default sources=['bearer'] flows into deps + router context."""
         config = MinimalConfig(
             auth=AuthConfig(
-                get_current_user_fn="myapp.auth.custom.get_user",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
             )
         )
         ctx = _project_ctx(config)
         result = list(AuthScaffold().build(ctx, _Empty()))
         deps = next(f for f in result if f.path == "auth/dependencies.py")
-        assert deps.context["gcu_module"] == "myapp.auth.custom"
-        assert deps.context["gcu_name"] == "get_user"
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert deps.context["sources"] == ["bearer"]
+        assert router.context["sources"] == ["bearer"]
+
+    def test_sources_both_thread_cookie_fields(self):
+        """sources=['bearer','cookie'] carries cookie_* into the router."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+                sources=["bearer", "cookie"],
+                cookie_name="session",
+                cookie_secure=False,
+                cookie_samesite="strict",
+            )
+        )
+        ctx = _project_ctx(config)
+        result = list(AuthScaffold().build(ctx, _Empty()))
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert router.context["sources"] == ["bearer", "cookie"]
+        assert router.context["cookie_name"] == "session"
+        assert router.context["cookie_secure"] is False
+        assert router.context["cookie_samesite"] == "strict"
+
+    def test_samesite_none_requires_secure(self):
+        """Config validator rejects SameSite=None without Secure."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cookie_samesite='none'"):
+            AuthConfig(
+                sources=["cookie"],
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+                cookie_samesite="none",
+                cookie_secure=False,
+            )
 
 
 # -------------------------------------------------------------------
@@ -503,7 +564,9 @@ class TestProjectRouter:
         app_config = AppConfig(module="blog")
         config = MinimalConfig(
             auth=AuthConfig(
-                verify_credentials_fn="myapp.verify",
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.verify",
             ),
             apps=[App(config=app_config, prefix="/blog")],
         )
@@ -531,6 +594,20 @@ class TestCrudHelpers:
         assert len(result) == 2
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
+
+    def test_field_dicts_rejects_nested(self):
+        import pytest
+
+        fields = [
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+            ),
+        ]
+        with pytest.raises(ValueError, match="only supported on read"):
+            _field_dicts(fields)
 
 
 # -------------------------------------------------------------------
@@ -603,6 +680,376 @@ class TestGet:
         assert handler.params[0].name == "user_id"
         assert handler.params[0].annotation == "int"
 
+    def test_get_with_nested_field_emits_sub_schema_and_serializer(self):
+        """A nested field adds its own schema + serializer alongside main."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(name="title", type="str"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(name="name", type="str"),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        # Parent schema's project field references the nested class name.
+        parent = schemas[1]
+        project_field = next(f for f in parent.fields if f.name == "project")
+        assert project_field.py_type == "TaskResourceProjectNested"
+        assert project_field.nested_serializer == (
+            "to_task_resource_project_nested"
+        )
+        assert project_field.many is False
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+        nested_ser = sers[0]
+        assert nested_ser.model_name == "Project"
+        assert nested_ser.model_module == "blog.models"
+        assert nested_ser.schema_name == "TaskResourceProjectNested"
+        assert [f.name for f in nested_ser.fields] == ["id", "name"]
+
+        main_ser = sers[1]
+        assert main_ser.model_module == "blog.models"
+        assert main_ser.model_name == "Task"
+
+    def test_get_with_nested_many_wraps_in_list(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="articles",
+                type="nested",
+                model="blog.models.Article",
+                fields=[FieldSpec(name="id", type="uuid")],
+                many=True,
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Author")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        parent = next(
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.name == "AuthorResource"
+        )
+        articles = next(f for f in parent.fields if f.name == "articles")
+        assert articles.py_type == "list[AuthorResourceArticlesNested]"
+        assert articles.many is True
+
+    def test_get_with_nested_emits_selectinload_by_default(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)",
+        ]
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
+
+    def test_get_with_nested_load_override(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="id", type="uuid")],
+                load="joined",
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "joinedload(Task.project)",
+        ]
+        assert ("sqlalchemy.orm", "joinedload") in handler.extra_imports
+
+    def test_get_with_nested_in_nested_builds_chain(self):
+        """Chains go parent→related→deeper; related model gets imported."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[FieldSpec(name="name", type="str")],
+                        load="joined",
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project).joinedload(Project.owner)",
+        ]
+        # Both loader funcs and the intermediate model class are needed.
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
+        assert ("sqlalchemy.orm", "joinedload") in handler.extra_imports
+        assert ("blog.models", "Project") in handler.extra_imports
+
+    def test_get_without_nested_has_empty_load_options(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == []
+        assert not any(
+            mod == "sqlalchemy.orm" for mod, _ in handler.extra_imports
+        )
+
+    def test_get_with_nested_in_nested(self):
+        """Nested fields recurse: names accumulate down the path."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[FieldSpec(name="name", type="str")],
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        # Deepest-first: owner, then project, then parent.
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectOwnerNested",
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_owner_nested",
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+    def test_get_with_four_levels_of_nesting(self):
+        """Recursion scales: 4 levels produce 4 sub-schemas + 4 sub-serializers.
+
+        Tests that path accumulation, schema ordering (deepest-first),
+        sub-serializer wiring, and the load-chain builder all compose
+        down a 4-deep nested path with mixed load strategies at every
+        level.
+        """
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(
+                        name="owner",
+                        type="nested",
+                        model="blog.models.User",
+                        fields=[
+                            FieldSpec(
+                                name="team",
+                                type="nested",
+                                model="blog.models.Team",
+                                fields=[
+                                    FieldSpec(
+                                        name="org",
+                                        type="nested",
+                                        model="blog.models.Org",
+                                        fields=[
+                                            FieldSpec(name="id", type="uuid"),
+                                        ],
+                                        load="subquery",
+                                    ),
+                                ],
+                                load="joined",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        # Every level contributes one schema + one serializer; deepest first.
+        schemas = [r for r in result if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == [
+            "TaskResourceProjectOwnerTeamOrgNested",
+            "TaskResourceProjectOwnerTeamNested",
+            "TaskResourceProjectOwnerNested",
+            "TaskResourceProjectNested",
+            "TaskResource",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_resource_project_owner_team_org_nested",
+            "to_task_resource_project_owner_team_nested",
+            "to_task_resource_project_owner_nested",
+            "to_task_resource_project_nested",
+            "to_task_resource",
+        ]
+
+        # Every intermediate sub-serializer references the next one down.
+        project_ser = next(
+            s for s in sers if s.function_name.endswith("_project_nested")
+        )
+        project_owner_field = next(
+            f for f in project_ser.fields if f.name == "owner"
+        )
+        assert project_owner_field.nested_serializer == (
+            "to_task_resource_project_owner_nested"
+        )
+
+        # Load chain spans all four levels, each with its configured strategy.
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)"
+            ".selectinload(Project.owner)"
+            ".joinedload(User.team)"
+            ".subqueryload(Team.org)",
+        ]
+
+        # Every loader and every intermediate model class is imported.
+        imports = handler.extra_imports
+        assert ("sqlalchemy.orm", "selectinload") in imports
+        assert ("sqlalchemy.orm", "joinedload") in imports
+        assert ("sqlalchemy.orm", "subqueryload") in imports
+        assert ("blog.models", "Project") in imports
+        assert ("blog.models", "User") in imports
+        assert ("blog.models", "Team") in imports
+
+    def test_get_with_branching_nested_fields(self):
+        """Multiple nested siblings at the same level each get their own chain.
+
+        Sibling nested fields shouldn't interfere: their schemas,
+        serializers, and load chains should all coexist independently.
+        """
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="name", type="str")],
+            ),
+            FieldSpec(
+                name="tags",
+                type="nested",
+                model="blog.models.Tag",
+                fields=[FieldSpec(name="name", type="str")],
+                many=True,
+            ),
+            FieldSpec(
+                name="owner",
+                type="nested",
+                model="blog.models.User",
+                fields=[FieldSpec(name="email", type="email")],
+                load="joined",
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        schema_names = {
+            s.name
+            for s in result
+            if isinstance(s, SchemaClass) and s.body_template is None
+        }
+        assert {
+            "TaskResource",
+            "TaskResourceProjectNested",
+            "TaskResourceTagsNested",
+            "TaskResourceOwnerNested",
+        } <= schema_names
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project)",
+            "selectinload(Task.tags)",
+            "joinedload(Task.owner)",
+        ]
+
+    def test_get_with_nested_in_nested_many_chain(self):
+        """``many=true`` inside a nested chain still produces a single chain."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(
+                        name="tasks",
+                        type="nested",
+                        model="blog.models.Subtask",
+                        fields=[FieldSpec(name="id", type="uuid")],
+                        many=True,
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.project).selectinload(Project.tasks)",
+        ]
+
 
 # -------------------------------------------------------------------
 # List
@@ -618,33 +1065,116 @@ def _templated_schemas(result: list[object]) -> list[SchemaClass]:
     ]
 
 
-class TestList:
-    """Tests for List operation."""
+def _drive_list(
+    resource: ResourceConfig,
+    *,
+    fields: list[FieldSpec] | None = None,
+    store: BuildStore | None = None,
+) -> BuildContext:
+    """Run List at ``.operations.0`` and register its outputs.
 
-    def test_list_emits_schema_and_handler(self):
-        """List emits its own ``{Model}ListItem`` schema + serializer."""
+    Extension-op tests call this first so ``find_list_outputs``
+    has a SearchRequest and RouteHandler to amend.
+    """
+    effective_fields = fields or _FIELDS
+    op_config = OperationConfig(
+        name="list",
+        fields=[f.model_dump() for f in effective_fields],
+    )
+    ctx = _operation_ctx(resource, op_config, store=store)
+    outputs = list(
+        List().build(ctx, List.Options(fields=effective_fields)),
+    )
+    ctx.store.add(ctx.instance_id, "list", *outputs)
+    return ctx
+
+
+def _drive_extension(
+    parent_ctx: BuildContext,
+    *,
+    type_name: str,
+    op_instance: object,
+    options: BaseModel,
+    extra_config: dict | None = None,
+) -> list[object]:
+    """Run a modifier op at the next free modifier-scope slot.
+
+    Modifiers nest inside the parent list op (``parent_ctx``'s
+    instance).  Registers the modifier under the list's
+    instance_id so ``find_list_outputs`` resolves the parent
+    correctly.  Returns the op's yielded outputs; any amendments
+    it made to the parent's outputs are visible on the store.
+    """
+    store = parent_ctx.store
+    list_id = parent_ctx.instance_id
+    n = 0
+    while f"{list_id}.modifiers.{n}" in store._instances:
+        n += 1
+    ext_id = f"{list_id}.modifiers.{n}"
+
+    ext_config = ModifierConfig(type=type_name, **(extra_config or {}))
+    store.register_instance(ext_id, ext_config, parent=list_id)
+    ext_ctx = BuildContext(
+        config=parent_ctx.config,
+        scope=MODIFIER_SCOPE,
+        instance=ext_config,
+        instance_id=ext_id,
+        store=store,
+    )
+    outputs = list(op_instance.build(ext_ctx, options))
+    store.add(ext_id, type_name, *outputs)
+    return outputs
+
+
+class TestList:
+    """Tests for the bare List op (no extensions)."""
+
+    def test_emits_list_item_schema_and_serializer(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         schemas = [r for r in result if isinstance(r, SchemaClass)]
-        assert len(schemas) == 1
-        assert schemas[0].name == "UserListItem"
+        assert {s.name for s in schemas} == {
+            "UserListItem",
+            "UserSearchRequest",
+        }
 
         sers = [r for r in result if isinstance(r, SerializerFn)]
         assert len(sers) == 1
         assert sers[0].function_name == "to_user_list_item"
-        assert sers[0].schema_name == "UserListItem"
+
+    def test_search_request_starts_empty(self):
+        """With no extensions, SearchRequest is an empty Pydantic model."""
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
+
+        search_req = next(
+            s
+            for s in result
+            if isinstance(s, SchemaClass) and s.name == "UserSearchRequest"
+        )
+        assert search_req.body_context["has_filter"] is False
+        assert search_req.body_context["has_sort"] is False
+        assert search_req.body_context["pagination_mode"] is None
+
+    def test_handler_is_bare_post_search(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="list"))
+        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
 
         handler = next(r for r in result if isinstance(r, RouteHandler))
         assert handler.method == "POST"
         assert handler.path == "/search"
         assert handler.function_name == "list_users"
+        assert handler.request_schema == "UserSearchRequest"
         assert handler.response_model == "list[UserListItem]"
-        assert handler.return_type == "list[UserListItem]"
-        assert handler.serializer_fn == "to_user_list_item"
+        assert handler.body_context["pagination_mode"] is None
+        assert ("sqlalchemy", "select") in handler.extra_imports
+        assert not any(mod == "ingot" for mod, _ in handler.extra_imports)
 
-    def test_list_test_case(self):
+    def test_test_case(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
         result = list(List().build(ctx, List.Options(fields=_FIELDS)))
@@ -654,145 +1184,278 @@ class TestList:
         assert tests[0].path == "/search"
         assert tests[0].is_list_response is True
 
-    def test_list_without_extensions_has_single_bodyless_search(self):
-        """Bare list op emits only one POST /search with no body."""
-        resource = ResourceConfig(model="app.models.User")
+    def test_list_with_nested_emits_load_options(self):
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="assignees",
+                type="nested",
+                model="blog.models.User",
+                fields=[FieldSpec(name="id", type="uuid")],
+                many=True,
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        result = list(List().build(ctx, List.Options(fields=_FIELDS)))
+        result = list(List().build(ctx, List.Options(fields=fields)))
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        assert handlers[0].method == "POST"
-        assert handlers[0].path == "/search"
-        assert handlers[0].params == []
-        assert handlers[0].request_schema is None
-        assert _templated_schemas(result) == []
-        assert not any(isinstance(r, EnumClass) for r in result)
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["load_options"] == [
+            "selectinload(Task.assignees)",
+        ]
+        assert ("sqlalchemy.orm", "selectinload") in handler.extra_imports
 
-    def test_list_with_filters_emits_filter_schemas(self):
-        resource = ResourceConfig(model="app.models.User")
+    def test_list_with_nested_field_emits_scoped_sub_schema(self):
+        """List-item nested schema is scoped under ListItem, not Resource."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[FieldSpec(name="name", type="str")],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            filters=FilterConfig(fields=["name"]),
+        result = list(List().build(ctx, List.Options(fields=fields)))
+
+        schemas = [
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.body_template is None
+        ]
+        # Scoping under the list item keeps names distinct from a Get
+        # op's nested schemas on the same resource.
+        assert [s.name for s in schemas] == [
+            "TaskListItemProjectNested",
+            "TaskListItem",
+        ]
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        assert [s.function_name for s in sers] == [
+            "to_task_list_item_project_nested",
+            "to_task_list_item",
+        ]
+
+
+class TestFilter:
+    """Tests for the Filter extension op."""
+
+    def test_emits_filter_condition_schema(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        result = list(List().build(ctx, opts))
+        schemas = [r for r in outputs if isinstance(r, SchemaClass)]
+        assert [s.name for s in schemas] == ["UserFilterCondition"]
+        assert schemas[0].body_context["allowed_fields"] == ["name"]
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserFilterCondition" in ext_names
-        assert "UserSearchRequest" in ext_names
-        assert "UserPage" not in ext_names  # no pagination configured
-
-    def test_list_with_ordering_emits_sort_field_enum_and_clause(self):
+    def test_amends_search_request_and_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            ordering=OrderConfig(fields=["name", "age"], default="name"),
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        result = list(List().build(ctx, opts))
+        search_req = _find_output(
+            list_ctx.store, SchemaClass, name="UserSearchRequest"
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert search_req.body_context["has_filter"] is True
+        assert handler.body_context["has_filter"] is True
+        assert ("ingot", "apply_filters") in handler.extra_imports
 
-        enums = [r for r in result if isinstance(r, EnumClass)]
+    def test_empty_fields_defaults_to_list_fields(self):
+        """FilterConfig() with no fields list uses all list fields."""
+        resource = ResourceConfig(
+            model="app.models.User",
+            operations=[
+                OperationConfig(
+                    name="list",
+                    fields=[f.model_dump() for f in _FIELDS],
+                ),
+            ],
+        )
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(),
+        )
+        schema = next(
+            s
+            for s in outputs
+            if isinstance(s, SchemaClass) and s.name == "UserFilterCondition"
+        )
+        assert schema.body_context["allowed_fields"] == ["name", "age"]
+
+
+class TestOrder:
+    """Tests for the Order extension op."""
+
+    def test_emits_sort_field_enum_and_clause(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(fields=["name", "age"], default="name"),
+        )
+        enums = [r for r in outputs if isinstance(r, EnumClass)]
         assert len(enums) == 1
         assert enums[0].name == "UserSortField"
         assert enums[0].members == [("NAME", "name"), ("AGE", "age")]
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserSortClause" in ext_names
-        assert "UserSearchRequest" in ext_names
-
-    def test_list_with_keyset_pagination_emits_page_and_search_handler(self):
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            pagination=PaginateConfig(mode="keyset", cursor_field="id"),
+        clause = next(
+            r
+            for r in outputs
+            if isinstance(r, SchemaClass) and r.name == "UserSortClause"
         )
-        result = list(List().build(ctx, opts))
+        assert clause.body_template.endswith("sort_clause.py.j2")
 
-        ext_names = [r.name for r in _templated_schemas(result)]
-        assert "UserPage" in ext_names
-        assert "UserSearchRequest" in ext_names
-
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.method == "POST"
-        assert search.path == "/search"
-        assert search.function_name == "list_users"
-        assert search.response_model == "UserPage"
-        assert search.request_schema == "UserSearchRequest"
-        assert search.body_context["pagination_mode"] == "keyset"
-        assert search.body_context["cursor_field"] == "id"
-        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
-
-    def test_list_with_offset_pagination_uses_offset_helper(self):
+    def test_stamps_sort_defaults_onto_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            pagination=PaginateConfig(mode="offset"),
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(
+                fields=["name"],
+                default="name",
+                default_dir="desc",
+            ),
         )
-        result = list(List().build(ctx, opts))
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["has_sort"] is True
+        assert handler.body_context["default_sort_field"] == "name"
+        assert handler.body_context["default_sort_dir"] == "desc"
+        assert ("ingot", "apply_ordering") in handler.extra_imports
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.body_context["pagination_mode"] == "offset"
-        assert ("ingot", "apply_offset_pagination") in search.extra_imports
-        assert ("ingot", "apply_keyset_pagination") not in search.extra_imports
 
-    def test_list_with_all_extensions_emits_everything(self):
+class TestPaginate:
+    """Tests for the Paginate extension op."""
+
+    def test_keyset_emits_page_and_wires_handler(self):
         resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(
-            fields=_FIELDS,
-            filters=FilterConfig(),
-            ordering=OrderConfig(fields=["name"]),
-            pagination=PaginateConfig(mode="keyset"),
+        list_ctx = _drive_list(resource)
+        outputs = _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset", cursor_field="id"),
         )
-        result = list(List().build(ctx, opts))
+        page = next(
+            r
+            for r in outputs
+            if isinstance(r, SchemaClass) and r.name == "UserPage"
+        )
+        assert page.body_context["mode"] == "keyset"
 
-        ext_names = {r.name for r in _templated_schemas(result)}
-        assert ext_names == {
-            "UserFilterCondition",
-            "UserSortClause",
-            "UserSearchRequest",
-            "UserPage",
-        }
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.response_model == "UserPage"
+        assert handler.return_type == "UserPage"
+        assert handler.body_context["pagination_mode"] == "keyset"
+        assert handler.body_context["cursor_field"] == "id"
+        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
 
-        handlers = [r for r in result if isinstance(r, RouteHandler)]
-        assert len(handlers) == 1
-        search = handlers[0]
-        assert search.body_context["has_filter"] is True
-        assert search.body_context["has_sort"] is True
-        assert search.body_context["pagination_mode"] == "keyset"
-        assert ("ingot", "apply_filters") in search.extra_imports
-        assert ("ingot", "apply_ordering") in search.extra_imports
-        assert ("ingot", "apply_keyset_pagination") in search.extra_imports
+    def test_offset_uses_offset_helper(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="offset"),
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["pagination_mode"] == "offset"
+        assert ("ingot", "apply_offset_pagination") in handler.extra_imports
+        assert ("ingot", "apply_keyset_pagination") not in handler.extra_imports
 
-        tests = [r for r in result if isinstance(r, TestCase)]
-        assert len(tests) == 1
-        tc = tests[0]
-        assert tc.method == "post"
-        assert tc.path == "/search"
-        assert tc.has_request_body is True
-        assert tc.request_schema == "UserSearchRequest"
+    def test_flips_list_test_case_is_list_response(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset"),
+        )
+        tc = next(
+            t
+            for t in list_ctx.store.outputs_under(
+                "project.apps.0.resources.0", TestCase
+            )
+            if t.op_name == "list"
+        )
         assert tc.is_list_response is False
 
-    def test_list_filters_default_to_all_list_fields(self):
-        """FilterConfig with no fields uses the list op's full field set."""
-        resource = ResourceConfig(model="app.models.User")
-        ctx = _operation_ctx(resource, OperationConfig(name="list"))
-        opts = List.Options(fields=_FIELDS, filters=FilterConfig())
-        result = list(List().build(ctx, opts))
 
-        filter_schema = next(
-            r
-            for r in _templated_schemas(result)
-            if r.name == "UserFilterCondition"
+class TestListExtensionsCompose:
+    """All three extensions together on one list."""
+
+    def test_filter_order_paginate_all_wire_in(self):
+        resource = ResourceConfig(model="app.models.User")
+        list_ctx = _drive_list(resource)
+        _drive_extension(
+            list_ctx,
+            type_name="filter",
+            op_instance=Filter(),
+            options=FilterConfig(fields=["name"]),
         )
-        assert filter_schema.body_context["allowed_fields"] == ["name", "age"]
+        _drive_extension(
+            list_ctx,
+            type_name="order",
+            op_instance=Order(),
+            options=OrderConfig(fields=["name"], default="name"),
+        )
+        _drive_extension(
+            list_ctx,
+            type_name="paginate",
+            op_instance=Paginate(),
+            options=PaginateConfig(mode="keyset"),
+        )
+        handler = _find_handler(list_ctx.store, path="/search")
+        assert handler.body_context["has_filter"] is True
+        assert handler.body_context["has_sort"] is True
+        assert handler.body_context["pagination_mode"] == "keyset"
+        assert ("ingot", "apply_filters") in handler.extra_imports
+        assert ("ingot", "apply_ordering") in handler.extra_imports
+        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        assert handler.response_model == "UserPage"
+
+
+def _find_output(store: BuildStore, output_type: type, *, name: str):
+    """Find a single output by type + .name in a store."""
+    matches = [
+        o
+        for o in store.outputs_under("project.apps.0.resources.0", output_type)
+        if getattr(o, "name", None) == name
+    ]
+    assert len(matches) == 1, (
+        f"expected one {output_type.__name__} named {name}"
+    )
+    return matches[0]
+
+
+def _find_handler(store: BuildStore, *, path: str) -> RouteHandler:
+    matches = [
+        h
+        for h in store.outputs_under("project.apps.0.resources.0", RouteHandler)
+        if h.path == path
+    ]
+    assert len(matches) == 1, f"expected one handler at {path}"
+    return matches[0]
 
 
 # -------------------------------------------------------------------
@@ -828,6 +1491,13 @@ class TestCreate:
         assert tests[0].status_invalid == 422
         assert tests[0].has_request_body is True
         assert tests[0].request_schema == "UserCreateRequest"
+        # Required fields must be carried through so the generated
+        # success test posts a valid body (regression: empty-dict
+        # bodies were returning 422 for non-empty CreateRequests).
+        assert tests[0].request_fields == [
+            {"name": "name", "py_type": "str"},
+            {"name": "age", "py_type": "int"},
+        ]
 
 
 # -------------------------------------------------------------------
@@ -927,11 +1597,14 @@ class TestAction:
         class _Info:
             is_object_action: bool = True
             response_class: str | None = "PostResult"
+            response_module: str = "blog.actions"
             request_class: str | None = "PostRequest"
+            request_module: str | None = "blog.actions"
             model_param_name: str | None = "post"
 
         op_config = OperationConfig(
             name="publish",
+            type="action",
             fn="blog.actions.publish",
         )
         ctx = _operation_ctx(resource, op_config)
@@ -950,6 +1623,8 @@ class TestAction:
         assert handler.path == "/{id}/publish"
         assert handler.function_name == "publish_action"
         assert handler.response_model == "PostResult"
+        assert handler.request_schema_module == "blog.actions"
+        assert handler.response_schema_module == "blog.actions"
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found == 404
@@ -963,11 +1638,14 @@ class TestAction:
         class _Info:
             is_object_action: bool = False
             response_class: str | None = None
+            response_module: str = "blog.actions"
             request_class: str | None = None
+            request_module: str | None = None
             model_param_name: str | None = None
 
         op_config = OperationConfig(
             name="bulk_import",
+            type="action",
             fn="blog.actions.bulk_import",
         )
         ctx = _operation_ctx(resource, op_config)

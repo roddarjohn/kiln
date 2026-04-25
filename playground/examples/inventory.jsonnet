@@ -9,6 +9,7 @@
 //     email/json/datetime fields
 //   - Actions with and without params, with and without auth
 
+local list = import "kiln/operations/list.libsonnet";
 local resource = import "kiln/resources/presets.libsonnet";
 
 {
@@ -37,34 +38,28 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "available_from", type: "date" },
           ],
         },
-        {
-          name: "list",
-          fields: [
+        list.searchable(
+          fields=[
             { name: "id", type: "uuid" },
             { name: "sku", type: "str" },
             { name: "name", type: "str" },
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
-          // Filtering: search by sku/name/unit_price/active
-          filters: {
-            fields: ["sku", "name", "unit_price", "active"],
-          },
-          // Ordering: sort by name or unit_price
-          ordering: {
+          filter={ fields: ["sku", "name", "unit_price", "active"] },
+          order={
             fields: ["name", "unit_price"],
             default: "name",
             default_dir: "asc",
           },
-          // Keyset pagination on the primary key
-          pagination: {
+          paginate={
             mode: "keyset",
             cursor_field: "id",
             cursor_type: "uuid",
             default_page_size: 25,
             max_page_size: 100,
           },
-        },
+        ),
         {
           name: "create",
           require_auth: true,
@@ -150,7 +145,7 @@ local resource = import "kiln/resources/presets.libsonnet";
             { name: "payload", type: "json" },
           ],
         },
-        "delete",
+        { name: "delete" },
         resource.action(
           name="ping",
           fn="inventory.actions.ping_event_log",

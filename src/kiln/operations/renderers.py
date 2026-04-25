@@ -27,9 +27,11 @@ from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.outputs import StaticFile
 from foundry.render import FileFragment, Fragment, SnippetFragment, registry
-from kiln._helpers import PYTHON_TYPES
+from kiln.config.schema import PYTHON_TYPES
+from kiln.operations.list import ListResult
 from kiln.operations.types import (
     EnumClass,
+    Field,
     RouteHandler,
     SchemaClass,
     SerializerFn,
@@ -98,7 +100,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         package_prefix=package_prefix,
         route_prefix=route_prefix,
         pk_name=getattr(resource, "pk", "id"),
-        pk_py_type=PYTHON_TYPES[getattr(resource, "pk_type", "uuid")],
+        pk_py_type=PYTHON_TYPES[resource.pk_type],
         has_auth=getattr(config, "auth", None) is not None,
         session_module=db.session_module,
         get_db_fn=db.get_db_fn,
@@ -238,11 +240,13 @@ def _handler_fragment(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
     if handler.request_schema:
-        imports.add_from(schema_mod, handler.request_schema)
+        request_mod = handler.request_schema_module or schema_mod
+        imports.add_from(request_mod, handler.request_schema)
 
     response_schema = _response_schema_name(handler)
     if response_schema:
-        imports.add_from(schema_mod, response_schema)
+        response_mod = handler.response_schema_module or schema_mod
+        imports.add_from(response_mod, response_schema)
     if handler.serializer_fn:
         serializer_mod = prefix_import(
             info.package_prefix, info.app, "serializers", info.model.lower
@@ -322,6 +326,35 @@ def _handler_context(
     }
 
 
+def _mock_row_lines(fields: list[Field], target: str) -> list[str]:
+    """Emit ``_mock_row()`` assignment lines for ``fields`` under ``target``.
+
+    Scalars become ``{target}.{name} = _sample("{py_type}")``.
+
+    Scalar-nested fields descend via dotted paths
+    (``row.author.id = _sample(...)``) — ``MagicMock`` auto-creates
+    the intermediate attribute.
+
+    Collection-nested fields (``many=True``) are intentionally left
+    unset: ``MagicMock`` supports ``__iter__`` returning an empty
+    iterator by default, so the generated list comprehension
+    ``[to_sub(x) for x in obj.tags]`` produces ``[]`` without any
+    explicit fixture plumbing.  Pydantic accepts an empty
+    ``list[Nested]``, so the route test still passes.
+    """
+    lines: list[str] = []
+    for f in fields:
+        if f.nested_serializer is not None and f.many:
+            continue
+        if f.nested_serializer is not None:
+            lines.extend(
+                _mock_row_lines(f.nested_fields or [], f"{target}.{f.name}")
+            )
+            continue
+        lines.append(f'{target}.{f.name} = _sample("{f.py_type}")')
+    return lines
+
+
 @registry.renders(SerializerFn)
 def _serializer_fragment(
     ser: SerializerFn, ctx: RenderCtx
@@ -330,7 +363,7 @@ def _serializer_fragment(
     ser_path = f"{info.app}/serializers/{info.model.lower}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
-    imports.add_from(info.model_module, info.model.pascal)
+    imports.add_from(ser.model_module, ser.model_name)
     schema_mod = prefix_import(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
@@ -349,19 +382,46 @@ def _serializer_fragment(
             "function_name": ser.function_name,
             "model_name": ser.model_name,
             "schema_name": ser.schema_name,
-            "fields": [{"name": f.name} for f in ser.fields],
+            "fields": [
+                {
+                    "name": f.name,
+                    "nested_serializer": f.nested_serializer,
+                    "many": f.many,
+                }
+                for f in ser.fields
+            ],
         },
         imports=imports,
     )
 
-    if info.generate_tests:
+    # Only the resource serializer contributes to the test file; the
+    # test template renders exactly one `test_to_{model}_resource_*`
+    # function, so emitting from list_item too would duplicate the
+    # mock-row assignments and assertions.
+    is_resource_ser = ser.function_name == f"to_{info.model.lower}_resource"
+    if info.generate_tests and is_resource_ser:
         test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+        ser_mod = prefix_import(
+            info.package_prefix, info.app, "serializers", info.model.lower
+        )
+        test_imports = ImportCollector()
+        test_imports.add_from(ser_mod, ser.function_name)
         yield FileFragment(
             path=test_path,
             template="fastapi/test_outer.py.j2",
-            context={"has_serializer_test": True},
+            context={
+                "has_serializer_test": True,
+                "mock_row_lines": _mock_row_lines(ser.fields, "row"),
+            },
+            imports=test_imports,
         )
         for f in ser.fields:
+            # Nested fields don't roundtrip through the naive mock-row
+            # serializer test (the test compares ORM attrs to schema
+            # attrs directly; nested fields go through a sub-serializer
+            # and produce a different object).
+            if f.nested_serializer is not None:
+                continue
             yield SnippetFragment(
                 path=test_path,
                 slot="serializer_fields",
@@ -392,8 +452,8 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
     if info.has_auth:
-        auth_module = prefix_import(info.package_prefix, "auth", "dependencies")
-        imports.add_from(auth_module, "get_current_user")
+        deps_module = prefix_import(info.package_prefix, "auth", "dependencies")
+        imports.add_from(deps_module, "get_session")
 
     yield FileFragment(
         path=test_path,
@@ -407,9 +467,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
             "has_auth": info.has_auth,
             "get_db_fn": info.get_db_fn,
             "route_module": route_module,
-            "get_current_user_fn": (
-                "get_current_user" if info.has_auth else None
-            ),
+            "get_session_fn": ("get_session" if info.has_auth else None),
         },
         imports=imports,
     )
@@ -439,6 +497,19 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
         template=sf.template,
         context=dict(sf.context),
     )
+
+
+@registry.renders(ListResult)
+def _list_result_fragment(
+    _result: ListResult, _ctx: RenderCtx
+) -> Iterator[Fragment]:
+    """ListResult is an internal bundle for modifier ops; emit nothing.
+
+    The individual outputs it references (ListItem / SearchRequest /
+    handler / etc.) are yielded separately by the list op and
+    rendered through their own registered renderers.
+    """
+    return iter(())
 
 
 # -------------------------------------------------------------------

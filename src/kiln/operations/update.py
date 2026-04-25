@@ -6,15 +6,16 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln._helpers import PYTHON_TYPES
-from kiln.operations._shared import FieldsOptions, _field_dicts
+from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.renderers import utils_imports
 from kiln.operations.types import (
     Field,
+    FieldsOptions,
     RouteHandler,
     RouteParam,
     SchemaClass,
     TestCase,
+    _field_dicts,
 )
 
 if TYPE_CHECKING:
@@ -71,6 +72,7 @@ class Update:
             method="PATCH",
             path=f"/{{{resource.pk}}}",
             function_name=f"update_{model.lower}",
+            op_name=ctx.instance.name,
             params=[
                 RouteParam(
                     name=resource.pk,

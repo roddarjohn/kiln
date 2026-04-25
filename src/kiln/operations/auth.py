@@ -1,25 +1,14 @@
-"""Auth operation: augments CRUD handlers with auth dependencies.
+"""Auth operation -- augments handlers + tests after the CRUD sweep.
 
-Auth is a resource-scoped operation that runs *after* the CRUD
-and action operations have produced their route handlers and
-test cases.  When the project has auth configured and the
-current resource opts in, it:
-
-* Appends ``current_user: Annotated[dict, Depends(...)]`` to
-  each :class:`RouteHandler`'s ``extra_deps`` so the template
-  renders the auth dependency.
-* Appends the ``get_current_user`` import to the handler's
-  ``extra_imports`` so the assembler includes it.
-* Flips :attr:`TestCase.requires_auth` so the generated tests
-  expect a 401 without credentials.
-
-This is the first example of an operation in the augment role:
-it produces no new outputs, only mutates earlier ones.
+Resource-scoped, ``after_children=True``, emits nothing.  Stamps a
+``Depends(get_session)`` parameter onto each handler whose op has
+effective ``require_auth`` and flips :attr:`TestCase.requires_auth`
+to match.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from foundry.naming import prefix_import
 from foundry.operation import operation
@@ -31,62 +20,60 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ResourceConfig
+    from kiln.config.schema import AuthConfig, ResourceConfig
 
 
 @operation("auth", scope="resource", after_children=True)
 class Auth:
-    """Augment CRUD/action handlers and tests with auth.
-
-    Runs at resource scope with ``after_children=True`` so all
-    operation-scope ops under this resource have already produced
-    their handlers and test cases by the time auth sweeps through.
-    """
+    """Augment CRUD/action handlers and tests with auth."""
 
     def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
-        """Apply only when auth is configured and the resource opts in.
+        """Run whenever auth is configured.
 
-        Args:
-            ctx: Build context for the current resource.
-
-        Returns:
-            ``True`` when the project config has ``auth`` set
-            and the resource has ``require_auth`` (default
-            ``True``).
-
+        Per-op filtering lives in :meth:`build`; gating here too
+        would duplicate it.
         """
-        if getattr(ctx.config, "auth", None) is None:
-            return False
-
-        return ctx.instance.require_auth
+        return getattr(ctx.config, "auth", None) is not None
 
     def build(
         self,
         ctx: BuildContext[ResourceConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
-        """Mutate earlier handlers/tests to require auth.
+        """Stamp session dep onto handlers whose op opts in.
 
-        Args:
-            ctx: Build context with store of earlier outputs.
-            _options: Unused.
-
-        Returns:
-            Empty iterable -- this operation only mutates earlier
-            output and emits no new objects.
-
+        Effective auth = op's ``require_auth`` when set, else the
+        resource default.  Skipping non-auth ops keeps the session
+        dep from leaking onto open routes.
         """
-        auth_mod = prefix_import(
-            ctx.package_prefix,
-            "auth",
-            "dependencies",
-        )
-        dep_line = "current_user: Annotated[dict, Depends(get_current_user)],"
-        import_pair = (auth_mod, "get_current_user")
+        auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
+        session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
+        deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
+
+        resource_default = ctx.instance.require_auth
+        op_auth: dict[str, bool] = {
+            op.name: (
+                op.require_auth
+                if op.require_auth is not None
+                else resource_default
+            )
+            for op in ctx.instance.operations
+        }
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
-            handler.extra_deps.append(dep_line)
-            handler.extra_imports.append(import_pair)
+            if not op_auth.get(handler.op_name, False):
+                continue
+            handler.extra_deps.append(
+                f"session: Annotated[{session_name}, Depends(get_session)],"
+            )
+            handler.extra_imports.append((deps_module, "get_session"))
+            handler.extra_imports.append((session_module, session_name))
+
         for test in ctx.store.outputs_under(ctx.instance_id, TestCase):
-            test.requires_auth = True
+            # TestCase.op_name holds the op class for actions
+            # ("action"); the concrete instance name is in
+            # action_name.  For CRUD the two match.
+            instance_name = test.action_name or test.op_name
+            test.requires_auth = op_auth.get(instance_name, False)
+
         return ()

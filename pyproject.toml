@@ -1,6 +1,6 @@
 [project]
 name = "kiln-generator"
-version = "0.6.1"
+version = "0.7.3"
 description = "CLI for autogenerating files from templates"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -22,6 +22,7 @@ dependencies = [
   "jinja2>=3.0",
   "fastapi>=0.115",
   "sqlalchemy[asyncio]>=2.0",
+  "pyjwt>=2.0",
 ]
 
 [project.urls]
@@ -45,6 +46,9 @@ scaffold = "kiln.operations.scaffold:Scaffold"
 auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
 get = "kiln.operations.get:Get"
 list = "kiln.operations.list:List"
+filter = "kiln.operations.filter:Filter"
+order = "kiln.operations.order:Order"
+paginate = "kiln.operations.paginate:Paginate"
 create = "kiln.operations.create:Create"
 update = "kiln.operations.update:Update"
 delete = "kiln.operations.delete:Delete"
