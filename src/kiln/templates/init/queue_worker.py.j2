@@ -1,0 +1,43 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Reads its DSN from the ``{{ url_env }}`` environment variable
+(the same variable the ``{{ db_key }}`` SQLAlchemy session
+reads).  The worker opens its *own* asyncpg connection because
+pgqueuer ``LISTEN``s for new-job notifications, which requires a
+long-lived connection that cannot be returned to a pool between
+batches.
+
+Run with::
+
+    python -m {{ worker_module }}
+
+Each entry in ``TASKS`` is registered as a pgqueuer entrypoint
+on the shared :class:`pgqueuer.PgQueuer`.  The pgqueuer schema
+must already be installed in the database; run ``pgq install``
+once per environment before starting the worker.
+{% endset %}
+{{ file_header("pgqueuer worker entrypoint", extra=_extra) }}
+
+from __future__ import annotations
+
+import asyncio
+import os
+
+from pgqueuer import PgQueuer
+
+from ingot import open_worker_driver
+
+from .tasks import TASKS
+
+
+async def main() -> None:
+    """Open a worker driver, register every task, and run forever."""
+    async with open_worker_driver(os.environ["{{ url_env }}"]) as driver:
+        pgq = PgQueuer(driver)
+        for name, fn in TASKS.items():
+            pgq.entrypoint(name)(fn)
+        await pgq.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

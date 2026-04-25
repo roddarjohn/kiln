@@ -23,6 +23,8 @@ from kiln.config.schema import (
     OrderConfig,
     PaginateConfig,
     ProjectConfig,
+    QueueConfig,
+    QueueTaskConfig,
     ResourceConfig,
 )
 from kiln.operations.create import Create
@@ -33,7 +35,7 @@ from kiln.operations.list import List
 from kiln.operations.order import Order
 from kiln.operations.paginate import Paginate
 from kiln.operations.routing import ProjectRouter, Router
-from kiln.operations.scaffold import AuthScaffold, Scaffold
+from kiln.operations.scaffold import AuthScaffold, QueueScaffold, Scaffold
 from kiln.operations.types import (
     EnumClass,
     Field,
@@ -54,9 +56,16 @@ class MinimalConfig(BaseModel):
     """Minimal project config for tests."""
 
     auth: AuthConfig | None = None
+    queue: QueueConfig | None = None
     databases: list[DatabaseConfig] = []
     package_prefix: str = "_generated"
     apps: list[object] = []
+
+    def resolve_database(self, db_key: str | None) -> DatabaseConfig:
+        """Mirror :meth:`ProjectConfig.resolve_database` for tests."""
+        if db_key is None:
+            return next(db for db in self.databases if db.default)
+        return next(db for db in self.databases if db.key == db_key)
 
 
 APP_SCOPE = Scope(name="app", config_key="apps", parent=PROJECT)
@@ -306,6 +315,150 @@ class TestAuthScaffold:
                 validate_fn="myapp.auth.validate",
                 cookie_samesite="none",
                 cookie_secure=False,
+            )
+
+
+# -------------------------------------------------------------------
+# QueueScaffold
+# -------------------------------------------------------------------
+
+
+class TestQueueScaffold:
+    """Tests for QueueScaffold operation."""
+
+    def test_when_false_without_queue(self):
+        """when() returns False when no queue is configured."""
+        ctx = _project_ctx()
+        assert QueueScaffold().when(ctx) is False
+
+    def test_when_true_with_queue(self):
+        """when() returns True when queue is configured."""
+        config = MinimalConfig(
+            queue=QueueConfig(),
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        ctx = _project_ctx(config)
+        assert QueueScaffold().when(ctx) is True
+
+    def test_emits_three_files(self):
+        """Queue config emits __init__, tasks, and worker."""
+        config = MinimalConfig(
+            queue=QueueConfig(
+                tasks=[QueueTaskConfig(name="ping", fn="myapp.tasks.ping")]
+            ),
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        paths = [f.path for f in result]
+        assert paths == [
+            "queue/__init__.py",
+            "queue/tasks.py",
+            "queue/worker.py",
+        ]
+
+    def test_tasks_context_splits_dotted_path(self):
+        """Each task's dotted fn path is split into module + name."""
+        config = MinimalConfig(
+            queue=QueueConfig(
+                tasks=[
+                    QueueTaskConfig(name="ping", fn="myapp.tasks.ping"),
+                    QueueTaskConfig(name="bake", fn="myapp.deep.tasks.bake"),
+                ]
+            ),
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        tasks_file = next(f for f in result if f.path == "queue/tasks.py")
+        assert tasks_file.context["tasks"] == [
+            {"name": "ping", "module": "myapp.tasks", "fn_name": "ping"},
+            {
+                "name": "bake",
+                "module": "myapp.deep.tasks",
+                "fn_name": "bake",
+            },
+        ]
+
+    def test_worker_context_threads_url_env(self):
+        """Worker template gets the resolved database's url_env."""
+        config = MinimalConfig(
+            queue=QueueConfig(),
+            databases=[
+                DatabaseConfig(
+                    key="primary", default=True, url_env="DATABASE_URL"
+                ),
+                DatabaseConfig(key="jobs", url_env="JOBS_DATABASE_URL"),
+            ],
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        worker = next(f for f in result if f.path == "queue/worker.py")
+        assert worker.context["url_env"] == "DATABASE_URL"
+        assert worker.context["db_key"] == "primary"
+
+    def test_worker_uses_named_database(self):
+        """``queue.database`` selects a named database over the default."""
+        config = MinimalConfig(
+            queue=QueueConfig(database="jobs"),
+            databases=[
+                DatabaseConfig(
+                    key="primary", default=True, url_env="DATABASE_URL"
+                ),
+                DatabaseConfig(key="jobs", url_env="JOBS_DATABASE_URL"),
+            ],
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        worker = next(f for f in result if f.path == "queue/worker.py")
+        assert worker.context["url_env"] == "JOBS_DATABASE_URL"
+        assert worker.context["db_key"] == "jobs"
+
+    def test_worker_module_with_package_prefix(self):
+        """worker_module includes the package_prefix when set."""
+        config = MinimalConfig(
+            queue=QueueConfig(),
+            databases=[DatabaseConfig(key="primary", default=True)],
+            package_prefix="_generated",
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        worker = next(f for f in result if f.path == "queue/worker.py")
+        assert worker.context["worker_module"] == "_generated.queue.worker"
+
+    def test_worker_module_without_package_prefix(self):
+        """worker_module drops the prefix when package_prefix is empty."""
+        config = MinimalConfig(
+            queue=QueueConfig(),
+            databases=[DatabaseConfig(key="primary", default=True)],
+            package_prefix="",
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        worker = next(f for f in result if f.path == "queue/worker.py")
+        assert worker.context["worker_module"] == "queue.worker"
+
+    def test_no_queue_files_from_scaffold(self):
+        """Scaffold never emits queue files -- that's QueueScaffold's job."""
+        config = MinimalConfig(
+            queue=QueueConfig(),
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        ctx = _project_ctx(config)
+        result = list(Scaffold().build(ctx, _Empty()))
+        paths = [f.path for f in result]
+        assert not any(p.startswith("queue/") for p in paths)
+
+    def test_duplicate_task_names_rejected(self):
+        """QueueConfig rejects duplicate task names."""
+        import pytest
+
+        with pytest.raises(ValueError, match="unique"):
+            QueueConfig(
+                tasks=[
+                    QueueTaskConfig(name="ping", fn="a.ping"),
+                    QueueTaskConfig(name="ping", fn="b.ping"),
+                ]
             )
 
 

@@ -23,6 +23,7 @@ dependencies = [
   "fastapi>=0.115",
   "sqlalchemy[asyncio]>=2.0",
   "pyjwt>=2.0",
+  "pgqueuer>=0.26.3",
 ]
 
 [project.urls]
@@ -44,6 +45,7 @@ kiln = "kiln.target:target"
 [project.entry-points."foundry.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
 auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
+queue_scaffold = "kiln.operations.scaffold:QueueScaffold"
 get = "kiln.operations.get:Get"
 list = "kiln.operations.list:List"
 filter = "kiln.operations.filter:Filter"

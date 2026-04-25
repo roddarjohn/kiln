@@ -1,0 +1,25 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+``TASKS`` maps each pgqueuer entrypoint name to the user-supplied
+async function that handles it.  The worker (``queue/worker.py``)
+imports this dict and registers every entry on the
+:class:`pgqueuer.PgQueuer` it owns.
+{% endset %}
+{{ file_header("pgqueuer task registry", extra=_extra) }}
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+{% for task in tasks %}
+from {{ task.module }} import {{ task.fn_name }}
+{% endfor %}
+
+TASKS: dict[str, Callable[..., Awaitable[Any]]] = {
+{% for task in tasks %}
+    "{{ task.name }}": {{ task.fn_name }},
+{% endfor %}
+}
+
+__all__ = ["TASKS"]

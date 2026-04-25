@@ -410,6 +410,58 @@ class App(BaseModel):
     prefix: str = ""
 
 
+class QueueTaskConfig(BaseModel):
+    """A single pgqueuer task entrypoint.
+
+    The user supplies the task body as a Python function; kiln
+    only generates the registration that wires it into the
+    worker's :class:`pgqueuer.PgQueuer` instance.
+
+    Generated handlers don't enqueue jobs automatically — that's
+    explicitly out of scope for v1.  Users call
+    :func:`ingot.get_queue` from inside action bodies to enqueue
+    when they want to.
+    """
+
+    name: str
+    """The pgqueuer entrypoint name.  Producers pass this as the
+    first argument to ``Queries.enqueue``."""
+
+    fn: str
+    """Dotted import path to the async task function, e.g.
+    ``"blog.tasks.index_article"``.  Signature must match
+    pgqueuer's entrypoint contract: ``async def fn(job: Job)``."""
+
+
+class QueueConfig(BaseModel):
+    """pgqueuer configuration for the project.
+
+    Setting this on the project config opts the project into the
+    queue scaffold: a ``queue/`` package is emitted with a worker
+    entrypoint and a task registry.  The tasks themselves live in
+    user code; kiln only owns the wiring.
+    """
+
+    database: str | None = None
+    """Key of the :class:`DatabaseConfig` whose DSN env var the
+    worker reads.  ``None`` selects the database marked
+    ``default=True``."""
+
+    tasks: list[QueueTaskConfig] = Field(default_factory=list)
+    """Task entrypoints registered on the worker's
+    :class:`pgqueuer.PgQueuer` at startup.  Empty is allowed —
+    you may want the producer side (``get_queue``) wired up
+    before any consumers exist."""
+
+    @model_validator(mode="after")
+    def _task_names_unique(self) -> QueueConfig:
+        names = [task.name for task in self.tasks]
+        if len(set(names)) != len(names):
+            msg = f"queue task names must be unique: {names}"
+            raise ValueError(msg)
+        return self
+
+
 class ProjectConfig(FoundryConfig):
     """Top-level kiln configuration.
 
@@ -432,6 +484,7 @@ class ProjectConfig(FoundryConfig):
     only those matching this value are used."""
     package_prefix: str = "_generated"
     auth: AuthConfig | None = None
+    queue: QueueConfig | None = None
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,

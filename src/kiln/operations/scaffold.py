@@ -1,7 +1,7 @@
-"""Scaffold operations: db sessions and the auth package.
+"""Scaffold operations: db sessions, auth, and pgqueuer wiring.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
-infrastructure files.  Split into two operations:
+infrastructure files.  Split into three operations:
 
 * :class:`Scaffold` -- always runs; emits the ``db/`` tree.
 * :class:`AuthScaffold` -- runs only when the project config has
@@ -9,6 +9,11 @@ infrastructure files.  Split into two operations:
   session-dep and login/logout routes (three files under
   ``auth/``); the consumer provides only the session/credentials
   schemas and the credential-validation function.
+* :class:`QueueScaffold` -- runs only when the project config has
+  ``queue`` set, via :meth:`QueueScaffold.when`.  Emits the
+  ``queue/`` package with a worker entrypoint and a task
+  registry; the consumer writes the task bodies and enqueues
+  jobs from action handlers via :func:`ingot.get_queue`.
 """
 
 from __future__ import annotations
@@ -170,5 +175,97 @@ class AuthScaffold:
                 "cookie_samesite": auth.cookie_samesite,
                 "store_module": store_module,
                 "store_name": store_name,
+            },
+        )
+
+
+@operation("queue_scaffold", scope="project")
+class QueueScaffold:
+    """Generate the ``queue/`` package for pgqueuer integration.
+
+    Emits three :class:`StaticFile` objects:
+
+    * ``queue/__init__.py`` -- package marker.
+    * ``queue/tasks.py`` -- imports each user task fn and exposes
+      a ``TASKS`` dict mapping pgqueuer entrypoint name → fn.
+    * ``queue/worker.py`` -- ``python -m`` entrypoint that opens
+      a dedicated asyncpg connection (via
+      :func:`ingot.open_worker_driver`), instantiates a
+      :class:`pgqueuer.PgQueuer`, registers every task in
+      ``TASKS`` as an entrypoint, and runs.
+
+    Producers (request-side enqueue) are not generated -- users
+    call :func:`ingot.get_queue` from inside action bodies when
+    they want to enqueue a job inside the request's transaction.
+    """
+
+    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
+        """Apply only when the project config has ``queue`` set.
+
+        Args:
+            ctx: Build context with project config.
+
+        Returns:
+            ``True`` when ``ctx.instance.queue`` is not ``None``.
+
+        """
+        return ctx.instance.queue is not None
+
+    def build(
+        self,
+        ctx: BuildContext[ProjectConfig],
+        _options: BaseModel,
+    ) -> Iterable[StaticFile]:
+        """Produce the queue package static files.
+
+        Args:
+            ctx: Build context with project config.  ``when`` has
+                already confirmed ``ctx.instance.queue is not None``.
+            _options: Unused (no options).
+
+        Yields:
+            Three :class:`StaticFile` objects under ``queue/``.
+
+        """
+        config = ctx.instance
+        queue = config.queue
+        assert queue is not None  # noqa: S101 -- guaranteed by when()
+
+        database = config.resolve_database(queue.database)
+
+        tasks = [
+            {
+                "name": task.name,
+                "module": task.fn.rsplit(".", 1)[0],
+                "fn_name": task.fn.rsplit(".", 1)[1],
+            }
+            for task in queue.tasks
+        ]
+
+        yield StaticFile(
+            path="queue/__init__.py",
+            template="",
+            context={},
+        )
+
+        yield StaticFile(
+            path="queue/tasks.py",
+            template="init/queue_tasks.py.j2",
+            context={"tasks": tasks},
+        )
+
+        worker_module = (
+            f"{config.package_prefix}.queue.worker"
+            if config.package_prefix
+            else "queue.worker"
+        )
+
+        yield StaticFile(
+            path="queue/worker.py",
+            template="init/queue_worker.py.j2",
+            context={
+                "url_env": database.url_env,
+                "db_key": database.key,
+                "worker_module": worker_module,
             },
         )
