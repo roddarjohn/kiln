@@ -25,6 +25,23 @@ dependencies = [
   "pyjwt>=2.0",
 ]
 
+[project.optional-dependencies]
+# ``kiln-generator[opentelemetry]`` installs the OTel runtime
+# packages that ``ingot.telemetry`` imports.  Generated apps with
+# telemetry on need this set; apps without telemetry never import
+# ``ingot.telemetry`` and don't need it.  Pinned as a coherent
+# release pair -- bump core (1.x) and instrumentation (0.x.b)
+# packages in lockstep when upgrading.  The same pins are emitted
+# verbatim into the generated ``telemetry/requirements.txt`` so a
+# deployment can install them directly without touching kiln.
+opentelemetry = [
+  "opentelemetry-api==1.29.0",
+  "opentelemetry-sdk==1.29.0",
+  "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-instrumentation-fastapi==0.50b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
+]
+
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
 Documentation = "https://roddarjohn.github.io/kiln/"
@@ -73,6 +90,14 @@ dev = [
   "coverage[toml]>=7.0",
   "tox>=4.49.1",
   "tox-uv>=1.33.2",
+  # OTel mirrored from the ``opentelemetry`` extra so the dev test
+  # suite can import ``ingot.telemetry``.  Keep version pins in
+  # lockstep with ``[project.optional-dependencies].opentelemetry``.
+  "opentelemetry-api==1.29.0",
+  "opentelemetry-sdk==1.29.0",
+  "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-instrumentation-fastapi==0.50b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
 ]
 playground = [
   "fastapi>=0.115",
@@ -125,7 +150,6 @@ ignore = [
 "src/ingot/**" = [
   "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
   "PLR0913", # pagination helpers genuinely take many parameters
-  "PLC0415", # ingot.telemetry defers OTel imports so the module imports without it
 ]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py

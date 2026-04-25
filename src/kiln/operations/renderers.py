@@ -304,9 +304,14 @@ def _apply_tracing_decorator(
     if telemetry is None:
         return
 
-    op_config = ctx.store.ancestor_of(ctx.instance_id, "operation")
+    # Resource lives one scope above the handler's operation scope.
+    # Operation config is *the* current instance for an op-scope
+    # output, but ``ctx`` only carries instance_id (not the instance
+    # itself for renderers).  ``body_template`` reliably identifies
+    # actions because the action op is the only one that points at
+    # ``fastapi/ops/action.py.j2``.
     resource_config = ctx.store.ancestor_of(ctx.instance_id, "resource")
-    is_action = getattr(op_config, "type", None) == "action"
+    is_action = handler.body_template == "fastapi/ops/action.py.j2"
 
     project_flag = (
         telemetry.span_per_action if is_action else telemetry.span_per_handler
@@ -315,15 +320,13 @@ def _apply_tracing_decorator(
         return
     if getattr(resource_config, "trace", None) is False:
         return
-    if getattr(op_config, "trace", None) is False:
-        return
 
     decorators_module = (
         f"{info.package_prefix}.telemetry.decorators"
         if info.package_prefix
         else "telemetry.decorators"
     )
-    op_name = handler.op_name or getattr(op_config, "name", "")
+    op_name = handler.op_name
     span_name = f"{info.model.lower}.{op_name}"
     record = "True" if telemetry.record_exceptions else "False"
     if is_action:
