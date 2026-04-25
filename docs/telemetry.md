@@ -29,21 +29,16 @@ local telemetry = import 'kiln/telemetry/telemetry.libsonnet';
 The full schema lives in
 [`kiln.config.schema.TelemetryConfig`](api.html#kiln.config.schema.TelemetryConfig).
 
-After regenerating, install the pinned OTel packages.  The cleanest
-path is the kiln extra:
+After regenerating, install the pinned OTel package set via the
+kiln extra:
 
 ```sh
 pip install kiln-generator[opentelemetry]
 ```
 
-or, equivalently, from the requirements file the scaffold emits:
-
-```sh
-pip install -r _generated/telemetry/requirements.txt
-```
-
-Both pin the same coherent OTel release pair.  Either form is fine;
-projects that vendor a `requirements.lock` typically use the file.
+Generated apps already depend on `kiln-generator` (they import from
+`ingot`), so the extra is the single source of truth for OTel
+versions -- nothing extra to vendor or copy.
 
 Then call `init_telemetry` from your app entry point, before mounting
 the generated router:
@@ -169,7 +164,7 @@ records and your structured logger automatically correlates.
 
 ## Pinned versions
 
-The generated `telemetry/requirements.txt` pins the OTel packages to a
+The `kiln-generator[opentelemetry]` extra pins the OTel packages to a
 coherent release pair:
 
 ```
@@ -182,7 +177,4 @@ opentelemetry-instrumentation-sqlalchemy==0.50b0
 
 The instrumentation packages ride a separate `0.x.b` version line that
 stabilises later than the core SDK; bump core (`1.x`) and
-instrumentation (`0.x.b`) in lockstep.  The same pins live on the
-`kiln-generator[opentelemetry]` extra and in the generated
-`requirements.txt`, so there is one source of truth across kiln, the
-generated app, and any explicit installs.
+instrumentation (`0.x.b`) in lockstep when upgrading.
