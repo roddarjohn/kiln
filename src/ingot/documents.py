@@ -41,7 +41,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, dataclass_transform
 
 import boto3
 from fastapi import HTTPException, status
@@ -75,6 +75,18 @@ def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(tz=datetime.UTC)
 
 
+# ``@dataclass_transform`` tells type checkers to treat the
+# ``Mapped[...]`` class attributes below as if they were dataclass
+# fields -- i.e. synthesize an ``__init__(*, id=..., s3_key=..., ...)``
+# for static analysis purposes.  At runtime nothing changes: SQLAlchemy
+# generates the real ``__init__`` when a concrete subclass is mapped
+# via ``DeclarativeBase``.  Without this hint, a type checker sees the
+# bare mixin as having no ``__init__`` (the annotations are class
+# attributes, not constructor params) and rejects every kwarg the
+# ``make_request_upload`` factory passes.  ``DeclarativeBase`` uses the
+# same trick internally; we apply it to the mixin too so kwargs flow
+# through statically.
+@dataclass_transform(field_specifiers=(mapped_column,))
 class DocumentMixin:
     """SQLAlchemy mixin supplying the columns of a document record.
 
@@ -401,9 +413,6 @@ def make_request_upload(
         # Prefix the key with the document id so collisions on the
         # consumer-supplied filename can't reach across rows.
         key = f"{document_id.hex}/{body.filename}"
-        # SQLAlchemy declarative ``__init__`` accepts every mapped
-        # column as a kwarg; pass via dict-unpack so zuban doesn't
-        # validate the kwargs against the mixin's empty signature.
         document = model_cls(
             id=document_id,
             s3_key=key,
