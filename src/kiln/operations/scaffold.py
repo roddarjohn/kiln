@@ -48,6 +48,10 @@ class Scaffold:
 
         """
         config = ctx.instance
+        instrument_sqlalchemy = (
+            config.telemetry is not None
+            and config.telemetry.instrument_sqlalchemy
+        )
 
         yield StaticFile(
             path="db/__init__.py",
@@ -69,6 +73,7 @@ class Scaffold:
                     "pool_recycle": db.pool_recycle,
                     "pool_pre_ping": db.pool_pre_ping,
                     "get_db_fn": f"get_{db.key}_db",
+                    "instrument_sqlalchemy": instrument_sqlalchemy,
                 },
             )
 
@@ -120,6 +125,12 @@ class AuthScaffold:
         auth = ctx.instance.auth
         assert auth is not None  # noqa: S101 -- guaranteed by when()
 
+        package_prefix = ctx.instance.package_prefix
+        has_telemetry = ctx.instance.telemetry is not None
+        telemetry_module = (
+            f"{package_prefix}.telemetry" if package_prefix else "telemetry"
+        )
+
         yield StaticFile(
             path="auth/__init__.py",
             template="",
@@ -170,5 +181,7 @@ class AuthScaffold:
                 "cookie_samesite": auth.cookie_samesite,
                 "store_module": store_module,
                 "store_name": store_name,
+                "has_telemetry": has_telemetry,
+                "telemetry_module": telemetry_module,
             },
         )

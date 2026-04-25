@@ -1,0 +1,26 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Re-exports of :func:`ingot.telemetry.traced_handler` /
+:func:`ingot.telemetry.traced_action` so generated route modules
+import them via a stable local path
+(``from {{ telemetry_module }}.decorators import traced_handler``).
+
+The local path means a future change to where the decorators live
+(e.g. moving them out of ingot) is a one-line edit to this file
+rather than a sweep across every generated route.
+{% endset %}
+{{ file_header("Tracing decorators for generated handlers", extra=_extra) }}
+
+from __future__ import annotations
+
+from ingot.telemetry import (
+    scrub_current_span_attributes,
+    traced_action,
+    traced_handler,
+)
+
+__all__ = [
+    "scrub_current_span_attributes",
+    "traced_action",
+    "traced_handler",
+]

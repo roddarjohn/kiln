@@ -44,6 +44,7 @@ kiln = "kiln.target:target"
 [project.entry-points."foundry.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
 auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
+telemetry_scaffold = "kiln.operations.telemetry:TelemetryScaffold"
 get = "kiln.operations.get:Get"
 list = "kiln.operations.list:List"
 filter = "kiln.operations.filter:Filter"
@@ -124,6 +125,7 @@ ignore = [
 "src/ingot/**" = [
   "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
   "PLR0913", # pagination helpers genuinely take many parameters
+  "PLC0415", # ingot.telemetry defers OTel imports so the module imports without it
 ]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py

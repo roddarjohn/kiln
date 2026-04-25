@@ -154,6 +154,165 @@ class AuthConfig(BaseModel):
         return self
 
 
+SamplerName = Literal[
+    "always_on",
+    "always_off",
+    "parentbased_always_on",
+    "parentbased_always_off",
+    "parentbased_traceidratio",
+    "traceidratio",
+]
+"""OpenTelemetry sampler names accepted by
+:class:`TelemetryConfig.sampler`.  ``parentbased_always_on`` (the
+default) keeps a parent's sampling decision when one exists and
+otherwise samples every trace -- a friendly default for development.
+Production users typically switch to ``parentbased_traceidratio``
+with a low :attr:`TelemetryConfig.sampler_ratio`."""
+
+
+ExporterName = Literal["otlp_http", "otlp_grpc", "console", "none"]
+"""Exporter selection for :class:`TelemetryConfig.exporter`.
+``"none"`` disables span export (useful when only metrics/logs are
+needed, or when a sidecar Collector reads from another source).
+Leave the field as ``None`` to defer to the standard
+``OTEL_EXPORTER_OTLP_*`` environment variables at runtime."""
+
+
+class TelemetryConfig(BaseModel):
+    """OpenTelemetry instrumentation for the generated app.
+
+    Set ``project.telemetry`` to an instance of this class to opt
+    in.  When unset, the generator emits zero references to
+    OpenTelemetry -- the runtime cost is exactly zero.
+
+    All toggle fields default to *sensible-for-most-projects*
+    values: traces and metrics on, logs off (the OTel logs SDK is
+    the youngest of the three signal APIs), FastAPI and SQLAlchemy
+    auto-instrumented, request/response bodies *not* captured
+    (PII risk), and ``parentbased_always_on`` sampling for friendly
+    development defaults.
+
+    The auth router (login/logout) always scrubs credentials and
+    session payloads from spans regardless of
+    :attr:`capture_request_body` / :attr:`capture_response_body`.
+    """
+
+    service_name: str
+    """Value emitted as the ``service.name`` resource attribute on
+    every signal.  Required -- there is no sensible default."""
+
+    service_version: str | None = None
+    """Optional ``service.version`` resource attribute."""
+
+    environment: str | None = None
+    """Optional ``deployment.environment.name`` resource attribute,
+    e.g. ``"prod"`` / ``"staging"`` / ``"dev"``."""
+
+    traces: bool = True
+    """Emit trace spans."""
+    metrics: bool = True
+    """Emit metrics."""
+    logs: bool = False
+    """Emit logs through the OTel logs SDK.  Off by default because
+    the logs SDK API surface is the youngest and most likely to
+    churn; enable when your collector pipeline is ready."""
+
+    instrument_fastapi: bool = True
+    """Wire FastAPIInstrumentor into the project router so every
+    HTTP request becomes a server span."""
+    instrument_sqlalchemy: bool = True
+    """Wire SQLAlchemyInstrumentor against each generated async
+    engine so every query becomes a client span."""
+    instrument_httpx: bool = False
+    """Wire HTTPXClientInstrumentor.  Off by default -- generated
+    apps don't make outbound HTTP themselves; turn on when consumer
+    code does."""
+    instrument_logging: bool = False
+    """Inject trace/span ids into stdlib log records via
+    LoggingInstrumentor.  Off by default to avoid mutating logging
+    config the consumer didn't ask for."""
+
+    span_per_handler: bool = True
+    """Wrap every generated CRUD handler in an internal span named
+    ``{resource}.{op}``.  Complements FastAPI's request span with
+    a clean op-scoped boundary that survives middleware reordering
+    and includes resource/op as low-cardinality attributes."""
+    span_per_action: bool = True
+    """Wrap every generated action handler in an internal span."""
+    record_exceptions: bool = True
+    """Set the span status to ERROR and record the exception when a
+    handler raises."""
+
+    capture_request_body: bool = False
+    """Attach a (truncated) request body string as a span attribute.
+    Off by default -- request bodies frequently contain PII."""
+    capture_response_body: bool = False
+    """Attach a (truncated) response body string as a span attribute.
+    Off by default -- response bodies frequently contain PII."""
+
+    sampler: SamplerName = "parentbased_always_on"
+    """Sampler choice.  ``"parentbased_always_on"`` is friendly for
+    dev (sample everything, but honour parent decisions); production
+    users typically switch to ``"parentbased_traceidratio"`` and set
+    :attr:`sampler_ratio`."""
+
+    sampler_ratio: float | None = None
+    """Sampling ratio in ``[0.0, 1.0]``.  Required when
+    :attr:`sampler` is ``"traceidratio"`` or
+    ``"parentbased_traceidratio"``; rejected otherwise."""
+
+    exporter: ExporterName | None = None
+    """Span exporter selection.  ``None`` defers to the standard
+    ``OTEL_EXPORTER_OTLP_*`` environment variables at runtime
+    (recommended for vendor-neutral deployments).  Set explicitly
+    to force a transport regardless of the environment."""
+
+    exporter_endpoint_env: str = "OTEL_EXPORTER_OTLP_ENDPOINT"
+    """Environment variable read at startup for the OTLP endpoint
+    when :attr:`exporter` is ``"otlp_http"`` / ``"otlp_grpc"``."""
+
+    exporter_headers_env: str = "OTEL_EXPORTER_OTLP_HEADERS"
+    """Environment variable read at startup for OTLP headers
+    (e.g. auth tokens for hosted backends).  Standard OTel format:
+    comma-separated ``key=value`` pairs."""
+
+    resource_attributes: dict[str, str] = Field(default_factory=dict)
+    """Extra static resource attributes added to every signal,
+    e.g. ``{"team": "platform", "tier": "edge"}``."""
+
+    @model_validator(mode="after")
+    def _ratio_required_for_ratio_samplers(self) -> TelemetryConfig:
+        ratio_samplers = ("traceidratio", "parentbased_traceidratio")
+        if self.sampler in ratio_samplers and self.sampler_ratio is None:
+            msg = (
+                f"sampler={self.sampler!r} requires sampler_ratio "
+                f"to be set in [0.0, 1.0]"
+            )
+            raise ValueError(msg)
+        if (
+            self.sampler not in ratio_samplers
+            and self.sampler_ratio is not None
+        ):
+            msg = (
+                f"sampler_ratio is only valid with a *ratio sampler "
+                f"(got sampler={self.sampler!r})"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _ratio_in_unit_interval(self) -> TelemetryConfig:
+        if self.sampler_ratio is None:
+            return self
+        if not 0.0 <= self.sampler_ratio <= 1.0:
+            msg = (
+                f"sampler_ratio must be in [0.0, 1.0], got "
+                f"{self.sampler_ratio!r}"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -327,6 +486,12 @@ class OperationConfig(BaseModel):
     require_auth: bool | None = None
     """Per-operation auth override.  When ``None``, inherits the
     resource-level ``require_auth`` default."""
+    trace: bool | None = None
+    """Per-operation telemetry override.  When ``None``, inherits
+    the resource-level ``trace`` default (which itself inherits
+    from the project's :attr:`TelemetryConfig.span_per_handler` /
+    :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
+    skip span emission for noisy / hot-path operations."""
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
@@ -378,6 +543,13 @@ class ResourceConfig(BaseModel):
     """Default authentication requirement for all operations on this
     resource.  Individual operations can override via their own
     ``require_auth`` field."""
+
+    trace: bool | None = None
+    """Per-resource telemetry override.  When ``None``, inherits the
+    project-level :attr:`TelemetryConfig.span_per_handler` /
+    :attr:`TelemetryConfig.span_per_action` toggles.  Set ``False``
+    to skip per-handler spans for every op on this resource (the
+    HTTP server span from ``FastAPIInstrumentor`` is unaffected)."""
 
     operations: Annotated[list[OperationConfig], Scoped(name="operation")] = (
         Field(default_factory=list)
@@ -432,6 +604,10 @@ class ProjectConfig(FoundryConfig):
     only those matching this value are used."""
     package_prefix: str = "_generated"
     auth: AuthConfig | None = None
+    telemetry: TelemetryConfig | None = None
+    """OpenTelemetry configuration.  ``None`` (the default) means
+    the generated app emits zero telemetry references; set to a
+    :class:`TelemetryConfig` to opt in."""
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,

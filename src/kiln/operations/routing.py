@@ -119,6 +119,10 @@ class ProjectRouter:
         package_prefix = config.package_prefix
         has_auth = config.auth is not None
         auth_module = f"{package_prefix}.auth" if package_prefix else "auth"
+        has_telemetry = config.telemetry is not None
+        telemetry_module = (
+            f"{package_prefix}.telemetry" if package_prefix else "telemetry"
+        )
 
         yield StaticFile(
             path="routes/__init__.py",
@@ -126,6 +130,8 @@ class ProjectRouter:
             context={
                 "has_auth": has_auth,
                 "auth_module": auth_module,
+                "has_telemetry": has_telemetry,
+                "telemetry_module": telemetry_module,
                 "apps": [
                     {
                         "module": (
