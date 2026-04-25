@@ -21,7 +21,12 @@ from ingot.auth import (
 from ingot.filters import FilterOp, apply_filters
 from ingot.ordering import SortDirection, apply_ordering
 from ingot.pagination import apply_keyset_pagination, apply_offset_pagination
-from ingot.queue import get_queue, open_worker_driver
+from ingot.queue import (
+    get_queue,
+    open_worker_driver,
+    register_module_tasks,
+    task,
+)
 from ingot.responses import assert_rowcount, get_object_from_query_or_404
 
 __all__ = [
@@ -39,5 +44,7 @@ __all__ = [
     "get_queue",
     "issue_session",
     "open_worker_driver",
+    "register_module_tasks",
     "session_auth",
+    "task",
 ]

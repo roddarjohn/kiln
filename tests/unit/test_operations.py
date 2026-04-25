@@ -24,7 +24,6 @@ from kiln.config.schema import (
     PaginateConfig,
     ProjectConfig,
     QueueConfig,
-    QueueTaskConfig,
     ResourceConfig,
 )
 from kiln.operations.create import Create
@@ -323,6 +322,13 @@ class TestAuthScaffold:
 # -------------------------------------------------------------------
 
 
+def _queue(
+    tasks_module: str = "blog.queue.tasks", **kwargs: object
+) -> QueueConfig:
+    """Construct a QueueConfig with sensible test defaults."""
+    return QueueConfig(tasks_module=tasks_module, **kwargs)
+
+
 class TestQueueScaffold:
     """Tests for QueueScaffold operation."""
 
@@ -334,56 +340,27 @@ class TestQueueScaffold:
     def test_when_true_with_queue(self):
         """when() returns True when queue is configured."""
         config = MinimalConfig(
-            queue=QueueConfig(),
+            queue=_queue(),
             databases=[DatabaseConfig(key="primary", default=True)],
         )
         ctx = _project_ctx(config)
         assert QueueScaffold().when(ctx) is True
 
-    def test_emits_three_files(self):
-        """Queue config emits __init__, tasks, and worker."""
+    def test_emits_two_files(self):
+        """Queue config emits __init__ and worker (no kiln-managed registry)."""
         config = MinimalConfig(
-            queue=QueueConfig(
-                tasks=[QueueTaskConfig(name="ping", fn="myapp.tasks.ping")]
-            ),
+            queue=_queue(),
             databases=[DatabaseConfig(key="primary", default=True)],
         )
         ctx = _project_ctx(config)
         result = list(QueueScaffold().build(ctx, _Empty()))
         paths = [f.path for f in result]
-        assert paths == [
-            "queue/__init__.py",
-            "queue/tasks.py",
-            "queue/worker.py",
-        ]
+        assert paths == ["queue/__init__.py", "queue/worker.py"]
 
-    def test_tasks_context_splits_dotted_path(self):
-        """Each task's dotted fn path is split into module + name."""
+    def test_worker_context_threads_url_env_and_tasks_module(self):
+        """Worker template gets url_env, db_key, and tasks_module."""
         config = MinimalConfig(
-            queue=QueueConfig(
-                tasks=[
-                    QueueTaskConfig(name="ping", fn="myapp.tasks.ping"),
-                    QueueTaskConfig(name="bake", fn="myapp.deep.tasks.bake"),
-                ]
-            ),
-            databases=[DatabaseConfig(key="primary", default=True)],
-        )
-        ctx = _project_ctx(config)
-        result = list(QueueScaffold().build(ctx, _Empty()))
-        tasks_file = next(f for f in result if f.path == "queue/tasks.py")
-        assert tasks_file.context["tasks"] == [
-            {"name": "ping", "module": "myapp.tasks", "fn_name": "ping"},
-            {
-                "name": "bake",
-                "module": "myapp.deep.tasks",
-                "fn_name": "bake",
-            },
-        ]
-
-    def test_worker_context_threads_url_env(self):
-        """Worker template gets the resolved database's url_env."""
-        config = MinimalConfig(
-            queue=QueueConfig(),
+            queue=_queue(tasks_module="myapp.tasks"),
             databases=[
                 DatabaseConfig(
                     key="primary", default=True, url_env="DATABASE_URL"
@@ -396,11 +373,12 @@ class TestQueueScaffold:
         worker = next(f for f in result if f.path == "queue/worker.py")
         assert worker.context["url_env"] == "DATABASE_URL"
         assert worker.context["db_key"] == "primary"
+        assert worker.context["tasks_module"] == "myapp.tasks"
 
     def test_worker_uses_named_database(self):
         """``queue.database`` selects a named database over the default."""
         config = MinimalConfig(
-            queue=QueueConfig(database="jobs"),
+            queue=_queue(database="jobs"),
             databases=[
                 DatabaseConfig(
                     key="primary", default=True, url_env="DATABASE_URL"
@@ -417,7 +395,7 @@ class TestQueueScaffold:
     def test_worker_module_with_package_prefix(self):
         """worker_module includes the package_prefix when set."""
         config = MinimalConfig(
-            queue=QueueConfig(),
+            queue=_queue(),
             databases=[DatabaseConfig(key="primary", default=True)],
             package_prefix="_generated",
         )
@@ -429,7 +407,7 @@ class TestQueueScaffold:
     def test_worker_module_without_package_prefix(self):
         """worker_module drops the prefix when package_prefix is empty."""
         config = MinimalConfig(
-            queue=QueueConfig(),
+            queue=_queue(),
             databases=[DatabaseConfig(key="primary", default=True)],
             package_prefix="",
         )
@@ -441,7 +419,7 @@ class TestQueueScaffold:
     def test_no_queue_files_from_scaffold(self):
         """Scaffold never emits queue files -- that's QueueScaffold's job."""
         config = MinimalConfig(
-            queue=QueueConfig(),
+            queue=_queue(),
             databases=[DatabaseConfig(key="primary", default=True)],
         )
         ctx = _project_ctx(config)
@@ -449,17 +427,37 @@ class TestQueueScaffold:
         paths = [f.path for f in result]
         assert not any(p.startswith("queue/") for p in paths)
 
-    def test_duplicate_task_names_rejected(self):
-        """QueueConfig rejects duplicate task names."""
+    def test_tasks_module_is_required(self):
+        """QueueConfig demands a tasks_module — no implicit default."""
         import pytest
 
-        with pytest.raises(ValueError, match="unique"):
-            QueueConfig(
-                tasks=[
-                    QueueTaskConfig(name="ping", fn="a.ping"),
-                    QueueTaskConfig(name="ping", fn="b.ping"),
-                ]
-            )
+        with pytest.raises(ValueError, match="tasks_module"):
+            QueueConfig()
+
+    def test_rendered_worker_imports_user_module(self):
+        """The rendered worker imports tasks_module and registers tasks."""
+        from pathlib import Path
+
+        from foundry.env import create_jinja_env
+
+        config = MinimalConfig(
+            queue=_queue(tasks_module="myapp.queue.tasks"),
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        ctx = _project_ctx(config)
+        result = list(QueueScaffold().build(ctx, _Empty()))
+        worker = next(f for f in result if f.path == "queue/worker.py")
+
+        env = create_jinja_env(
+            Path("src/foundry/templates"), Path("src/kiln/templates")
+        )
+        rendered = env.get_template(worker.template).render(**worker.context)
+
+        assert 'TASKS_MODULE = "myapp.queue.tasks"' in rendered
+        assert "register_module_tasks(pgq, tasks_mod)" in rendered
+        assert "importlib.import_module(TASKS_MODULE)" in rendered
+        # Output is valid Python.
+        compile(rendered, "queue/worker.py", "exec")
 
 
 # -------------------------------------------------------------------

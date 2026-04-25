@@ -67,8 +67,6 @@ See [LICENSE](LICENSE) for details.
   - e.g. filter list endpoints
   - should be rego I'd think
 
-- async tasks?
-
 - emails / texts / pdfs / spreadsheets?
   - is FE
 

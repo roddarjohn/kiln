@@ -128,6 +128,87 @@ Notes on inheritance:
 * ``auth`` is configured once at the root; each resource opts in via
   ``require_auth`` (defaults to ``True``).
 
+Background tasks (pgqueuer)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Setting a top-level ``queue`` block opts the project into a
+`pgqueuer <https://github.com/janbjorge/pgqueuer>`_ scaffold.
+Tasks themselves live entirely in your code — kiln does not
+model individual tasks; it only emits the worker shell:
+
+.. code-block:: jsonnet
+
+   {
+     version: "1",
+     databases: [{ key: "primary", url_env: "DATABASE_URL", default: true }],
+     queue: {
+       // database: "primary",  // optional, defaults to default db
+       tasks_module: "blog.queue.tasks",
+     },
+     // ...apps, resources, etc.
+   }
+
+**Define tasks with the** :func:`ingot.task` **decorator.**  Every
+``@task``-decorated coroutine in ``tasks_module`` is registered on
+the worker's :class:`pgqueuer.PgQueuer` at startup.  Tuning sits
+on the decorator, not in jsonnet:
+
+.. code-block:: python
+
+   # blog/queue/tasks.py
+   from ingot import task
+
+   @task
+   async def index_article(job): ...
+
+   @task(concurrency_limit=4, retry_timer_seconds=30)
+   async def send_welcome(job): ...
+
+   @task(name="legacy.ping")  # entrypoint name != fn name
+   async def ping_v2(job): ...
+
+Available kwargs map 1:1 onto :meth:`pgqueuer.PgQueuer.entrypoint`:
+``name`` (defaults to fn name), ``concurrency_limit`` (max parallel),
+``requests_per_second`` (rate limit), ``retry_timer_seconds``
+(translated to a :class:`datetime.timedelta`), and
+``serialized_dispatch`` (force sequential per ``dedupe_key``).
+Unset kwargs fall through to pgqueuer's defaults.
+
+**Producer side (enqueue from a request):**  Call
+:func:`ingot.get_queue` from inside an action handler to obtain a
+``pgqueuer.Queries`` bound to the request's session.  Enqueue calls
+join the session's transaction, so the job is durable iff the
+session commits (transactional outbox):
+
+.. code-block:: python
+
+   from ingot import get_queue
+
+   async def publish(article_id, session, ...):
+       # ... app logic that updates the row ...
+       queue = await get_queue(session)
+       await queue.enqueue(["index_article"], [str(article_id).encode()])
+       # If the request handler commits, the job is durable.
+       # If it rolls back, the job never existed.
+
+**Consumer side (worker process):**
+
+.. code-block:: bash
+
+   pgq install --pg-dsn "$DATABASE_URL"   # one-time, before first start
+   python -m _generated.queue.worker      # long-running
+
+To split work across pod classes, point different deployments at
+different task modules — write ``blog.queue.fast`` and
+``blog.queue.slow``, set the worker's ``TASKS_MODULE`` constant
+(or override at deploy time) per pod, and only the tasks defined
+in that module are registered.  No kiln-side filtering needed.
+
+The ``pgq install`` step is the pgqueuer schema migration — kiln does
+**not** add the pgqueuer tables to your alembic chain.  Run it once
+per environment.  See :doc:`reference` for the full set of generated
+files.
+
 Operations
 ----------
 
@@ -250,7 +331,9 @@ Built-in operations
      - Output
    * - ``scaffold``
      - project
-     - ``db/*_session.py``, ``auth/dependencies.py``, ``auth/router.py``
+     - ``db/*_session.py``, ``auth/dependencies.py``, ``auth/router.py``,
+       ``queue/worker.py`` (each set is gated on the matching config
+       block being present)
    * - ``get``
      - resource
      - GET /{pk} route handler + response schema

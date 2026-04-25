@@ -183,18 +183,19 @@ class AuthScaffold:
 class QueueScaffold:
     """Generate the ``queue/`` package for pgqueuer integration.
 
-    Emits three :class:`StaticFile` objects:
+    Emits two :class:`StaticFile` objects:
 
     * ``queue/__init__.py`` -- package marker.
-    * ``queue/tasks.py`` -- imports each user task fn and exposes
-      a ``TASKS`` dict mapping pgqueuer entrypoint name → fn.
     * ``queue/worker.py`` -- ``python -m`` entrypoint that opens
       a dedicated asyncpg connection (via
-      :func:`ingot.open_worker_driver`), instantiates a
-      :class:`pgqueuer.PgQueuer`, registers every task in
-      ``TASKS`` as an entrypoint, and runs.
+      :func:`ingot.open_worker_driver`), imports the user's
+      :attr:`QueueConfig.tasks_module`, and calls
+      :func:`ingot.register_module_tasks` to register every
+      :func:`ingot.task`-decorated function it finds.
 
-    Producers (request-side enqueue) are not generated -- users
+    Tasks live entirely in user code: the user writes a module
+    with ``@task``-decorated coroutine functions; kiln does not
+    generate per-task code.  Producers (request-side enqueue)
     call :func:`ingot.get_queue` from inside action bodies when
     they want to enqueue a job inside the request's transaction.
     """
@@ -224,7 +225,7 @@ class QueueScaffold:
             _options: Unused (no options).
 
         Yields:
-            Three :class:`StaticFile` objects under ``queue/``.
+            Two :class:`StaticFile` objects under ``queue/``.
 
         """
         config = ctx.instance
@@ -233,31 +234,16 @@ class QueueScaffold:
 
         database = config.resolve_database(queue.database)
 
-        tasks = [
-            {
-                "name": task.name,
-                "module": task.fn.rsplit(".", 1)[0],
-                "fn_name": task.fn.rsplit(".", 1)[1],
-            }
-            for task in queue.tasks
-        ]
+        worker_module = (
+            f"{config.package_prefix}.queue.worker"
+            if config.package_prefix
+            else "queue.worker"
+        )
 
         yield StaticFile(
             path="queue/__init__.py",
             template="",
             context={},
-        )
-
-        yield StaticFile(
-            path="queue/tasks.py",
-            template="init/queue_tasks.py.j2",
-            context={"tasks": tasks},
-        )
-
-        worker_module = (
-            f"{config.package_prefix}.queue.worker"
-            if config.package_prefix
-            else "queue.worker"
         )
 
         yield StaticFile(
@@ -267,5 +253,6 @@ class QueueScaffold:
                 "url_env": database.url_env,
                 "db_key": database.key,
                 "worker_module": worker_module,
+                "tasks_module": queue.tasks_module,
             },
         )

@@ -410,36 +410,16 @@ class App(BaseModel):
     prefix: str = ""
 
 
-class QueueTaskConfig(BaseModel):
-    """A single pgqueuer task entrypoint.
-
-    The user supplies the task body as a Python function; kiln
-    only generates the registration that wires it into the
-    worker's :class:`pgqueuer.PgQueuer` instance.
-
-    Generated handlers don't enqueue jobs automatically — that's
-    explicitly out of scope for v1.  Users call
-    :func:`ingot.get_queue` from inside action bodies to enqueue
-    when they want to.
-    """
-
-    name: str
-    """The pgqueuer entrypoint name.  Producers pass this as the
-    first argument to ``Queries.enqueue``."""
-
-    fn: str
-    """Dotted import path to the async task function, e.g.
-    ``"blog.tasks.index_article"``.  Signature must match
-    pgqueuer's entrypoint contract: ``async def fn(job: Job)``."""
-
-
 class QueueConfig(BaseModel):
     """pgqueuer configuration for the project.
 
     Setting this on the project config opts the project into the
     queue scaffold: a ``queue/`` package is emitted with a worker
-    entrypoint and a task registry.  The tasks themselves live in
-    user code; kiln only owns the wiring.
+    that imports :attr:`tasks_module` and registers every
+    :func:`ingot.task`-decorated function it finds.  Tuning
+    (``concurrency_limit``, ``retry_timer_seconds``, etc.) lives
+    on the decorator, not in jsonnet — kiln does not model
+    individual tasks at all.
     """
 
     database: str | None = None
@@ -447,19 +427,12 @@ class QueueConfig(BaseModel):
     worker reads.  ``None`` selects the database marked
     ``default=True``."""
 
-    tasks: list[QueueTaskConfig] = Field(default_factory=list)
-    """Task entrypoints registered on the worker's
-    :class:`pgqueuer.PgQueuer` at startup.  Empty is allowed —
-    you may want the producer side (``get_queue``) wired up
-    before any consumers exist."""
-
-    @model_validator(mode="after")
-    def _task_names_unique(self) -> QueueConfig:
-        names = [task.name for task in self.tasks]
-        if len(set(names)) != len(names):
-            msg = f"queue task names must be unique: {names}"
-            raise ValueError(msg)
-        return self
+    tasks_module: str
+    """Dotted import path of the user-authored module containing
+    :func:`ingot.task`-decorated coroutine functions, e.g.
+    ``"blog.queue.tasks"``.  The generated worker imports this
+    module and calls :func:`ingot.register_module_tasks` to wire
+    every tagged function onto its :class:`pgqueuer.PgQueuer`."""
 
 
 class ProjectConfig(FoundryConfig):
