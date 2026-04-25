@@ -70,9 +70,10 @@ See [LICENSE](LICENSE) for details.
 - async tasks?
 
 - emails / texts / pdfs / spreadsheets?
+  - is FE
+
+- websockets?
 
 - document uploading?
 
 - multi-tenant?
-
-- websockets?
