@@ -22,7 +22,6 @@ from ingot.filters import FilterOp, apply_filters
 from ingot.ordering import SortDirection, apply_ordering
 from ingot.pagination import apply_keyset_pagination, apply_offset_pagination
 from ingot.responses import assert_rowcount, get_object_from_query_or_404
-from ingot.utils import run_once
 
 __all__ = [
     "FilterOp",
@@ -37,6 +36,5 @@ __all__ = [
     "encode_jwt",
     "get_object_from_query_or_404",
     "issue_session",
-    "run_once",
     "session_auth",
 ]
