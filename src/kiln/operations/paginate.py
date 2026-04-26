@@ -42,7 +42,7 @@ class Paginate:
 
         Args:
             ctx: Build context for the ``"paginate"`` op entry.
-            options: Parsed :class:`PaginateConfig`.
+            options: Parsed :class:`~kiln.config.schema.PaginateConfig`.
 
         Yields:
             ``{Model}Page`` response schema.

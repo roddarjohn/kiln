@@ -10,6 +10,10 @@ Each submodule groups related primitives:
 * :mod:`ingot.filters` -- declarative filter expressions.
 * :mod:`ingot.ordering` -- sort-direction + apply-ordering helper.
 * :mod:`ingot.pagination` -- keyset and offset pagination.
+* :mod:`ingot.queue` -- pgqueuer integration: :func:`~ingot.queue.get_queue`
+  for transactional-outbox enqueue from a SQLAlchemy session, and
+  :func:`~ingot.queue.open_worker_driver` for the worker-side
+  asyncpg connection.
 * :mod:`ingot.utils` -- HTTP-status row-lookup guards
   (``get_object_from_query_or_404``, ``assert_rowcount``).
 

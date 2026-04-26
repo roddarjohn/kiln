@@ -17,12 +17,12 @@ def write_files(
 ) -> int:
     """Write generated files to disk.
 
-    Each file's :attr:`~GeneratedFile.path` is joined with
-    *out_dir* to determine the target path.  Parent directories
+    Each file's :attr:`~foundry.spec.GeneratedFile.path` is joined
+    with *out_dir* to determine the target path.  Parent directories
     are created as needed.  Existing files are always overwritten.
 
     Args:
-        files: Sequence of :class:`GeneratedFile` objects.
+        files: Sequence of :class:`~foundry.spec.GeneratedFile` objects.
         out_dir: Root directory for output paths.
 
     Returns:

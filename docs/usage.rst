@@ -128,6 +128,15 @@ Notes on inheritance:
 * ``auth`` is configured once at the root; each resource opts in via
   ``require_auth`` (defaults to ``True``).
 
+Background tasks (pgqueuer)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+kiln-generated apps integrate with `pgqueuer
+<https://github.com/janbjorge/pgqueuer>`_ for background work.  See
+:doc:`pgqueuer` for the full runbook (schema setup, defining
+tasks, the worker factory, transactional-outbox enqueue from
+request handlers, and common pitfalls).
+
 Operations
 ----------
 
@@ -224,7 +233,7 @@ Strategies mix across nesting levels, producing chains like
 outer ``select(...)``.  See :ref:`nested-fields` in the reference
 for all keys.
 
-The :mod:`kiln/fields.libsonnet` helper shortens the common shape:
+The ``kiln/fields.libsonnet`` helper shortens the common shape:
 
 .. code-block:: jsonnet
 
@@ -255,6 +264,7 @@ Built-in operations
    * - ``scaffold``
      - project
      - ``db/*_session.py``, ``auth/dependencies.py``, ``auth/router.py``
+       (each set is gated on the matching config block being present)
    * - ``get``
      - resource
      - GET /{pk} route handler + response schema

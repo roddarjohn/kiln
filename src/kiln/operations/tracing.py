@@ -2,9 +2,10 @@
 
 Mirrors :class:`~kiln.operations.auth.Auth`: resource-scoped,
 ``after_children=True``, emits nothing.  Walks every
-:class:`RouteHandler` produced under the resource and prepends a
-``@traced_handler(...)`` decorator string when telemetry is enabled
-and not opted out at the resource or operation level.
+:class:`~kiln.operations.types.RouteHandler` produced under the
+resource and prepends a ``@traced_handler(...)`` decorator string
+when telemetry is enabled and not opted out at the resource or
+operation level.
 
 Lives as a first-class operation rather than a renderer helper so
 the cross-cutting concern is discoverable in the entry-point

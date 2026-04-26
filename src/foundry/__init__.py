@@ -6,7 +6,7 @@ Target-agnostic primitives for building code generators:
   runs operations, scope by scope.
 * :func:`~foundry.operation.operation` -- decorator that turns a
   class into a scoped build step.
-* :mod:`~foundry.outputs` -- :class:`StaticFile`, the one build
+* :mod:`~foundry.outputs` -- :class:`~foundry.outputs.StaticFile`, the one build
   output that's target-neutral.  Python / FastAPI-specific
   outputs (``RouteHandler``, ``SchemaClass``, …) live in
   :mod:`kiln.operations.outputs`.

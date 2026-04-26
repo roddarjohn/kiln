@@ -42,7 +42,7 @@ class Get:
 
         Args:
             ctx: Build context for the ``"get"`` operation entry.
-            options: Parsed :class:`FieldsOptions`.
+            options: Parsed :class:`~kiln.operations.types.FieldsOptions`.
 
         Yields:
             The ``{Model}Resource`` schema, its serializer, the

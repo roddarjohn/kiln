@@ -32,6 +32,13 @@ write in ``.jsonnet`` / ``.json``.
    :members:
    :undoc-members:
 
+.. autoclass:: kiln.config.schema.ModifierConfig
+   :members:
+   :undoc-members:
+
+.. autodata:: kiln.config.schema.FieldType
+   :no-value:
+
 .. autoclass:: kiln.config.schema.FieldSpec
    :members:
    :undoc-members:
@@ -41,6 +48,22 @@ write in ``.jsonnet`` / ``.json``.
    :undoc-members:
 
 .. autoclass:: kiln.config.schema.DatabaseConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.TelemetryConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.FilterConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.OrderConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.config.schema.PaginateConfig
    :members:
    :undoc-members:
 
@@ -142,9 +165,8 @@ Nested fields are supported on read ops (``get`` / ``list``) only.
 Write-op request bodies (``create`` / ``update``) must use scalar
 fields.
 
-The :mod:`kiln/fields.libsonnet` helper library exposes a
-:func:`nested` shortcut for common cases — see :doc:`usage` for
-examples.
+The ``kiln/fields.libsonnet`` helper library exposes a ``nested``
+shortcut for common cases — see :doc:`usage` for examples.
 
 Built-in operations
 -------------------
@@ -165,8 +187,9 @@ protocol.
    * - ``scaffold``
      - :mod:`kiln.operations.scaffold`
      - project
-     - Emits ``db/*_session.py`` and (if ``auth`` is configured)
-       ``auth/dependencies.py`` + ``auth/router.py``.
+     - Two project-scope ops live here.  ``Scaffold`` always emits
+       ``db/*_session.py``.  ``AuthScaffold`` emits the ``auth/``
+       package when ``config.auth`` is set.
    * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
      - :mod:`kiln.operations.get`, :mod:`~kiln.operations.list`,
        :mod:`~kiln.operations.create`, :mod:`~kiln.operations.update`,
@@ -258,8 +281,17 @@ Targets
 
 .. autofunction:: foundry.target.discover_targets
 
-.. autoclass:: foundry.errors.CLIError
+.. autoexception:: foundry.errors.CLIError
    :members:
+   :undoc-members:
+
+.. autoexception:: foundry.errors.ConfigError
+   :members:
+   :undoc-members:
+
+.. autoexception:: foundry.errors.GenerationError
+   :members:
+   :undoc-members:
 
 Engine
 ^^^^^^
@@ -281,12 +313,24 @@ Operations
 .. autoclass:: foundry.operation.EmptyOptions
    :members:
 
-.. autofunction:: foundry.operation.topological_sort
+.. autoclass:: foundry.operation.OperationRegistry
+   :members:
+
+.. data:: foundry.operation.DEFAULT_REGISTRY
+
+   Process-wide registry populated at import time by entry-point
+   discovery.
 
 Scopes
 ^^^^^^
 
 .. autoclass:: foundry.scope.Scope
+   :members:
+
+.. autoclass:: foundry.scope.ScopeTree
+   :members:
+
+.. autoclass:: foundry.scope.Scoped
    :members:
 
 .. autofunction:: foundry.scope.discover_scopes
@@ -299,34 +343,49 @@ Typed outputs
 ^^^^^^^^^^^^^
 
 Every operation's ``build`` method returns instances of the types
-below.  All are mutable dataclasses.
-
-.. autoclass:: foundry.outputs.RouteHandler
-   :members:
-
-.. autoclass:: foundry.outputs.RouteParam
-   :members:
-
-.. autoclass:: foundry.outputs.SchemaClass
-   :members:
-
-.. autoclass:: foundry.outputs.Field
-   :members:
-
-.. autoclass:: foundry.outputs.EnumClass
-   :members:
-
-.. autoclass:: foundry.outputs.SerializerFn
-   :members:
-
-.. autoclass:: foundry.outputs.TestCase
-   :members:
-
-.. autoclass:: foundry.outputs.RouterMount
-   :members:
+below.  Framework-agnostic types live in ``foundry.outputs``;
+FastAPI-specific output dataclasses live in
+``kiln.operations.types``.
 
 .. autoclass:: foundry.outputs.StaticFile
    :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.RouteHandler
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.RouteParam
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.SchemaClass
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.Field
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.EnumClass
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.SerializerFn
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.TestCase
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.RouterMount
+   :members:
+   :undoc-members:
+
+.. autoclass:: kiln.operations.types.FieldsOptions
+   :members:
+   :undoc-members:
 
 Render registry
 ^^^^^^^^^^^^^^^
@@ -337,8 +396,21 @@ Render registry
 .. autoclass:: foundry.render.RenderCtx
    :members:
 
-.. autoclass:: foundry.render.BuildStore
+.. autoclass:: foundry.store.BuildStore
    :members:
+
+.. autoclass:: foundry.render.FileFragment
+   :members:
+
+.. autoclass:: foundry.render.SnippetFragment
+   :members:
+
+.. autoclass:: foundry.render.Fragment
+   :members:
+
+.. data:: foundry.render.registry
+
+   Process-wide :class:`RenderRegistry` populated at import time.
 
 Output
 ^^^^^^
@@ -360,6 +432,8 @@ Naming and imports
 
 .. autoclass:: foundry.imports.ImportCollector
    :members:
+
+.. autofunction:: foundry.imports.format_imports
 
 Jinja environment
 ^^^^^^^^^^^^^^^^^
@@ -416,3 +490,13 @@ Configures async PostgreSQL connections.
    })
 
 Resources that omit ``db_key`` use the database with ``default: true``.
+
+pgqueuer integration
+^^^^^^^^^^^^^^^^^^^^
+
+kiln does not scaffold pgqueuer wiring.  See :doc:`pgqueuer` for
+the full guide — the two helpers in :mod:`ingot.queue`
+(:func:`ingot.queue.get_queue` for transactional-outbox enqueue,
+:func:`ingot.queue.open_worker_driver` for the SQLAlchemy→asyncpg
+DSN bridge), the worker-factory pattern, and how to run the
+worker with pgqueuer's own CLI.

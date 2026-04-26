@@ -195,7 +195,7 @@ class List:
 
 
 def resource_model(ctx: BuildContext[ModifierConfig, ProjectConfig]) -> Name:
-    """Return the model :class:`Name` for the modifier's resource."""
+    """Return the model :class:`~foundry.naming.Name` of the resource."""
     resource = cast(
         "ResourceConfig",
         ctx.store.ancestor_of(ctx.instance_id, "resource"),

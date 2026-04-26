@@ -23,6 +23,7 @@ dependencies = [
   "fastapi>=0.115",
   "sqlalchemy[asyncio]>=2.0",
   "pyjwt>=2.0",
+  "pgqueuer[asyncpg]>=0.26.3",
 ]
 
 [project.optional-dependencies]

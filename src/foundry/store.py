@@ -92,7 +92,7 @@ class BuildStore:
       methods below.
     - :meth:`children` — direct children of an instance, optionally
       filtered by child scope.
-    - :meth:`scope_of` — resolve an id's :class:`Scope`.
+    - :meth:`scope_of` — resolve an id's :class:`~foundry.scope.Scope`.
 
     **Output lookup** (return objects emitted by ops):
 
@@ -114,7 +114,7 @@ class BuildStore:
     - :meth:`add` — engine calls this with an op's yielded outputs.
       Ops normally don't call it directly.
     - :meth:`register_instance` — engine calls this before invoking
-      :meth:`build` at a scope instance.  Ops never call it.
+      ``build()`` at a scope instance.  Ops never call it.
 
     Typical extension recipes
     -------------------------
@@ -140,7 +140,7 @@ class BuildStore:
         bundle.search_request.body_context["has_filter"] = True
 
     Attributes:
-        scope_tree: :class:`ScopeTree` for the build's config.
+        scope_tree: :class:`~foundry.scope.ScopeTree` for the build's config.
             Required for the :meth:`scope_of` derivation (and
             therefore for ``child_scope=`` filtering on
             :meth:`children`).  Defaults to empty so ad-hoc
@@ -210,7 +210,7 @@ class BuildStore:
                 siblings.append(instance_id)
 
     def scope_of(self, instance_id: str) -> Scope:
-        """Resolve the :class:`Scope` an ``instance_id`` belongs to."""
+        """Resolve the :class:`~foundry.scope.Scope` of *instance_id*."""
         return self.scope_tree.scope_for(instance_id)
 
     def ancestor_of(
@@ -272,7 +272,7 @@ class BuildStore:
 
         Children come back in registration (config) order.  When
         *child_scope* is given, only children in that scope are
-        returned (requires :attr:`scopes` to be populated).
+        returned (requires :attr:`scope_tree` to be populated).
 
         Args:
             parent_id: Parent instance id.

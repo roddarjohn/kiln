@@ -231,7 +231,7 @@ def targets_list_cmd() -> None:
 
 
 def cli_main() -> None:
-    """Run the CLI, converting :class:`CLIError` to a clean exit.
+    """Run the CLI, converting :class:`~foundry.errors.CLIError` cleanly.
 
     Any ``CLIError`` raised inside a command is rendered as
     ``{prefix}: {message}`` on stderr and exits with code 1.

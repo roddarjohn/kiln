@@ -40,12 +40,6 @@ foundry.assembler
 .. automodule:: foundry.assembler
    :members:
 
-foundry.render
---------------
-
-.. automodule:: foundry.render
-   :members:
-
 kiln.operations
 ---------------
 
@@ -65,6 +59,15 @@ kiln.operations
    :members:
 
 .. automodule:: kiln.operations.delete
+   :members:
+
+.. automodule:: kiln.operations.filter
+   :members:
+
+.. automodule:: kiln.operations.order
+   :members:
+
+.. automodule:: kiln.operations.paginate
    :members:
 
 .. automodule:: kiln.operations.action
@@ -95,6 +98,9 @@ kiln.operations
    :members:
 
 .. automodule:: ingot.pagination
+   :members:
+
+.. automodule:: ingot.queue
    :members:
 
 .. automodule:: ingot.utils

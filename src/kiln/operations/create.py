@@ -47,7 +47,7 @@ class Create:
 
         Args:
             ctx: Build context for the ``"create"`` operation entry.
-            options: Parsed :class:`FieldsOptions`.
+            options: Parsed :class:`~kiln.operations.types.FieldsOptions`.
 
         Yields:
             The ``{Model}CreateRequest`` schema, the route handler,

@@ -1,9 +1,11 @@
 name: docs
 
 on:
+  release:
+    types: [published]
   push:
     branches: [main]
-  workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: read
@@ -15,7 +17,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Strict single-version build: trips on any sphinx warning.
+  # Runs on every PR so doc warnings can't accumulate.  Cheap --
+  # builds the current tree only, no version-shim, no deploy.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+      - uses: extractions/setup-just@v4
+      - run: just docs-check
+
+  # Versioned multi-tag build for GitHub Pages.  Only fires on a
+  # published release (release-please cuts these on the merge of
+  # its release PR) -- main pushes that aren't releases don't
+  # trigger a rebuild, so the deploy stays tied to the changelog.
   build:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
