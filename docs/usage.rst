@@ -334,6 +334,17 @@ kiln supports a presigned-URL upload flow on top of the existing
 ``action`` machinery -- no new operation type, just a SQLAlchemy mixin
 plus four ready-made action functions in :mod:`ingot.documents`.
 
+Install the ``documents`` extra to bring in the ``boto3`` runtime
+dependency::
+
+    pip install 'kiln-generator[documents]'
+    # or: uv add 'kiln-generator[documents]'
+
+Without the extra, importing :mod:`ingot.documents` raises
+``ModuleNotFoundError`` -- the gate is at the import boundary, not
+deferred to first call, so failures surface immediately at app
+startup rather than mid-request.
+
 The flow:
 
 1. Client ``POST /attachments/upload`` with ``{filename, content_type,
