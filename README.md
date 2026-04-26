@@ -78,6 +78,4 @@ See [LICENSE](LICENSE) for details.
 
 - websockets?
 
-- document uploading?
-
 - multi-tenant?
