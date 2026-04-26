@@ -165,11 +165,9 @@ protocol.
    * - ``scaffold``
      - :mod:`kiln.operations.scaffold`
      - project
-     - Three project-scope ops live here.  ``Scaffold`` always emits
+     - Two project-scope ops live here.  ``Scaffold`` always emits
        ``db/*_session.py``.  ``AuthScaffold`` emits the ``auth/``
-       package when ``config.auth`` is set.  ``QueueScaffold`` emits
-       the ``queue/`` package (worker + task registry) when
-       ``config.queue`` is set.
+       package when ``config.auth`` is set.
    * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
      - :mod:`kiln.operations.get`, :mod:`~kiln.operations.list`,
        :mod:`~kiln.operations.create`, :mod:`~kiln.operations.update`,
@@ -227,12 +225,6 @@ snake-cased model name.
      - ``scaffold``
      - Yes
    * - ``auth/router.py``
-     - ``scaffold``
-     - Yes
-   * - ``queue/__init__.py``
-     - ``scaffold``
-     - Yes
-   * - ``queue/worker.py``
      - ``scaffold``
      - Yes
    * - ``{module}/schemas/{name}.py``
@@ -426,38 +418,12 @@ Configures async PostgreSQL connections.
 
 Resources that omit ``db_key`` use the database with ``default: true``.
 
-``kiln/queue/pgqueuer.libsonnet``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pgqueuer integration
+^^^^^^^^^^^^^^^^^^^^
 
-Configures a `pgqueuer <https://github.com/janbjorge/pgqueuer>`_
-worker pointing at a user-authored task module.
-
-.. code-block:: jsonnet
-
-   local queue = import 'kiln/queue/pgqueuer.libsonnet';
-
-   queue.pgqueuer({
-     tasks_module: "blog.queue.tasks",
-     // database: "primary",  // optional, defaults to default db
-   })
-
-``tasks_module`` is the dotted path of a Python module containing
-:func:`ingot.task`-decorated coroutine functions.  The generated
-worker imports it and calls :func:`ingot.register_module_tasks` to
-wire each tagged function onto its :class:`pgqueuer.PgQueuer`.
-Per-task tuning (``concurrency_limit``, ``retry_timer_seconds``,
-``requests_per_second``, ``serialized_dispatch``) lives on the
-``@task`` decorator, *not* in jsonnet.
-
-See :doc:`usage` for the full pattern — producer-side enqueue
-(transactional outbox via :func:`ingot.get_queue`), the
-:func:`ingot.task` decorator, and the worker-startup recipe.
-
-To split work across pod classes, write multiple task modules
-(``blog.queue.fast``, ``blog.queue.slow``) and point different
-deployments at different ones (override ``TASKS_MODULE`` in the
-generated worker, or generate against a different config).
-
-The pgqueuer schema is **not** part of the generated alembic chain.
-Run ``pgq install --pg-dsn "$DATABASE_URL"`` once per environment
-before starting the worker.
+kiln does not scaffold pgqueuer wiring.  See :doc:`usage` for the
+two helpers in :mod:`ingot.queue` (:func:`ingot.get_queue` for
+transactional-outbox enqueue, :func:`ingot.open_worker_driver` for
+the SQLAlchemy→asyncpg DSN bridge) and the worker-factory pattern.
+Run the worker with pgqueuer's own CLI:
+``pgq run path.to.module:main``.

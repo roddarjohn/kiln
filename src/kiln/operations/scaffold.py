@@ -1,7 +1,7 @@
-"""Scaffold operations: db sessions, auth, and pgqueuer wiring.
+"""Scaffold operations: db sessions and the auth package.
 
 Produces :class:`~foundry.outputs.StaticFile` objects for
-infrastructure files.  Split into three operations:
+infrastructure files.  Split into two operations:
 
 * :class:`Scaffold` -- always runs; emits the ``db/`` tree.
 * :class:`AuthScaffold` -- runs only when the project config has
@@ -9,11 +9,12 @@ infrastructure files.  Split into three operations:
   session-dep and login/logout routes (three files under
   ``auth/``); the consumer provides only the session/credentials
   schemas and the credential-validation function.
-* :class:`QueueScaffold` -- runs only when the project config has
-  ``queue`` set, via :meth:`QueueScaffold.when`.  Emits the
-  ``queue/`` package with a worker entrypoint and a task
-  registry; the consumer writes the task bodies and enqueues
-  jobs from action handlers via :func:`ingot.get_queue`.
+
+Pgqueuer integration is intentionally *not* scaffolded -- users
+write their own ``main()`` factory per pgqueuer's CLI idiom and
+run ``pgq run module:main``.  Kiln contributes only the
+runtime helpers in :mod:`ingot.queue` (``get_queue``,
+``open_worker_driver``).
 """
 
 from __future__ import annotations
@@ -175,84 +176,5 @@ class AuthScaffold:
                 "cookie_samesite": auth.cookie_samesite,
                 "store_module": store_module,
                 "store_name": store_name,
-            },
-        )
-
-
-@operation("queue_scaffold", scope="project")
-class QueueScaffold:
-    """Generate the ``queue/`` package for pgqueuer integration.
-
-    Emits two :class:`StaticFile` objects:
-
-    * ``queue/__init__.py`` -- package marker.
-    * ``queue/worker.py`` -- ``python -m`` entrypoint that opens
-      a dedicated asyncpg connection (via
-      :func:`ingot.open_worker_driver`), imports the user's
-      :attr:`QueueConfig.tasks_module`, and calls
-      :func:`ingot.register_module_tasks` to register every
-      :func:`ingot.task`-decorated function it finds.
-
-    Tasks live entirely in user code: the user writes a module
-    with ``@task``-decorated coroutine functions; kiln does not
-    generate per-task code.  Producers (request-side enqueue)
-    call :func:`ingot.get_queue` from inside action bodies when
-    they want to enqueue a job inside the request's transaction.
-    """
-
-    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
-        """Apply only when the project config has ``queue`` set.
-
-        Args:
-            ctx: Build context with project config.
-
-        Returns:
-            ``True`` when ``ctx.instance.queue`` is not ``None``.
-
-        """
-        return ctx.instance.queue is not None
-
-    def build(
-        self,
-        ctx: BuildContext[ProjectConfig],
-        _options: BaseModel,
-    ) -> Iterable[StaticFile]:
-        """Produce the queue package static files.
-
-        Args:
-            ctx: Build context with project config.  ``when`` has
-                already confirmed ``ctx.instance.queue is not None``.
-            _options: Unused (no options).
-
-        Yields:
-            Two :class:`StaticFile` objects under ``queue/``.
-
-        """
-        config = ctx.instance
-        queue = config.queue
-        assert queue is not None  # noqa: S101 -- guaranteed by when()
-
-        database = config.resolve_database(queue.database)
-
-        worker_module = (
-            f"{config.package_prefix}.queue.worker"
-            if config.package_prefix
-            else "queue.worker"
-        )
-
-        yield StaticFile(
-            path="queue/__init__.py",
-            template="",
-            context={},
-        )
-
-        yield StaticFile(
-            path="queue/worker.py",
-            template="init/queue_worker.py.j2",
-            context={
-                "url_env": database.url_env,
-                "db_key": database.key,
-                "worker_module": worker_module,
-                "tasks_module": queue.tasks_module,
             },
         )

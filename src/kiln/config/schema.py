@@ -410,31 +410,6 @@ class App(BaseModel):
     prefix: str = ""
 
 
-class QueueConfig(BaseModel):
-    """pgqueuer configuration for the project.
-
-    Setting this on the project config opts the project into the
-    queue scaffold: a ``queue/`` package is emitted with a worker
-    that imports :attr:`tasks_module` and registers every
-    :func:`ingot.task`-decorated function it finds.  Tuning
-    (``concurrency_limit``, ``retry_timer_seconds``, etc.) lives
-    on the decorator, not in jsonnet — kiln does not model
-    individual tasks at all.
-    """
-
-    database: str | None = None
-    """Key of the :class:`DatabaseConfig` whose DSN env var the
-    worker reads.  ``None`` selects the database marked
-    ``default=True``."""
-
-    tasks_module: str
-    """Dotted import path of the user-authored module containing
-    :func:`ingot.task`-decorated coroutine functions, e.g.
-    ``"blog.queue.tasks"``.  The generated worker imports this
-    module and calls :func:`ingot.register_module_tasks` to wire
-    every tagged function onto its :class:`pgqueuer.PgQueuer`."""
-
-
 class ProjectConfig(FoundryConfig):
     """Top-level kiln configuration.
 
@@ -457,7 +432,6 @@ class ProjectConfig(FoundryConfig):
     only those matching this value are used."""
     package_prefix: str = "_generated"
     auth: AuthConfig | None = None
-    queue: QueueConfig | None = None
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,
