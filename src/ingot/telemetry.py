@@ -118,9 +118,6 @@ def _build_resource(
     if service_version:
         attrs["service.version"] = service_version
     if environment_env and (env_value := os.environ.get(environment_env)):
-        # Truthy check covers both "unset" (``None``) and "set but
-        # empty" (``""``) -- ``ENVIRONMENT=`` in a .env file is
-        # almost always a typo, not a real value.
         attrs["deployment.environment.name"] = env_value
     attrs.update(extra)
     return Resource.create(attrs)
