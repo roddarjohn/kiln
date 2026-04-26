@@ -308,6 +308,25 @@ class TestAuthScaffold:
                 cookie_secure=False,
             )
 
+    def test_session_store_threads_module_and_name(self):
+        """Setting session_store splits its dotted path into both files."""
+        config = MinimalConfig(
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+                session_store="myapp.revocation.revocations",
+            )
+        )
+        ctx = _project_ctx(config)
+        result = list(AuthScaffold().build(ctx, _Empty()))
+        deps = next(f for f in result if f.path == "auth/dependencies.py")
+        router = next(f for f in result if f.path == "auth/router.py")
+        assert deps.context["store_module"] == "myapp.revocation"
+        assert deps.context["store_name"] == "revocations"
+        assert router.context["store_module"] == "myapp.revocation"
+        assert router.context["store_name"] == "revocations"
+
 
 # -------------------------------------------------------------------
 # Router
