@@ -59,7 +59,7 @@ class TelemetryScaffold:
             ``True`` when the project opts into telemetry.
 
         """
-        return ctx.instance.telemetry is not None
+        return bool(ctx.instance.telemetry)
 
     def build(
         self,

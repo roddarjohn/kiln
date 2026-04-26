@@ -104,7 +104,7 @@ class AuthScaffold:
             ``True`` when ``ctx.instance.auth`` is not ``None``.
 
         """
-        return ctx.instance.auth is not None
+        return bool(ctx.instance.auth)
 
     def build(
         self,

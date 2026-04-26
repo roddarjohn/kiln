@@ -52,7 +52,7 @@ class Tracing:
         Per-resource and per-op gating lives in :meth:`build`; gating
         here too would duplicate it.
         """
-        return ctx.config.telemetry is not None
+        return bool(ctx.config.telemetry)
 
     def build(
         self,
@@ -62,46 +62,33 @@ class Tracing:
         """Prepend ``@traced_handler`` to handlers whose op opts in."""
         telemetry = ctx.config.telemetry
         assert telemetry is not None  # noqa: S101 -- guaranteed by when()
-
         resource = ctx.instance
         if resource.trace is False:
             return ()
 
-        # Pre-compute the per-op gate so we don't re-walk the
-        # operations list once per handler.
-        op_meta: dict[str, tuple[bool | None, bool]] = {
-            op.name: (op.trace, op.type == "action")
+        traced_ops = {
+            op.name
             for op in resource.operations
-        }
-
-        # Resource model name appears in span/attribute names; lower
-        # cased so dashboards see ``article.get`` not
-        # ``Article.get``.
-        _, _, model_class = resource.model.rpartition(".")
-        resource_label = model_class.lower()
-        record = "True" if telemetry.record_exceptions else "False"
-
-        for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
-            op_trace, is_action = op_meta.get(handler.op_name, (None, False))
-            if op_trace is False:
-                continue
-            project_flag = (
+            if op.trace is not False
+            and (
                 telemetry.span_per_action
-                if is_action
+                if op.type == "action"
                 else telemetry.span_per_handler
             )
-            if not project_flag:
-                continue
+        }
+        # Lowercase model class -- dashboards read ``article.get``
+        # better than ``Article.get``.
+        label = resource.model.rpartition(".")[2].lower()
+        record = telemetry.record_exceptions
 
-            span_name = f"{resource_label}.{handler.op_name}"
+        for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
+            if handler.op_name not in traced_ops:
+                continue
             handler.decorators.insert(
                 0,
-                (
-                    f'@traced_handler("{span_name}", '
-                    f'resource="{resource_label}", '
-                    f'op="{handler.op_name}", '
-                    f"record_exceptions={record})"
-                ),
+                f'@traced_handler("{label}.{handler.op_name}", '
+                f'resource="{label}", op="{handler.op_name}", '
+                f"record_exceptions={record})",
             )
             handler.extra_imports.append(("ingot.telemetry", "traced_handler"))
 

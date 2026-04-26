@@ -33,7 +33,7 @@ class Auth:
         Per-op filtering lives in :meth:`build`; gating here too
         would duplicate it.
         """
-        return ctx.config.auth is not None
+        return bool(ctx.config.auth)
 
     def build(
         self,
