@@ -202,7 +202,7 @@ def _visit(
 
 def _run_ops(
     ops: list[OperationEntry],
-    ctx: BuildContext[Any],
+    ctx: BuildContext[Any, BaseModel],
     *,
     after_children: bool,
 ) -> None:
