@@ -14,7 +14,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig, ResourceConfig
+    from kiln.config.schema import (
+        OperationConfig,
+        ProjectConfig,
+        ResourceConfig,
+    )
 
 
 @operation(
@@ -28,7 +32,7 @@ class Delete:
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[OperationConfig, ProjectConfig],
         _options: EmptyOptions,
     ) -> Iterable[object]:
         """Produce output for DELETE /{pk}.

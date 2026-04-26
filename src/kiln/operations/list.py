@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from kiln.config.schema import (
         ModifierConfig,
         OperationConfig,
+        ProjectConfig,
         ResourceConfig,
     )
 
@@ -79,7 +80,7 @@ class List:
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[OperationConfig, ProjectConfig],
         options: Options,
     ) -> Iterable[object]:
         """Emit the list schemas, serializer, handler, and test case.
@@ -193,7 +194,7 @@ class List:
 # -------------------------------------------------------------------
 
 
-def resource_model(ctx: BuildContext[ModifierConfig]) -> Name:
+def resource_model(ctx: BuildContext[ModifierConfig, ProjectConfig]) -> Name:
     """Return the model :class:`Name` for the modifier's resource."""
     resource = cast(
         "ResourceConfig",

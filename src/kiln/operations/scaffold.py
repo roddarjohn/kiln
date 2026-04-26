@@ -33,7 +33,7 @@ class Scaffold:
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce static files for db sessions.
@@ -94,7 +94,7 @@ class AuthScaffold:
       :func:`ingot.auth.issue_session` / :func:`clear_session`.
     """
 
-    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
+    def when(self, ctx: BuildContext[ProjectConfig, ProjectConfig]) -> bool:
         """Apply only when the project config has ``auth`` set.
 
         Args:
@@ -108,7 +108,7 @@ class AuthScaffold:
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce the auth router static file.

@@ -49,7 +49,7 @@ class TelemetryScaffold:
     no-op rather than a duplicate provider install.
     """
 
-    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
+    def when(self, ctx: BuildContext[ProjectConfig, ProjectConfig]) -> bool:
         """Run only when ``ctx.instance.telemetry`` is set.
 
         Args:
@@ -63,7 +63,7 @@ class TelemetryScaffold:
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce the telemetry package files.

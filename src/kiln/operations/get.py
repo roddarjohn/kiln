@@ -20,7 +20,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig, ResourceConfig
+    from kiln.config.schema import (
+        OperationConfig,
+        ProjectConfig,
+        ResourceConfig,
+    )
 
 
 @operation("get", scope="operation", dispatch_on="name")
@@ -31,7 +35,7 @@ class Get:
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[OperationConfig, ProjectConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
         """Produce output for GET /{pk}.

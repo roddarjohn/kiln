@@ -31,7 +31,7 @@ class Router:
 
     def build(
         self,
-        ctx: BuildContext[App],
+        ctx: BuildContext[App, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce this app's router-aggregation file.
@@ -91,7 +91,7 @@ class ProjectRouter:
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce the project-level router file.

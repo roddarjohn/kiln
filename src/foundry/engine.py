@@ -33,13 +33,18 @@ from foundry.store import BuildStore
 
 
 @dataclass
-class BuildContext[InstanceT]:
+class BuildContext[InstanceT, ConfigT: BaseModel]:
     """Context passed to every operation's ``build`` method.
 
-    Parameterized on the scope instance type so operations can
-    annotate e.g. ``ctx: BuildContext[ResourceConfig]`` and get
-    typed access to ``ctx.instance.*``.  The engine itself
-    builds ``BuildContext[Any]`` since it's scope-agnostic.
+    Parameterized on two types:
+
+    * ``InstanceT`` -- the scope's per-instance config (e.g.
+      ``ResourceConfig`` for resource-scope ops).
+    * ``ConfigT`` -- the project root config.  The engine itself
+      uses ``BuildContext[Any, BaseModel]`` since it's
+      target-agnostic; target-specific ops (e.g. all of kiln)
+      annotate ``BuildContext[X, ProjectConfig]`` and get typed
+      access to ``ctx.config.*`` without casting.
 
     Attributes:
         config: The full project config (top-level model).
@@ -56,7 +61,7 @@ class BuildContext[InstanceT]:
 
     """
 
-    config: BaseModel
+    config: ConfigT
     scope: Scope
     instance: InstanceT
     instance_id: str

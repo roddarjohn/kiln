@@ -16,7 +16,7 @@ the body-template path.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from foundry.operation import operation
 from kiln.operations.types import RouteHandler
@@ -46,22 +46,21 @@ class Tracing:
     apps without telemetry produce zero references to OpenTelemetry.
     """
 
-    def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
+    def when(self, ctx: BuildContext[ResourceConfig, ProjectConfig]) -> bool:
         """Run whenever telemetry is configured at the project level.
 
         Per-resource and per-op gating lives in :meth:`build`; gating
         here too would duplicate it.
         """
-        return bool(getattr(ctx.config, "telemetry", None))
+        return ctx.config.telemetry is not None
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[ResourceConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
         """Prepend ``@traced_handler`` to handlers whose op opts in."""
-        config = cast("ProjectConfig", ctx.config)
-        telemetry = config.telemetry
+        telemetry = ctx.config.telemetry
         assert telemetry is not None  # noqa: S101 -- guaranteed by when()
 
         resource = ctx.instance

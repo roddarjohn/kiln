@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ModifierConfig
+    from kiln.config.schema import ModifierConfig, ProjectConfig
 
 
 @operation(
@@ -41,7 +41,7 @@ class Filter:
 
     def build(
         self,
-        ctx: BuildContext[ModifierConfig],
+        ctx: BuildContext[ModifierConfig, ProjectConfig],
         options: FilterConfig,
     ) -> Iterable[object]:
         """Emit filter schemas and amend List's outputs.
