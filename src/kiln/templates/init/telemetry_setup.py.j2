@@ -17,9 +17,10 @@ imported into the same process) is a silent no-op rather than a
 duplicate provider install.
 
 Configuration is fixed at code-generation time (sampler, signal
-toggles, resource attributes); only the OTLP endpoint and headers
-are read from the environment via ``{{ exporter_endpoint_env }}``
-and ``{{ exporter_headers_env }}`` so the same artifact deploys
+toggles, resource attributes); the OTLP endpoint and headers are
+read from the standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` and
+``OTEL_EXPORTER_OTLP_HEADERS`` environment variables by the OTel
+SDK at exporter construction, so the same artifact deploys
 unchanged across environments.
 
 Service name: ``{{ service_name }}``.
@@ -91,8 +92,6 @@ def init_telemetry(app: FastAPI | None = None) -> None:
 {% if exporter %}
         exporter="{{ exporter }}",
 {% endif %}
-        exporter_endpoint_env="{{ exporter_endpoint_env }}",
-        exporter_headers_env="{{ exporter_headers_env }}",
     )
     trace.set_tracer_provider(tracer_provider)
 
