@@ -350,63 +350,49 @@ The flow:
 The model
 ^^^^^^^^^
 
-Add :class:`ingot.documents.DocumentMixin` to a concrete model on
-your own ``Base`` so the table lives in your metadata (foreign keys,
-alembic, multi-schema setups all keep working):
+Bind a concrete ``Document`` model to your ``Base`` once per app
+with :func:`ingot.documents.bind_document_model`:
 
 .. code-block:: python
 
    # myapp/models.py
-   from ingot.documents import DocumentMixin
+   from ingot.documents import bind_document_model
    from myapp.db import Base
 
-   class Attachment(Base, DocumentMixin):
-       __tablename__ = "attachments"
-       # add your own columns here, e.g.
-       # owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(...))
+   Document = bind_document_model(Base)
 
-The mixin supplies ``id`` (UUID PK), ``s3_key``, ``content_type``,
-``size_bytes``, ``original_filename``, ``created_at``, and
-``uploaded_at`` (NULL until the upload is confirmed).
+This creates ``class Document(Base, DocumentMixin)`` with
+``__tablename__ = "documents"`` and registers it on
+``Base.metadata`` so alembic discovers the table automatically --
+no env.py changes required.  The columns are ``id`` (UUID PK),
+``s3_key``, ``content_type``, ``size_bytes``,
+``original_filename``, ``created_at``, and ``uploaded_at`` (NULL
+until the upload is confirmed).
 
-The actions module
-^^^^^^^^^^^^^^^^^^
-
-Bind :func:`ingot.documents.make_request_upload` to your concrete
-class and re-export the rest as-is:
+For multi-table apps (rare), call ``bind_document_model`` again with
+distinct ``name=`` and ``tablename=`` per binding:
 
 .. code-block:: python
 
-   # myapp/attachments/actions.py
-   from ingot.documents import (
-       complete_upload,
-       delete_document,
-       download,
-       make_request_upload,
+   ProfileImage = bind_document_model(
+       Base, name="ProfileImage", tablename="profile_images",
    )
-   from myapp.models import Attachment
-
-   request_upload = make_request_upload(Attachment)
-
-The factory exists because creating a row needs the concrete class;
-the other three functions accept any :class:`DocumentMixin` subclass
-and the introspector matches them via the supertype check.
 
 The config
 ^^^^^^^^^^
 
-Use the ``resource.documents(actions_module)`` preset to bundle the
-get + four upload-flow actions onto the resource:
+Point a resource at the bound model and call
+``resource.documents()``:
 
 .. code-block:: jsonnet
 
    local resource = import "kiln/resources/presets.libsonnet";
 
    {
-     model: "myapp.models.Attachment",
+     model: "myapp.models.Document",
      pk: "id",
      pk_type: "uuid",
-     operations: resource.documents("myapp.attachments.actions"),
+     operations: resource.documents(),
    }
 
 Routes generated (relative to the resource prefix):
@@ -422,12 +408,18 @@ The download endpoint is ``POST`` rather than ``GET`` because the
 underlying ``action`` operation only supports POST today; the
 response carries the GET URL the client follows.
 
+The action functions in :mod:`ingot.documents` use the resource's
+mapped class via the introspector's supertype match -- object
+actions take ``document: DocumentMixin`` (any concrete subclass
+matches the instance), and ``request_upload`` takes
+``model_cls: type[DocumentMixin]`` so the handler can plug in the
+class for the ``INSERT``.  No per-resource glue module is needed.
+
 Customizing the get fields:
 
 .. code-block:: jsonnet
 
    resource.documents(
-     "myapp.attachments.actions",
      fields=[
        { name: "id", type: "uuid" },
        { name: "original_filename", type: "str" },
@@ -442,7 +434,7 @@ want to attach your own ``get`` op with extra non-mixin fields):
 
    operations: [
      { name: "get", fields: [...own fields including custom columns...] },
-   ] + resource.documents("...", include_get=false)
+   ] + resource.documents(include_get=false)
 
 S3 configuration
 ^^^^^^^^^^^^^^^^

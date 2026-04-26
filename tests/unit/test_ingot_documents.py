@@ -17,11 +17,12 @@ from ingot.documents import (
     DocumentMixin,
     S3Storage,
     UploadRequest,
+    bind_document_model,
     complete_upload,
     default_storage,
     delete_document,
     download,
-    make_request_upload,
+    request_upload,
 )
 
 
@@ -95,6 +96,57 @@ def test_mixin_composes_with_extra_columns():
     cols = _columns(_Attachment)
     assert "owner_id" in cols
     assert "s3_key" in cols
+
+
+# --- bind_document_model -------------------------------------------------
+
+
+def test_bind_document_model_creates_mapped_class():
+    class B(DeclarativeBase):
+        pass
+
+    doc = bind_document_model(B)
+
+    assert doc.__name__ == "Document"
+    assert doc.__tablename__ == "documents"
+    assert issubclass(doc, DocumentMixin)
+    assert issubclass(doc, B)
+    cols = _columns(doc)
+    assert {"id", "s3_key", "uploaded_at"} <= set(cols)
+
+
+def test_bind_document_model_registers_on_user_metadata():
+    class B(DeclarativeBase):
+        pass
+
+    doc = bind_document_model(B)
+
+    # Alembic discovery works because the table lives on the user's
+    # Base.metadata, not a separate one ingot owns.
+    assert "documents" in B.metadata.tables
+    assert B.metadata.tables["documents"] is doc.__table__
+
+
+def test_bind_document_model_supports_multiple_bindings():
+    class B(DeclarativeBase):
+        pass
+
+    attachment = bind_document_model(
+        B,
+        name="Attachment",
+        tablename="attachments",
+    )
+    profile_image = bind_document_model(
+        B,
+        name="ProfileImage",
+        tablename="profile_images",
+    )
+
+    assert attachment.__name__ == "Attachment"
+    assert attachment.__tablename__ == "attachments"
+    assert profile_image.__name__ == "ProfileImage"
+    assert profile_image.__tablename__ == "profile_images"
+    assert {"attachments", "profile_images"} <= set(B.metadata.tables)
 
 
 # --- S3Storage -------------------------------------------------------------
@@ -254,14 +306,13 @@ async def test_request_upload_inserts_pending_row(fake_db, fake_storage):
     from sqlalchemy.sql.dml import Insert
 
     fake_storage.presigned_put_url.return_value = "https://s3/put"
-    request_upload = make_request_upload(_Doc)
 
     body = UploadRequest(
         filename="report.pdf",
         content_type="application/pdf",
         size_bytes=1234,
     )
-    response = await request_upload(db=fake_db, body=body)
+    response = await request_upload(model_cls=_Doc, db=fake_db, body=body)
 
     stmt = _executed_stmt(fake_db)
     assert isinstance(stmt, Insert)

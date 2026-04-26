@@ -53,45 +53,40 @@
 
   // Bundle a get + the four document-flow actions onto a resource.
   //
-  // The consumer points ``actions_module`` at a project-local module
-  // that re-exports the ingot.documents helpers, binding
-  // ``request_upload`` to their concrete model class:
+  // The consumer creates a Document model on their own ``Base``
+  // once per app:
   //
-  //   # myapp/attachments/actions.py
-  //   from ingot.documents import (
-  //     make_request_upload, complete_upload, download, delete_document,
-  //   )
-  //   from myapp.models import Attachment
+  //   # myapp/models.py
+  //   from ingot.documents import bind_document_model
+  //   from myapp.db import Base
   //
-  //   request_upload = make_request_upload(Attachment)
+  //   Document = bind_document_model(Base)
   //
   // and then in their config:
   //
   //   resources: [
   //     {
-  //       model: "myapp.models.Attachment",
+  //       model: "myapp.models.Document",
   //       pk: "id", pk_type: "uuid",
-  //       operations: resource.documents("myapp.attachments.actions"),
+  //       operations: resource.documents(),
   //     },
   //   ],
   //
   // Pass ``fields`` to override the get-op field list (default is
   // the DocumentMixin column set in ``$.document_fields``); pass
-  // an explicit ``operations: [...] + resource.documents(..., get=null)``
-  // pattern by setting ``include_get=false`` if the consumer wants
-  // to define their own get separately.
+  // ``include_get=false`` to skip the get entirely (e.g. when the
+  // consumer wants to define their own with extra columns).
   //
   // Routes generated (relative to the resource prefix):
   //   GET  /{pk}                    -- get (DocumentMixin columns)
   //   POST /upload                  -- request_upload (collection)
-  //   POST /{pk}/complete           -- complete_upload (object)
+  //   POST /{pk}/complete           -- complete_upload (object; 204)
   //   POST /{pk}/download           -- download (object; POST is a
   //                                   limitation of actions today --
   //                                   the response is the GET URL)
   //   POST /{pk}/delete-document    -- delete_document (object;
   //                                   cascades S3 + row delete; 204)
   documents(
-    actions_module,
     require_auth=true,
     fields=null,
     include_get=true,
@@ -107,22 +102,22 @@
     ) + [
       $.action(
         name="upload",
-        fn=actions_module + ".request_upload",
+        fn="ingot.documents.request_upload",
         require_auth=require_auth,
       ),
       $.action(
         name="complete",
-        fn=actions_module + ".complete_upload",
+        fn="ingot.documents.complete_upload",
         require_auth=require_auth,
       ),
       $.action(
         name="download",
-        fn=actions_module + ".download",
+        fn="ingot.documents.download",
         require_auth=require_auth,
       ),
       $.action(
         name="delete_document",
-        fn=actions_module + ".delete_document",
+        fn="ingot.documents.delete_document",
         require_auth=require_auth,
       ),
     ],

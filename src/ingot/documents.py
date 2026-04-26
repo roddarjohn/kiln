@@ -4,13 +4,15 @@ A *document* is a binary blob (image, PDF, attachment) tracked by a
 metadata row in the consumer's database and a corresponding object
 in S3-compatible storage.  This module ships three pieces:
 
-* :class:`DocumentMixin` -- a SQLAlchemy 2.0 mixin that supplies
-  the columns every document row needs (``id``, ``s3_key``,
+* :class:`DocumentMixin` + :func:`bind_document_model` -- the mixin
+  supplies the columns every document row needs (``id``, ``s3_key``,
   ``content_type``, ``size_bytes``, ``original_filename``,
-  ``created_at``, ``uploaded_at``).  Consumers attach it to a
-  concrete model on their own ``Base`` so the table lives in their
-  metadata -- foreign keys, alembic, multi-schema setups all keep
-  working.
+  ``created_at``, ``uploaded_at``); the factory builds a concrete
+  mapped class on the consumer's ``DeclarativeBase`` so the table
+  lives in their metadata (alembic discovery, FKs, multi-schema all
+  keep working).  Typical use is one ``Document = bind_document_model(
+  Base)`` per app; multi-table apps pass ``name=`` and
+  ``tablename=`` for additional bindings.
 
 * :class:`S3Storage` -- a small wrapper around ``boto3`` that
   exposes the three operations a presigned-upload flow actually
@@ -19,15 +21,16 @@ in S3-compatible storage.  This module ships three pieces:
   testable; :func:`default_storage` builds one from ``KILN_S3_*``
   env vars for the common case.
 
-* Action functions -- :func:`make_request_upload`,
+* Action functions -- :func:`request_upload`,
   :func:`complete_upload`, :func:`download`, and
-  :func:`delete_document`.  These are shaped to plug into kiln's
+  :func:`delete_document`.  These plug into kiln's
   :class:`~kiln.operations.action.Action` operation: the consumer
-  re-exports them from a project-local actions module and points
-  ``resource.action`` entries at them.  The
-  :class:`DocumentMixin`-typed object-action params match any
-  concrete subclass via the introspector's supertype check, so the
-  same four functions serve every document resource in the project.
+  points ``resource.action`` entries at them directly (no
+  per-resource wrapper module).  The :class:`DocumentMixin`-typed
+  parameters (instance for object actions, class for collection
+  actions) match any concrete subclass via the introspector's
+  supertype check, so the same four functions serve every document
+  resource.
 
 The split is deliberate: the mixin is pure SQLAlchemy and has no
 runtime dependency on AWS, so consumers who only want the metadata
@@ -41,7 +44,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import boto3
 from fastapi import HTTPException, status
@@ -50,7 +53,7 @@ from sqlalchemy import BigInteger, DateTime, String, delete, insert, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,6 +130,58 @@ class DocumentMixin:
     )
     """When the upload was confirmed.  ``None`` means pending --
     metadata exists but the blob may or may not be in S3."""
+
+
+def bind_document_model(
+    base: type,
+    *,
+    name: str = "Document",
+    tablename: str = "documents",
+) -> type[DocumentMixin]:
+    """Build a concrete document model on the consumer's ``Base``.
+
+    Returns a freshly-constructed subclass of *base* and
+    :class:`DocumentMixin` named *name* with ``__tablename__`` set
+    to *tablename*.  The class is registered on ``base.metadata``
+    so the consumer's alembic env (which already imports their
+    models module to populate ``target_metadata``) picks the table
+    up automatically -- no env.py changes required.
+
+    Typical use is one call per app:
+
+    .. code-block:: python
+
+        # myapp/models.py
+        from ingot.documents import bind_document_model
+        from myapp.db import Base
+
+        Document = bind_document_model(Base)
+
+    For multi-table apps, pass distinct *name* and *tablename* per
+    binding:
+
+    .. code-block:: python
+
+        ProfileImage = bind_document_model(
+            Base, name="ProfileImage", tablename="profile_images",
+        )
+
+    Args:
+        base: The consumer's :class:`sqlalchemy.orm.DeclarativeBase`
+            subclass.  The returned class is mapped on
+            ``base.metadata``.
+        name: Class name for the generated type.  Affects the dotted
+            path the kiln config points at
+            (``model: "myapp.models.{name}"``).
+        tablename: Database table name.  Must be unique within
+            ``base.metadata``.
+
+    Returns:
+        The newly-built mapped class.
+
+    """
+    cls = type(name, (base, DocumentMixin), {"__tablename__": tablename})
+    return cast("type[DocumentMixin]", cls)
 
 
 @dataclass
@@ -272,58 +327,46 @@ class DownloadResponse(BaseModel):
 # --- Action functions -----------------------------------------------------
 
 
-def make_request_upload(
+async def request_upload(
+    *,
     model_cls: type[DocumentMixin],
-) -> Callable[..., Awaitable[UploadResponse]]:
-    """Build the request-upload collection action for *model_cls*.
+    db: AsyncSession,
+    body: UploadRequest,
+) -> UploadResponse:
+    """Reserve a key and return a presigned PUT URL.
 
-    Returned as a factory because creating a row needs the concrete
-    SQLAlchemy class; collection actions only receive ``db`` and
-    ``body`` from the action handler, so the closure binds the
-    class by reference.
+    The row is created with ``uploaded_at=NULL``; the client
+    confirms the actual byte upload via :func:`complete_upload`.
 
-    Consumers re-export the result from a project-local actions
-    module and point a :func:`resource.action` entry at it -- the
-    introspector reads this closure's signature, sees the
-    :class:`UploadRequest` body and no model param, and emits a
-    ``POST /upload`` route.
+    *model_cls* is supplied by the action handler, which detects
+    the ``type[DocumentMixin]`` annotation and passes the
+    resource's mapped class.  No per-resource factory binding
+    needed -- consumers point :func:`resource.action` at this
+    function directly.
     """
-
-    async def request_upload(
-        *,
-        db: AsyncSession,
-        body: UploadRequest,
-    ) -> UploadResponse:
-        """Reserve a key and return a presigned PUT URL.
-
-        The row is created with ``uploaded_at=NULL``; the client
-        confirms the actual byte upload via :func:`complete_upload`.
-        """
-        document_id = uuid.uuid4()
-        # Prefix the key with the document id so collisions on the
-        # consumer-supplied filename can't reach across rows.
-        key = f"{document_id.hex}/{body.filename}"
-        await db.execute(
-            insert(model_cls).values(
-                id=document_id,
-                s3_key=key,
-                content_type=body.content_type,
-                size_bytes=body.size_bytes,
-                original_filename=body.filename,
-            )
-        )
-
-        storage = default_storage()
-        upload_url = storage.presigned_put_url(
-            key,
-            content_type=body.content_type,
-        )
-        return UploadResponse(
+    document_id = uuid.uuid4()
+    # Prefix the key with the document id so collisions on the
+    # consumer-supplied filename can't reach across rows.
+    key = f"{document_id.hex}/{body.filename}"
+    await db.execute(
+        insert(model_cls).values(
             id=document_id,
-            upload_url=upload_url,
+            s3_key=key,
+            content_type=body.content_type,
+            size_bytes=body.size_bytes,
+            original_filename=body.filename,
         )
+    )
 
-    return request_upload
+    storage = default_storage()
+    upload_url = storage.presigned_put_url(
+        key,
+        content_type=body.content_type,
+    )
+    return UploadResponse(
+        id=document_id,
+        upload_url=upload_url,
+    )
 
 
 async def complete_upload(

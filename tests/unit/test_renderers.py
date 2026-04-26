@@ -937,6 +937,7 @@ def test_action_template_returns_none_emits_204_and_no_return():
         is_object_action=True,
         fn_name="archive",
         model_param_name="post",
+        model_class_param_name=None,
         has_request_body=False,
         returns_none=True,
     )
@@ -957,6 +958,7 @@ def test_action_template_returns_body_keeps_return_result():
         is_object_action=True,
         fn_name="publish",
         model_param_name="post",
+        model_class_param_name=None,
         has_request_body=False,
         returns_none=False,
     )
@@ -965,6 +967,37 @@ def test_action_template_returns_body_keeps_return_result():
     import ast
 
     ast.parse(rendered)
+
+
+def test_action_template_passes_model_class_kwarg():
+    """Collection action with ``model_cls: type[X]`` gets the resource model."""
+    rendered = _render_action_template(
+        is_object_action=False,
+        fn_name="request_upload",
+        model_param_name=None,
+        model_class_param_name="model_cls",
+        has_request_body=True,
+        returns_none=False,
+    )
+    expected = "result = await request_upload(db=db, model_cls=Post, body=body)"
+    assert expected in rendered
+    import ast
+
+    ast.parse(rendered)
+
+
+def test_action_template_omits_model_class_kwarg_when_unset():
+    """Without a ``type[X]`` param, no ``model_cls=`` kwarg appears."""
+    rendered = _render_action_template(
+        is_object_action=False,
+        fn_name="bulk_import",
+        model_param_name=None,
+        model_class_param_name=None,
+        has_request_body=True,
+        returns_none=False,
+    )
+    assert "model_cls=" not in rendered
+    assert "result = await bulk_import(db=db, body=body)" in rendered
 
 
 def test_response_schema_name_list_envelope():

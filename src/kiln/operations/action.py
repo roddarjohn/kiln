@@ -124,6 +124,7 @@ class Action:
                 "is_object_action": info.is_object_action,
                 "fn_name": fn_name,
                 "model_param_name": info.model_param_name,
+                "model_class_param_name": info.model_class_param_name,
                 "has_request_body": info.request_class is not None,
                 "returns_none": info.returns_none,
             },

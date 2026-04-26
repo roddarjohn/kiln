@@ -138,3 +138,24 @@ def test_introspect_collection_action_returning_none():
     assert info.is_object_action is False
     assert info.returns_none is True
     assert info.response_class is None
+
+
+def test_introspect_collection_action_with_model_class_param():
+    """``model_cls: type[StubMixin]`` is detected as the model-class param."""
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_with_model_class",
+        f"{_STUB}.StubModelWithMixin",
+    )
+    assert info.is_object_action is False  # no instance param
+    assert info.model_class_param_name == "model_cls"
+    assert info.request_class == "StubRequest"
+    assert info.model_param_name is None
+
+
+def test_introspect_no_model_class_param_when_supertype_mismatch():
+    """``type[StubMixin]`` does NOT match a model that doesn't extend it."""
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_with_model_class",
+        f"{_STUB}.StubModel",  # plain StubModel, not StubModelWithMixin
+    )
+    assert info.model_class_param_name is None

@@ -121,3 +121,13 @@ async def collection_action_returns_none(
     db: AsyncSession,
 ) -> None:
     """Collection action with no body -- 204 No Content."""
+
+
+async def collection_action_with_model_class(
+    *,
+    model_cls: type[StubMixin],
+    db: AsyncSession,
+    body: StubRequest,
+) -> StubResponse:
+    """Collection action that wants the resource's mapped class."""
+    return StubResponse(ok=True)

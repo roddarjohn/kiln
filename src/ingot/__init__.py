@@ -25,11 +25,12 @@ from ingot.documents import (
     S3Storage,
     UploadRequest,
     UploadResponse,
+    bind_document_model,
     complete_upload,
     default_storage,
     delete_document,
     download,
-    make_request_upload,
+    request_upload,
 )
 from ingot.filters import FilterOp, apply_filters
 from ingot.ordering import SortDirection, apply_ordering
@@ -50,6 +51,7 @@ __all__ = [
     "apply_offset_pagination",
     "apply_ordering",
     "assert_rowcount",
+    "bind_document_model",
     "clear_session",
     "complete_upload",
     "decode_jwt",
@@ -59,6 +61,6 @@ __all__ = [
     "encode_jwt",
     "get_object_from_query_or_404",
     "issue_session",
-    "make_request_upload",
+    "request_upload",
     "session_auth",
 ]

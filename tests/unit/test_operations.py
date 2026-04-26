@@ -1596,6 +1596,7 @@ class TestAction:
 
         info = IntrospectedAction(
             model_param_name="post",
+            model_class_param_name=None,
             request_class="PostRequest",
             request_module="blog.actions",
             response_class="PostResult",
@@ -1640,6 +1641,7 @@ class TestAction:
 
         info = IntrospectedAction(
             model_param_name=None,
+            model_class_param_name=None,
             request_class=None,
             request_module=None,
             response_class="BulkResult",
@@ -1677,6 +1679,7 @@ class TestAction:
 
         info = IntrospectedAction(
             model_param_name="post",
+            model_class_param_name=None,
             request_class=None,
             request_module=None,
             response_class=None,
@@ -1717,6 +1720,7 @@ class TestAction:
 
         info = IntrospectedAction(
             model_param_name="post",
+            model_class_param_name=None,
             request_class=None,
             request_module=None,
             response_class="PostResource",
@@ -1746,6 +1750,43 @@ class TestAction:
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_success == 202
 
+    def test_action_model_class_param_propagates_to_body_context(self):
+        """``type[X]`` param name flows to the template so it can pass it."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name=None,
+            model_class_param_name="model_cls",
+            request_class="UploadRequest",
+            request_module="ingot.documents",
+            response_class="UploadResponse",
+            response_module="ingot.documents",
+        )
+
+        op_config = OperationConfig(
+            name="upload",
+            type="action",
+            fn="ingot.documents.request_upload",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="ingot.documents.request_upload")
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["model_class_param_name"] == "model_cls"
+        # Collection action: no PK in path.
+        assert handler.path == "/upload"
+
     def test_action_status_code_overrides_default_204(self):
         """Override beats the ``-> None`` 204 default too."""
         from kiln.operations._introspect import IntrospectedAction
@@ -1754,6 +1795,7 @@ class TestAction:
 
         info = IntrospectedAction(
             model_param_name="post",
+            model_class_param_name=None,
             request_class=None,
             request_module=None,
             response_class=None,

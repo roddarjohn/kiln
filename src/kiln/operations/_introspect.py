@@ -30,6 +30,12 @@ class IntrospectedAction:
         model_param_name: Name of the parameter holding the model
             instance, or ``None`` if the function doesn't take one
             (collection action).
+        model_class_param_name: Name of the parameter typed
+            ``type[X]`` where the resource model is a subclass of
+            X.  The generated handler passes the resource's mapped
+            class as that kwarg, so a collection action can INSERT
+            without a per-resource factory binding.  ``None`` when
+            no such parameter exists.
         request_class: Name of the Pydantic request-body class, if
             any.
         request_module: Module containing ``request_class``.
@@ -42,6 +48,7 @@ class IntrospectedAction:
     """
 
     model_param_name: str | None
+    model_class_param_name: str | None
     request_class: str | None
     request_module: str | None
     response_class: str | None
@@ -95,6 +102,7 @@ def introspect_action_fn(
     sig = inspect.signature(fn)
 
     model_param_name: str | None = None
+    model_class_param_name: str | None = None
     request_class: str | None = None
     request_module: str | None = None
 
@@ -106,6 +114,10 @@ def introspect_action_fn(
 
         if _matches_model(hint, model_cls):
             model_param_name = param_name
+            continue
+
+        if _matches_model_class_param(hint, model_cls):
+            model_class_param_name = param_name
             continue
 
         if not _is_pydantic_model(hint):
@@ -125,6 +137,7 @@ def introspect_action_fn(
 
     return IntrospectedAction(
         model_param_name=model_param_name,
+        model_class_param_name=model_class_param_name,
         request_class=request_class,
         request_module=request_module,
         response_class=response_class,
@@ -168,6 +181,30 @@ def _resolve_hints(
     except Exception as exc:
         msg = f"Cannot resolve type annotations for '{fn_dotted}': {exc}"
         raise ValueError(msg) from exc
+
+
+def _matches_model_class_param(hint: object, model_cls: object) -> bool:
+    """Return ``True`` when *hint* is ``type[X]`` and *model_cls* is X or a sub.
+
+    Counterpart to :func:`_matches_model` for the *class* (not the
+    instance) of the resource model.  Lets a generic collection
+    action declare ``model_cls: type[DocumentMixin]`` and have the
+    handler plug in the concrete mapped class -- no per-resource
+    factory binding required.
+
+    The match goes through :func:`typing.get_origin`/``get_args`` so
+    only true ``type[X]`` parameterizations qualify; a bare ``type``
+    annotation doesn't, and neither does ``Type[X]`` from older
+    pre-3.9 code paths because ``typing.Type`` resolves to ``type``
+    under modern annotation evaluation.
+    """
+    origin = typing.get_origin(hint)
+    if origin is not type:
+        return False
+    args = typing.get_args(hint)
+    if len(args) != 1:
+        return False
+    return _matches_model(args[0], model_cls)
 
 
 def _matches_model(hint: object, model_cls: object) -> bool:
