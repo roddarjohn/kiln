@@ -112,8 +112,8 @@ sampled requests while keeping ingest volume manageable.
 ## Exporter
 
 By default the generated `init_telemetry` does not pin a transport --
-it builds the OTLP HTTP exporter with library defaults so the standard
-OTel environment variables take effect at runtime:
+it instantiates the OTLP HTTP exporter with no arguments, and the OTel
+SDK reads the standard environment variables itself at construct time:
 
 ```sh
 OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.com
@@ -123,6 +123,9 @@ OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer abc123
 This keeps the same artifact deployable across environments.  Override
 with `exporter: 'otlp_grpc' | 'console' | 'none'` if you want to pin a
 specific transport at code-generation time.
+
+There are no kiln-side knobs for the env-var *names* — point your
+deployment at the standard OTel ones.
 
 `otlp_grpc` is additive: install it alongside the base extra,
 

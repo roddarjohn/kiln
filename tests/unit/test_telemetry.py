@@ -51,8 +51,6 @@ class TestTelemetryConfigDefaults:
         assert cfg.sampler == "parentbased_always_on"
         assert cfg.sampler_ratio is None
         assert cfg.exporter is None
-        assert cfg.exporter_endpoint_env == "OTEL_EXPORTER_OTLP_ENDPOINT"
-        assert cfg.exporter_headers_env == "OTEL_EXPORTER_OTLP_HEADERS"
         assert cfg.environment_env == "ENVIRONMENT"
         assert cfg.resource_attributes == {}
 

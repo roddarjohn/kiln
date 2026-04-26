@@ -233,7 +233,9 @@ def _handler_fragment(
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
 
-    _apply_tracing_decorator(handler, ctx, info, imports)
+    _apply_tracing_decorator(
+        handler=handler, ctx=ctx, info=info, imports=imports
+    )
 
     if handler.status_code in (201, 204):
         imports.add_from("starlette", "status")
@@ -277,12 +279,13 @@ def _handler_fragment(
 
 
 def _apply_tracing_decorator(
+    *,
     handler: RouteHandler,
     ctx: RenderCtx,
     info: _ResourceInfo,
     imports: ImportCollector,
 ) -> None:
-    """Prepend ``@traced_handler`` / ``@traced_action`` when enabled.
+    """Prepend a ``@traced_handler`` decorator when telemetry is on.
 
     Composes the project / resource / op trace flags:
 
