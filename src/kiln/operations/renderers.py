@@ -233,7 +233,7 @@ def _handler_fragment(
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
 
-    if handler.status_code in (201, 204):
+    if _status_suffix(handler.status_code) is not None:
         imports.add_from("starlette", "status")
 
     schema_mod = prefix_import(

@@ -23,6 +23,7 @@ from kiln.config.schema import (
     PaginateConfig,
     ProjectConfig,
     ResourceConfig,
+    TelemetryConfig,
 )
 from kiln.operations.create import Create
 from kiln.operations.delete import Delete
@@ -53,6 +54,7 @@ class MinimalConfig(BaseModel):
     """Minimal project config for tests."""
 
     auth: AuthConfig | None = None
+    telemetry: TelemetryConfig | None = None
     databases: list[DatabaseConfig] = []
     package_prefix: str = "_generated"
     apps: list[object] = []

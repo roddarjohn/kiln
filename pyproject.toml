@@ -26,6 +26,30 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ``kiln-generator[opentelemetry]`` installs the OTel runtime
+# packages that ``ingot.telemetry`` imports.  Generated apps with
+# telemetry on need this set; apps without telemetry never import
+# ``ingot.telemetry`` and don't need it.  Pinned as a coherent
+# release pair -- bump core (1.x) and instrumentation (0.x.b)
+# packages in lockstep when upgrading.
+opentelemetry = [
+  "opentelemetry-api==1.29.0",
+  "opentelemetry-sdk==1.29.0",
+  "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-instrumentation-fastapi==0.50b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
+  "opentelemetry-instrumentation-requests==0.50b0",
+]
+# ``kiln-generator[opentelemetry-grpc]`` is additive on top of the
+# ``opentelemetry`` extra: it adds the gRPC OTLP exporter that the
+# generated ``init_telemetry`` reaches for when ``exporter:
+# 'otlp_grpc'``.  Split out because the gRPC stack pulls in
+# protobuf and grpc-io, which together are roughly an order of
+# magnitude heavier than the HTTP transport and aren't useful to
+# consumers staying on OTLP/HTTP.  Install both extras together::
+#
+#     pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
+opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.29.0"]
 files = ["boto3>=1.34"]
 
 [project.urls]
@@ -47,6 +71,7 @@ kiln = "kiln.target:target"
 [project.entry-points."foundry.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
 auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
+telemetry_scaffold = "kiln.operations.telemetry:TelemetryScaffold"
 get = "kiln.operations.get:Get"
 list = "kiln.operations.list:List"
 filter = "kiln.operations.filter:Filter"
@@ -57,6 +82,7 @@ update = "kiln.operations.update:Update"
 delete = "kiln.operations.delete:Delete"
 action = "kiln.operations.action:Action"
 auth = "kiln.operations.auth:Auth"
+tracing = "kiln.operations.tracing:Tracing"
 router = "kiln.operations.routing:Router"
 project_router = "kiln.operations.routing:ProjectRouter"
 
@@ -75,6 +101,17 @@ dev = [
   "coverage[toml]>=7.0",
   "tox>=4.49.1",
   "tox-uv>=1.33.2",
+  # OTel mirrored from the ``opentelemetry`` /
+  # ``opentelemetry-grpc`` extras so the dev test suite can import
+  # ``ingot.telemetry`` and exercise the gRPC exporter path.  Keep
+  # the pins in lockstep with the matching extras above.
+  "opentelemetry-api==1.29.0",
+  "opentelemetry-sdk==1.29.0",
+  "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-exporter-otlp-proto-grpc==1.29.0",
+  "opentelemetry-instrumentation-fastapi==0.50b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
+  "opentelemetry-instrumentation-requests==0.50b0",
   # Ingot's files extra ships boto3 as optional; CI installs it
   # here so the full test suite can run without an explicit --extra.
   "boto3>=1.34",

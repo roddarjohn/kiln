@@ -4,6 +4,16 @@ Mount this in your application::
 
     from .routes import router
     app.include_router(router)
+{% if has_telemetry %}
+
+OpenTelemetry is enabled.  Call ``init_telemetry`` from the same
+entry point, before mounting the router::
+
+    from {{ telemetry_module }} import init_telemetry
+
+    init_telemetry(app)
+    app.include_router(router)
+{% endif %}
 {% endset %}
 {{ file_header("Root API router — mounts every app router", extra=_extra) }}
 
