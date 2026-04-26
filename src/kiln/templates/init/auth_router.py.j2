@@ -53,7 +53,7 @@ from {{ store_module }} import {{ store_name }}
 {% endif %}
 
 {% if has_telemetry %}
-from {{ telemetry_module }}.decorators import scrub_current_span_attributes
+from ingot.telemetry import scrub_current_span_attributes
 {% endif %}
 
 from .dependencies import get_session

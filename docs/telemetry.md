@@ -96,11 +96,19 @@ OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer abc123
 
 This keeps the same artifact deployable across environments.  Override
 with `exporter: 'otlp_grpc' | 'console' | 'none'` if you want to pin a
-specific transport at code-generation time.  Note that `otlp_grpc`
-requires you to also install
-`opentelemetry-exporter-otlp-proto-grpc==1.29.0` on top of the
-generated requirements file -- the gRPC stack is heavy and is not
-included in the default pin set.
+specific transport at code-generation time.
+
+`otlp_grpc` is additive: install it alongside the base extra,
+
+```sh
+pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
+```
+
+The gRPC exporter lives in its own extra because it pulls in protobuf
+and grpc-io -- roughly an order of magnitude heavier than the HTTP
+transport.  Generated code imports the gRPC exporter lazily, so apps
+that stay on OTLP/HTTP never load the gRPC stack even when both
+extras are present.
 
 ## Per-resource and per-op opt-out
 
@@ -173,6 +181,12 @@ opentelemetry-sdk==1.29.0
 opentelemetry-exporter-otlp-proto-http==1.29.0
 opentelemetry-instrumentation-fastapi==0.50b0
 opentelemetry-instrumentation-sqlalchemy==0.50b0
+```
+
+The optional `kiln-generator[opentelemetry-grpc]` extra adds:
+
+```
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
 ```
 
 The instrumentation packages ride a separate `0.x.b` version line that

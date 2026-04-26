@@ -1,21 +1,23 @@
 """Telemetry scaffold operation.
 
-Generates the ``telemetry/`` package in the project's output tree
-when :attr:`~kiln.config.schema.ProjectConfig.telemetry` is set.
-The package contains the OpenTelemetry initialisation entry point
-(``setup.py``) and the per-handler tracing decorators
-(``decorators.py``).
+Generates ``telemetry.py`` in the project's output tree when
+:attr:`~kiln.config.schema.ProjectConfig.telemetry` is set.  The
+file exposes a single ``init_telemetry(app)`` entry point that
+builds and installs the configured providers and wires the
+requested instrumentors.
+
+Per-handler tracing decorators live in :mod:`ingot.telemetry` and
+are imported directly by the generated route modules -- no local
+re-export module sits between them.  Likewise OTel runtime
+packages aren't emitted as a generated ``requirements.txt``;
+generated apps already depend on ``kiln-generator`` (they import
+from ``ingot``), so installing ``kiln-generator[opentelemetry]``
+is enough.
 
 The op follows the same shape as
 :class:`~kiln.operations.scaffold.AuthScaffold` -- gated by a
 :meth:`when` predicate so a project without telemetry produces
 zero references to OpenTelemetry anywhere in the generated tree.
-
-OTel runtime packages aren't emitted as a generated
-``requirements.txt`` -- generated apps already depend on
-``kiln-generator`` (they import from ``ingot``), so the consumer
-simply installs ``kiln-generator[opentelemetry]`` and gets the
-pinned package set from there.
 """
 
 from __future__ import annotations
@@ -36,17 +38,15 @@ if TYPE_CHECKING:
 
 @operation("telemetry_scaffold", scope="project")
 class TelemetryScaffold:
-    """Generate the ``telemetry/`` package.
+    """Generate ``telemetry.py``.
 
-    Emits three :class:`~foundry.outputs.StaticFile` outputs:
-
-    * ``telemetry/__init__.py`` -- package marker.
-    * ``telemetry/setup.py`` -- ``init_telemetry(app)`` builds and
-      installs the configured tracer / meter / logger providers and
-      wires the requested instrumentors.
-    * ``telemetry/decorators.py`` -- re-exports the per-handler
-      tracing decorators from :mod:`ingot.telemetry` so generated
-      route modules import them via a stable local path.
+    A single :class:`~foundry.outputs.StaticFile` carrying the
+    ``init_telemetry(app)`` entry point.  ``init_telemetry`` builds
+    the configured tracer / meter / logger providers, installs them
+    on the OTel globals, and wires the requested instrumentors.
+    The generated function is decorated with
+    :func:`ingot.utils.run_once` so a second call is a silent
+    no-op rather than a duplicate provider install.
     """
 
     def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
@@ -87,37 +87,25 @@ class TelemetryScaffold:
             f"{package_prefix}.telemetry" if package_prefix else "telemetry"
         )
 
-        setup_context = {
-            "telemetry_module": telemetry_module,
-            "service_name": telemetry.service_name,
-            "service_version": telemetry.service_version,
-            "environment": telemetry.environment,
-            "resource_attributes": dict(telemetry.resource_attributes),
-            "traces": telemetry.traces,
-            "metrics": telemetry.metrics,
-            "logs": telemetry.logs,
-            "instrument_fastapi": telemetry.instrument_fastapi,
-            "instrument_httpx": telemetry.instrument_httpx,
-            "instrument_logging": telemetry.instrument_logging,
-            "sampler": telemetry.sampler,
-            "sampler_ratio": telemetry.sampler_ratio,
-            "exporter": telemetry.exporter,
-            "exporter_endpoint_env": telemetry.exporter_endpoint_env,
-            "exporter_headers_env": telemetry.exporter_headers_env,
-        }
-
         yield StaticFile(
-            path="telemetry/__init__.py",
-            template="",
-            context={},
-        )
-        yield StaticFile(
-            path="telemetry/setup.py",
+            path="telemetry.py",
             template="init/telemetry_setup.py.j2",
-            context=setup_context,
-        )
-        yield StaticFile(
-            path="telemetry/decorators.py",
-            template="init/telemetry_decorators.py.j2",
-            context={"telemetry_module": telemetry_module},
+            context={
+                "telemetry_module": telemetry_module,
+                "service_name": telemetry.service_name,
+                "service_version": telemetry.service_version,
+                "environment": telemetry.environment,
+                "resource_attributes": dict(telemetry.resource_attributes),
+                "traces": telemetry.traces,
+                "metrics": telemetry.metrics,
+                "logs": telemetry.logs,
+                "instrument_fastapi": telemetry.instrument_fastapi,
+                "instrument_httpx": telemetry.instrument_httpx,
+                "instrument_logging": telemetry.instrument_logging,
+                "sampler": telemetry.sampler,
+                "sampler_ratio": telemetry.sampler_ratio,
+                "exporter": telemetry.exporter,
+                "exporter_endpoint_env": telemetry.exporter_endpoint_env,
+                "exporter_headers_env": telemetry.exporter_headers_env,
+            },
         )

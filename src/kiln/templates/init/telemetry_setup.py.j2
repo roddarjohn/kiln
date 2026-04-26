@@ -11,6 +11,11 @@ constructed and before it is mounted::
     app = FastAPI()
     init_telemetry(app)
 
+The function is decorated with :func:`ingot.utils.run_once`, so
+a second invocation (e.g. a test reload, or a second kiln tree
+imported into the same process) is a silent no-op rather than a
+duplicate provider install.
+
 Configuration is fixed at code-generation time (sampler, signal
 toggles, resource attributes); only the OTLP endpoint and headers
 are read from the environment via ``{{ exporter_endpoint_env }}``
@@ -46,6 +51,7 @@ from ingot.telemetry import (
     build_logger_provider,
 {% endif %}
 )
+from ingot.utils import run_once
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -57,12 +63,8 @@ _RESOURCE_ATTRIBUTES: dict[str, str] = {
 {% endfor %}
 }
 
-_INITIALISED = False
-"""Module-level guard so a second ``init_telemetry`` call (e.g.
-test reload) is a no-op rather than installing duplicate
-providers."""
 
-
+@run_once
 def init_telemetry(app: FastAPI | None = None) -> None:
     """Install OpenTelemetry providers and wire instrumentors.
 
@@ -71,11 +73,6 @@ def init_telemetry(app: FastAPI | None = None) -> None:
             HTTP instrumentation is skipped -- pass the app to get
             request spans (the typical case).
     """
-    global _INITIALISED
-    if _INITIALISED:
-        return
-    _INITIALISED = True
-
     tracer_provider = build_tracer_provider(
         service_name="{{ service_name }}",
 {% if service_version %}

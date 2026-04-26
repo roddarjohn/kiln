@@ -152,7 +152,7 @@ class TestTelemetryScaffoldGate:
 
 
 class TestTelemetryScaffoldOutputs:
-    def test_emits_three_files(self):
+    def test_emits_single_file(self):
         cfg = ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
             telemetry=TelemetryConfig(service_name="svc"),
@@ -165,11 +165,7 @@ class TestTelemetryScaffoldOutputs:
         )
         assert all(isinstance(o, StaticFile) for o in outputs)
         paths = {o.path for o in outputs}
-        assert paths == {
-            "telemetry/__init__.py",
-            "telemetry/setup.py",
-            "telemetry/decorators.py",
-        }
+        assert paths == {"telemetry.py"}
 
     def test_setup_context_carries_config_values(self):
         cfg = ProjectConfig(
@@ -189,8 +185,7 @@ class TestTelemetryScaffoldOutputs:
                 _options=TelemetryScaffold().Options(),
             )
         )
-        setup = next(o for o in outputs if o.path == "telemetry/setup.py")
-        ctx = setup.context
+        ctx = outputs[0].context
         assert ctx["service_name"] == "svc"
         assert ctx["service_version"] == "1.2.3"
         assert ctx["environment"] == "prod"
@@ -209,10 +204,7 @@ class TestTelemetryScaffoldOutputs:
                 _options=TelemetryScaffold().Options(),
             )
         )
-        decorators = next(
-            o for o in outputs if o.path == "telemetry/decorators.py"
-        )
-        assert decorators.context["telemetry_module"] == "_generated.telemetry"
+        assert outputs[0].context["telemetry_module"] == "_generated.telemetry"
 
     def test_telemetry_module_omits_empty_prefix(self):
         cfg = ProjectConfig(
@@ -226,10 +218,7 @@ class TestTelemetryScaffoldOutputs:
                 _options=TelemetryScaffold().Options(),
             )
         )
-        decorators = next(
-            o for o in outputs if o.path == "telemetry/decorators.py"
-        )
-        assert decorators.context["telemetry_module"] == "telemetry"
+        assert outputs[0].context["telemetry_module"] == "telemetry"
 
 
 # ---------------------------------------------------------------------------
@@ -347,8 +336,9 @@ class TestAuthScaffoldTelemetryFlag:
             )
         )
         router = next(o for o in outputs if o.path == "auth/router.py")
+        # Auth router scrub imports straight from ``ingot.telemetry``
+        # now -- no project-level decorators module to point at.
         assert router.context["has_telemetry"] is True
-        assert router.context["telemetry_module"] == "_generated.telemetry"
 
     def test_auth_router_no_telemetry_by_default(self):
         from kiln.operations.scaffold import AuthScaffold
@@ -556,24 +546,20 @@ class TestHandlerTracingDecorator:
             )
         )
         block = _all_imports(fragments)
-        assert (
-            "from _generated.telemetry.decorators import traced_handler"
-            in block
-        )
+        # Imports point at ingot.telemetry directly -- no per-project
+        # re-export module sits between the generated handler and
+        # the kiln-shipped decorator.
+        assert "from ingot.telemetry import traced_handler" in block
 
-    def test_decorator_import_uses_empty_prefix(self):
-        # When package_prefix is empty the decorator import drops the
-        # leading dotted segment.
-        handler = _crud_handler()
-        ctx = _handler_render_ctx(telemetry=TelemetryConfig(service_name="s"))
-        ctx = RenderCtx(
-            env=ctx.env,
-            config=ctx.config,
-            package_prefix="",
-            language=ctx.language,
-            store=ctx.store,
-            instance_id=ctx.instance_id,
+    def test_action_decorator_import_added(self):
+        handler = _action_handler()
+        fragments = list(
+            shared_registry.render(
+                handler,
+                _handler_render_ctx(
+                    telemetry=TelemetryConfig(service_name="svc"),
+                ),
+            )
         )
-        fragments = list(shared_registry.render(handler, ctx))
         block = _all_imports(fragments)
-        assert "from telemetry.decorators import traced_handler" in block
+        assert "from ingot.telemetry import traced_action" in block

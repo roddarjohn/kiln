@@ -31,9 +31,7 @@ dependencies = [
 # telemetry on need this set; apps without telemetry never import
 # ``ingot.telemetry`` and don't need it.  Pinned as a coherent
 # release pair -- bump core (1.x) and instrumentation (0.x.b)
-# packages in lockstep when upgrading.  The same pins are emitted
-# verbatim into the generated ``telemetry/requirements.txt`` so a
-# deployment can install them directly without touching kiln.
+# packages in lockstep when upgrading.
 opentelemetry = [
   "opentelemetry-api==1.29.0",
   "opentelemetry-sdk==1.29.0",
@@ -41,6 +39,16 @@ opentelemetry = [
   "opentelemetry-instrumentation-fastapi==0.50b0",
   "opentelemetry-instrumentation-sqlalchemy==0.50b0",
 ]
+# ``kiln-generator[opentelemetry-grpc]`` is additive on top of the
+# ``opentelemetry`` extra: it adds the gRPC OTLP exporter that the
+# generated ``init_telemetry`` reaches for when ``exporter:
+# 'otlp_grpc'``.  Split out because the gRPC stack pulls in
+# protobuf and grpc-io, which together are roughly an order of
+# magnitude heavier than the HTTP transport and aren't useful to
+# consumers staying on OTLP/HTTP.  Install both extras together::
+#
+#     pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
+opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.29.0"]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -90,12 +98,14 @@ dev = [
   "coverage[toml]>=7.0",
   "tox>=4.49.1",
   "tox-uv>=1.33.2",
-  # OTel mirrored from the ``opentelemetry`` extra so the dev test
-  # suite can import ``ingot.telemetry``.  Keep version pins in
-  # lockstep with ``[project.optional-dependencies].opentelemetry``.
+  # OTel mirrored from the ``opentelemetry`` /
+  # ``opentelemetry-grpc`` extras so the dev test suite can import
+  # ``ingot.telemetry`` and exercise the gRPC exporter path.  Keep
+  # the pins in lockstep with the matching extras above.
   "opentelemetry-api==1.29.0",
   "opentelemetry-sdk==1.29.0",
   "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-exporter-otlp-proto-grpc==1.29.0",
   "opentelemetry-instrumentation-fastapi==0.50b0",
   "opentelemetry-instrumentation-sqlalchemy==0.50b0",
 ]

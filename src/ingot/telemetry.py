@@ -141,11 +141,12 @@ def _build_span_exporter(
     headers = _parse_otlp_headers(os.environ.get(headers_env, ""))
     endpoint = os.environ.get(endpoint_env)
     if exporter == "otlp_grpc":
-        # gRPC stays lazy: it pulls a heavy protobuf/grpc stack that
-        # the user only needs when they explicitly select this
-        # transport.  ``opentelemetry-exporter-otlp-proto-grpc`` is
-        # not in the ``[telemetry]`` extra; consumers who want gRPC
-        # add it to their own deps.
+        # gRPC stays lazy: the protobuf/grpc stack is roughly an
+        # order of magnitude heavier than the HTTP transport, and
+        # apps on OTLP/HTTP would otherwise pay that import cost
+        # every startup.  Install via the
+        # ``kiln-generator[opentelemetry-grpc]`` extra (additive on
+        # top of ``[opentelemetry]``).
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]  # noqa: PLC0415
             OTLPSpanExporter as GrpcSpanExporter,
         )

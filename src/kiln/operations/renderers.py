@@ -321,16 +321,11 @@ def _apply_tracing_decorator(
     if getattr(resource_config, "trace", None) is False:
         return
 
-    decorators_module = (
-        f"{info.package_prefix}.telemetry.decorators"
-        if info.package_prefix
-        else "telemetry.decorators"
-    )
     op_name = handler.op_name
     span_name = f"{info.model.lower}.{op_name}"
     record = "True" if telemetry.record_exceptions else "False"
     if is_action:
-        imports.add_from(decorators_module, "traced_action")
+        imports.add_from("ingot.telemetry", "traced_action")
         decorator = (
             f'@traced_action("{span_name}", '
             f'resource="{info.model.lower}", '
@@ -338,7 +333,7 @@ def _apply_tracing_decorator(
             f"record_exceptions={record})"
         )
     else:
-        imports.add_from(decorators_module, "traced_handler")
+        imports.add_from("ingot.telemetry", "traced_handler")
         decorator = (
             f'@traced_handler("{span_name}", '
             f'resource="{info.model.lower}", '
