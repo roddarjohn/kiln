@@ -39,7 +39,6 @@
 
     span_per_handler: std.get(opts, "span_per_handler", true),
     span_per_action: std.get(opts, "span_per_action", true),
-    record_exceptions: std.get(opts, "record_exceptions", true),
 
     capture_request_body: std.get(opts, "capture_request_body", false),
     capture_response_body: std.get(opts, "capture_response_body", false),

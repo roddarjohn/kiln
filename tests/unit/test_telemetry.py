@@ -43,7 +43,6 @@ class TestTelemetryConfigDefaults:
         assert cfg.instrument_logging is False
         assert cfg.span_per_handler is True
         assert cfg.span_per_action is True
-        assert cfg.record_exceptions is True
         assert cfg.capture_request_body is False
         assert cfg.capture_response_body is False
         assert cfg.sampler == "parentbased_always_on"
@@ -496,7 +495,10 @@ class TestTracingOp:
         assert '"post.get"' in decs[0]
         assert 'resource="post"' in decs[0]
         assert 'op="get"' in decs[0]
-        assert "record_exceptions=True" in decs[0]
+        # Exception recording is *not* a knob -- the surrounding
+        # FastAPIInstrumentor server span is the authoritative
+        # success/failure signal.
+        assert "record_exceptions" not in decs[0]
         assert (
             "ingot.telemetry",
             "traced_handler",
@@ -514,14 +516,6 @@ class TestTracingOp:
         assert decs[0].startswith("@traced_handler(")
         assert 'op="publish"' in decs[0]
         assert "action=" not in decs[0]
-
-    def test_record_exceptions_threaded_through(self):
-        handlers = _run_tracing(
-            telemetry=TelemetryConfig(
-                service_name="svc", record_exceptions=False
-            ),
-        )
-        assert "record_exceptions=False" in handlers[0].decorators[0]
 
     def test_resource_trace_false_skips_decorator(self):
         handlers = _run_tracing(
