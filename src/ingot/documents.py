@@ -1,5 +1,16 @@
 """Document storage primitives for kiln-generated FastAPI projects.
 
+This module's runtime dependency on ``boto3`` is gated behind the
+``documents`` extra.  Install with::
+
+    pip install 'kiln-generator[documents]'
+    # or: uv add 'kiln-generator[documents]'
+
+Importing this module without the extra raises ``ModuleNotFoundError``
+on ``import boto3`` -- so the gate is honest rather than lazy:
+either the dep is there and everything works, or it isn't and the
+import surface fails fast.
+
 A *document* is a binary blob (image, PDF, attachment) tracked by a
 metadata row in the consumer's database and a corresponding object
 in S3-compatible storage.  This module ships three pieces:
