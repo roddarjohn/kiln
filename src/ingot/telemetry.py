@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -41,11 +41,13 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     ConsoleSpanExporter,
+    SpanExporter,
 )
 from opentelemetry.sdk.trace.sampling import (
     ALWAYS_OFF,
     ALWAYS_ON,
     ParentBased,
+    Sampler,
     TraceIdRatioBased,
 )
 
@@ -69,18 +71,23 @@ the absent attribute so a missing-attribute alert doesn't mask a
 real outage."""
 
 
-def _resolve_env(env_var: str | None) -> str | None:
-    """Read *env_var* from the process environment.
+SamplerName = Literal[
+    "always_on",
+    "always_off",
+    "parentbased_always_on",
+    "parentbased_always_off",
+    "parentbased_traceidratio",
+    "traceidratio",
+]
+"""Accepted values of the :attr:`build_tracer_provider.sampler`
+parameter.  Mirrors :data:`kiln.config.schema.SamplerName` --
+duplicated here rather than imported because ``ingot`` is a runtime
+package and must not depend on ``kiln``."""
 
-    Returns ``None`` for ``None`` or unset / empty values so callers
-    can use ``is not None`` to decide whether to attach an attribute.
-    Empty strings are treated as unset because ``ENVIRONMENT=`` in a
-    .env file is almost always a mistake, not a real value.
-    """
-    if env_var is None:
-        return None
-    value = os.environ.get(env_var)
-    return value or None
+
+ExporterName = Literal["otlp_http", "otlp_grpc", "console", "none"]
+"""Accepted values of the :attr:`build_tracer_provider.exporter`
+parameter.  Mirrors :data:`kiln.config.schema.ExporterName`."""
 
 
 # -------------------------------------------------------------------
@@ -92,7 +99,7 @@ def _build_resource(
     *,
     service_name: str,
     service_version: str | None,
-    environment: str | None,
+    environment_env: str | None,
     extra: Mapping[str, str],
 ) -> Resource:
     """Build the OTel ``Resource`` shared across signal providers.
@@ -100,17 +107,25 @@ def _build_resource(
     Centralised so traces, metrics, and logs all carry identical
     resource attributes -- otherwise correlation across signals on
     a single service breaks silently.
+
+    ``environment_env`` is the *name* of the variable holding the
+    deployment-environment value, not the value itself; the lookup
+    happens here so callers don't repeat it.  Empty / unset variables
+    are skipped (``ENVIRONMENT=`` in a .env file is almost always a
+    typo, not a real value).
     """
     attrs: dict[str, str] = {"service.name": service_name}
     if service_version is not None:
         attrs["service.version"] = service_version
-    if environment is not None:
-        attrs["deployment.environment.name"] = environment
+    if environment_env:
+        env_value = os.environ.get(environment_env) or None
+        if env_value is not None:
+            attrs["deployment.environment.name"] = env_value
     attrs.update(extra)
     return Resource.create(attrs)
 
 
-def _build_sampler(*, name: str, ratio: float | None) -> Any:
+def _build_sampler(*, name: SamplerName, ratio: float | None) -> Sampler:
     """Translate the schema's sampler name to an SDK sampler.
 
     Validation already constrained ``name`` to a known string and
@@ -135,7 +150,10 @@ def _build_sampler(*, name: str, ratio: float | None) -> Any:
     raise ValueError(msg)
 
 
-def _build_span_exporter(*, exporter: str | None) -> Any | None:
+def _build_span_exporter(
+    *,
+    exporter: ExporterName | None,
+) -> SpanExporter | None:
     """Build a span exporter from the schema's selection.
 
     Returns ``None`` when ``exporter`` is ``"none"`` (caller skips
@@ -170,9 +188,9 @@ def build_tracer_provider(
     service_version: str | None = None,
     environment_env: str | None = None,
     resource_attributes: Mapping[str, str] | None = None,
-    sampler: str = "parentbased_always_on",
+    sampler: SamplerName = "parentbased_always_on",
     sampler_ratio: float | None = None,
-    exporter: str | None = None,
+    exporter: ExporterName | None = None,
 ) -> TracerProvider:
     """Build and return a configured ``TracerProvider``.
 
@@ -194,7 +212,7 @@ def build_tracer_provider(
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=_resolve_env(environment_env),
+        environment_env=environment_env,
         extra=resource_attributes or {},
     )
     provider = TracerProvider(
@@ -224,7 +242,7 @@ def build_meter_provider(
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=_resolve_env(environment_env),
+        environment_env=environment_env,
         extra=resource_attributes or {},
     )
     reader = PeriodicExportingMetricReader(OTLPMetricExporter())
@@ -250,7 +268,7 @@ def build_logger_provider(
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=_resolve_env(environment_env),
+        environment_env=environment_env,
         extra=resource_attributes or {},
     )
     provider = LoggerProvider(resource=resource)

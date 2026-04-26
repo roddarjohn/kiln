@@ -27,7 +27,6 @@ from ingot.telemetry import (
     _build_resource,
     _build_sampler,
     _build_span_exporter,
-    _resolve_env,
     build_logger_provider,
     build_meter_provider,
     build_tracer_provider,
@@ -38,25 +37,6 @@ from ingot.telemetry import (
 # ---------------------------------------------------------------------------
 # Env var resolution
 # ---------------------------------------------------------------------------
-
-
-class TestResolveEnv:
-    def test_none(self):
-        assert _resolve_env(None) is None
-
-    def test_unset(self, monkeypatch):
-        monkeypatch.delenv("MY_VAR", raising=False)
-        assert _resolve_env("MY_VAR") is None
-
-    def test_empty_string_treated_as_unset(self, monkeypatch):
-        # ``ENVIRONMENT=`` in a .env file is almost always a typo,
-        # not a real "this deployment has the empty-string env name."
-        monkeypatch.setenv("MY_VAR", "")
-        assert _resolve_env("MY_VAR") is None
-
-    def test_set(self, monkeypatch):
-        monkeypatch.setenv("MY_VAR", "prod")
-        assert _resolve_env("MY_VAR") == "prod"
 
 
 class TestBuildProviderResolvesEnvironmentEnv:
