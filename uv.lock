@@ -602,7 +602,7 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-documents = [
+files = [
     { name = "boto3" },
 ]
 
@@ -641,7 +641,7 @@ playground = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 'documents'", specifier = ">=1.34" },
+    { name = "boto3", marker = "extra == 'files'", specifier = ">=1.34" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.0" },
     { name = "jsonnet", specifier = ">=0.21.0" },
@@ -650,7 +650,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.24.1" },
 ]
-provides-extras = ["documents"]
+provides-extras = ["files"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -1,29 +1,29 @@
-"""Document storage primitives for kiln-generated FastAPI projects.
+"""File storage primitives for kiln-generated FastAPI projects.
 
 This module's runtime dependency on ``boto3`` is gated behind the
-``documents`` extra.  Install with::
+``files`` extra.  Install with::
 
-    pip install 'kiln-generator[documents]'
-    # or: uv add 'kiln-generator[documents]'
+    pip install 'kiln-generator[files]'
+    # or: uv add 'kiln-generator[files]'
 
 Importing this module without the extra raises ``ModuleNotFoundError``
 on ``import boto3`` -- so the gate is honest rather than lazy:
 either the dep is there and everything works, or it isn't and the
 import surface fails fast.
 
-A *document* is a binary blob (image, PDF, attachment) tracked by a
+A *file* is a binary blob (image, PDF, attachment) tracked by a
 metadata row in the consumer's database and a corresponding object
 in S3-compatible storage.  This module ships three pieces:
 
-* :class:`DocumentMixin` + :func:`bind_document_model` -- the mixin
-  supplies the columns every document row needs (``id``, ``s3_key``,
+* :class:`FileMixin` + :func:`bind_file_model` -- the mixin
+  supplies the columns every file row needs (``id``, ``s3_key``,
   ``content_type``, ``size_bytes``, ``original_filename``,
   ``created_at``, ``uploaded_at``); the factory builds a concrete
   mapped class on the consumer's ``DeclarativeBase`` so the table
   lives in their metadata (alembic discovery, FKs, multi-schema all
-  keep working).  Typical use is one ``Document = bind_document_model(
-  Base)`` per app; multi-table apps pass ``name=`` and
-  ``tablename=`` for additional bindings.
+  keep working).  Typical use is one ``File = bind_file_model(Base)``
+  per app; multi-table apps pass ``name=`` and ``tablename=`` for
+  additional bindings.
 
 * :class:`S3Storage` -- a small wrapper around ``boto3`` that
   exposes the three operations a presigned-upload flow actually
@@ -33,14 +33,14 @@ in S3-compatible storage.  This module ships three pieces:
   env vars for the common case.
 
 * Action functions -- :func:`request_upload`,
-  :func:`complete_upload`, :func:`download`, and
-  :func:`delete_document`.  These plug into kiln's
+  :func:`complete_upload`, :func:`download`, and :func:`delete_file`.
+  These plug into kiln's
   :class:`~kiln.operations.action.Action` operation: the consumer
   points ``resource.action`` entries at them directly (no
-  per-resource wrapper module).  The :class:`DocumentMixin`-typed
+  per-resource wrapper module).  The :class:`FileMixin`-typed
   parameters (instance for object actions, class for collection
   actions) match any concrete subclass via the introspector's
-  supertype check, so the same four functions serve every document
+  supertype check, so the same four functions serve every file
   resource.
 
 The split is deliberate: the mixin is pure SQLAlchemy and has no
@@ -78,20 +78,27 @@ shows up in logs anyone reads.
 """
 
 
-class DocumentMixin:
-    """SQLAlchemy mixin supplying the columns of a document record.
+class FileMixin:
+    """SQLAlchemy mixin supplying the columns of a file record.
 
-    Add to a concrete model on the consumer's ``Base``:
+    Consumers should not subclass this directly -- call
+    :func:`bind_file_model` instead, which builds the concrete
+    mapped class on the consumer's ``Base`` for them:
 
     .. code-block:: python
 
-        class Attachment(Base, DocumentMixin):
-            __tablename__ = "attachments"
-            owner_id: Mapped[uuid.UUID] = mapped_column(
-                ForeignKey("users.id"),
-            )
+        # myapp/models.py
+        from ingot.files import bind_file_model
+        from myapp.db import Base
 
-    A row with ``uploaded_at is None`` represents a document the
+        File = bind_file_model(Base)
+
+    The mixin is exposed mainly as a *type marker* -- the action
+    functions in this module annotate their parameters with
+    ``FileMixin`` so the kiln introspector can match any concrete
+    subclass via the supertype check.
+
+    A row with ``uploaded_at is None`` represents a file the
     server has reserved a key for (and handed the client a presigned
     PUT URL) but whose upload hasn't yet been confirmed.  Consumers
     typically clear or expire these rows on a schedule.
@@ -143,37 +150,37 @@ class DocumentMixin:
     metadata exists but the blob may or may not be in S3."""
 
 
-def bind_document_model(
+def bind_file_model(
     base: type,
     *,
-    name: str = "Document",
-    tablename: str = "documents",
-) -> type[DocumentMixin]:
-    """Build a concrete document model on the consumer's ``Base``.
+    name: str = "File",
+    tablename: str = "files",
+) -> type[FileMixin]:
+    """Build a concrete file model on the consumer's ``Base``.
 
     Returns a freshly-constructed subclass of *base* and
-    :class:`DocumentMixin` named *name* with ``__tablename__`` set
-    to *tablename*.  The class is registered on ``base.metadata``
-    so the consumer's alembic env (which already imports their
-    models module to populate ``target_metadata``) picks the table
-    up automatically -- no env.py changes required.
+    :class:`FileMixin` named *name* with ``__tablename__`` set to
+    *tablename*.  The class is registered on ``base.metadata`` so
+    the consumer's alembic env (which already imports their models
+    module to populate ``target_metadata``) picks the table up
+    automatically -- no env.py changes required.
 
     Typical use is one call per app:
 
     .. code-block:: python
 
         # myapp/models.py
-        from ingot.documents import bind_document_model
+        from ingot.files import bind_file_model
         from myapp.db import Base
 
-        Document = bind_document_model(Base)
+        File = bind_file_model(Base)
 
     For multi-table apps, pass distinct *name* and *tablename* per
     binding:
 
     .. code-block:: python
 
-        ProfileImage = bind_document_model(
+        ProfileImage = bind_file_model(
             Base, name="ProfileImage", tablename="profile_images",
         )
 
@@ -191,8 +198,8 @@ def bind_document_model(
         The newly-built mapped class.
 
     """
-    cls = type(name, (base, DocumentMixin), {"__tablename__": tablename})
-    return cast("type[DocumentMixin]", cls)
+    cls = type(name, (base, FileMixin), {"__tablename__": tablename})
+    return cast("type[FileMixin]", cls)
 
 
 @dataclass
@@ -340,7 +347,7 @@ class DownloadResponse(BaseModel):
 
 async def request_upload(
     *,
-    model_cls: type[DocumentMixin],
+    model_cls: type[FileMixin],
     db: AsyncSession,
     body: UploadRequest,
 ) -> UploadResponse:
@@ -350,18 +357,18 @@ async def request_upload(
     confirms the actual byte upload via :func:`complete_upload`.
 
     *model_cls* is supplied by the action handler, which detects
-    the ``type[DocumentMixin]`` annotation and passes the
-    resource's mapped class.  No per-resource factory binding
-    needed -- consumers point :func:`resource.action` at this
-    function directly.
+    the ``type[FileMixin]`` annotation and passes the resource's
+    mapped class.  No per-resource factory binding needed --
+    consumers point :func:`resource.action` at this function
+    directly.
     """
-    document_id = uuid.uuid4()
-    # Prefix the key with the document id so collisions on the
+    file_id = uuid.uuid4()
+    # Prefix the key with the file id so collisions on the
     # consumer-supplied filename can't reach across rows.
-    key = f"{document_id.hex}/{body.filename}"
+    key = f"{file_id.hex}/{body.filename}"
     await db.execute(
         insert(model_cls).values(
-            id=document_id,
+            id=file_id,
             s3_key=key,
             content_type=body.content_type,
             size_bytes=body.size_bytes,
@@ -375,17 +382,17 @@ async def request_upload(
         content_type=body.content_type,
     )
     return UploadResponse(
-        id=document_id,
+        id=file_id,
         upload_url=upload_url,
     )
 
 
 async def complete_upload(
-    document: DocumentMixin,
+    file: FileMixin,
     *,
     db: AsyncSession,
 ) -> None:
-    """Mark *document* as uploaded.
+    """Mark *file* as uploaded.
 
     Returns ``None`` so the action op emits 204 No Content -- a
     completed upload has no useful body to return; the client
@@ -396,42 +403,42 @@ async def complete_upload(
     whether the caller's session has autoflush quirks.  Idempotent
     -- calling twice just refreshes the timestamp.
     """
-    cls = type(document)
+    cls = type(file)
     await db.execute(
         update(cls)
-        .where(cls.id == document.id)
+        .where(cls.id == file.id)
         .values(uploaded_at=datetime.datetime.now(tz=datetime.UTC)),
     )
 
 
 async def download(
-    document: DocumentMixin,
+    file: FileMixin,
     *,
     db: AsyncSession,  # noqa: ARG001 -- action handler passes this
 ) -> DownloadResponse:
-    """Return a presigned GET URL for *document*.
+    """Return a presigned GET URL for *file*.
 
     Refuses with 404 when ``uploaded_at is None`` -- the row exists
     but the client never confirmed the PUT, so the object may not
     be in S3 and a presigned URL would just 404 noisily.
     """
-    if document.uploaded_at is None:
+    if file.uploaded_at is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document upload not complete",
+            detail="File upload not complete",
         )
     storage = default_storage()
     return DownloadResponse(
-        download_url=storage.presigned_get_url(document.s3_key),
+        download_url=storage.presigned_get_url(file.s3_key),
     )
 
 
-async def delete_document(
-    document: DocumentMixin,
+async def delete_file(
+    file: FileMixin,
     *,
     db: AsyncSession,
 ) -> None:
-    """Cascade-delete *document*: remove the S3 object then the row.
+    """Cascade-delete *file*: remove the S3 object then the row.
 
     Returns ``None`` so the action op emits 204 No Content -- the
     client doesn't need a body to know the row is gone.
@@ -442,6 +449,6 @@ async def delete_document(
     instead leak S3 objects, which are harder to find later.
     """
     storage = default_storage()
-    storage.delete(document.s3_key)
-    cls = type(document)
-    await db.execute(delete(cls).where(cls.id == document.id))
+    storage.delete(file.s3_key)
+    cls = type(file)
+    await db.execute(delete(cls).where(cls.id == file.id))

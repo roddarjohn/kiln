@@ -1,4 +1,4 @@
-"""Tests for ingot.documents."""
+"""Tests for ingot.files."""
 
 from __future__ import annotations
 
@@ -11,16 +11,16 @@ from fastapi import HTTPException
 from sqlalchemy import inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-import ingot.documents as documents_mod
-from ingot.documents import (
+import ingot.files as files_mod
+from ingot.files import (
     DEFAULT_PRESIGN_TTL,
-    DocumentMixin,
+    FileMixin,
     S3Storage,
     UploadRequest,
-    bind_document_model,
+    bind_file_model,
     complete_upload,
     default_storage,
-    delete_document,
+    delete_file,
     download,
     request_upload,
 )
@@ -30,11 +30,11 @@ class _Base(DeclarativeBase):
     pass
 
 
-class _Doc(_Base, DocumentMixin):
-    __tablename__ = "_test_docs"
+class _File(_Base, FileMixin):
+    __tablename__ = "_test_files"
 
 
-class _Attachment(_Base, DocumentMixin):
+class _Attachment(_Base, FileMixin):
     __tablename__ = "_test_attachments"
 
     owner_id: Mapped[uuid.UUID] = mapped_column()
@@ -44,11 +44,11 @@ def _columns(model: type) -> dict[str, object]:
     return {col.name: col for col in inspect(model).columns}
 
 
-# --- DocumentMixin ---------------------------------------------------------
+# --- FileMixin ------------------------------------------------------------
 
 
 def test_mixin_supplies_expected_columns():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     expected = {
         "id",
         "s3_key",
@@ -62,30 +62,30 @@ def test_mixin_supplies_expected_columns():
 
 
 def test_mixin_id_is_primary_key():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     assert cols["id"].primary_key is True
 
 
 def test_mixin_s3_key_is_unique_and_not_null():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     assert cols["s3_key"].unique is True
     assert cols["s3_key"].nullable is False
 
 
 def test_mixin_optional_columns_are_nullable():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     for name in ("content_type", "size_bytes", "original_filename"):
         assert cols[name].nullable is True
     assert cols["uploaded_at"].nullable is True
 
 
 def test_mixin_created_at_is_not_null():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     assert cols["created_at"].nullable is False
 
 
 def test_mixin_id_default_is_uuid4_callable():
-    cols = _columns(_Doc)
+    cols = _columns(_File)
     # Calling the default produces a UUID -- proves uuid.uuid4 is wired
     # in directly rather than a stamped-at-import constant.
     value = cols["id"].default.arg(None)
@@ -98,45 +98,45 @@ def test_mixin_composes_with_extra_columns():
     assert "s3_key" in cols
 
 
-# --- bind_document_model -------------------------------------------------
+# --- bind_file_model -------------------------------------------------
 
 
-def test_bind_document_model_creates_mapped_class():
+def test_bind_file_model_creates_mapped_class():
     class B(DeclarativeBase):
         pass
 
-    doc = bind_document_model(B)
+    bound = bind_file_model(B)
 
-    assert doc.__name__ == "Document"
-    assert doc.__tablename__ == "documents"
-    assert issubclass(doc, DocumentMixin)
-    assert issubclass(doc, B)
-    cols = _columns(doc)
+    assert bound.__name__ == "File"
+    assert bound.__tablename__ == "files"
+    assert issubclass(bound, FileMixin)
+    assert issubclass(bound, B)
+    cols = _columns(bound)
     assert {"id", "s3_key", "uploaded_at"} <= set(cols)
 
 
-def test_bind_document_model_registers_on_user_metadata():
+def test_bind_file_model_registers_on_user_metadata():
     class B(DeclarativeBase):
         pass
 
-    doc = bind_document_model(B)
+    bound = bind_file_model(B)
 
     # Alembic discovery works because the table lives on the user's
     # Base.metadata, not a separate one ingot owns.
-    assert "documents" in B.metadata.tables
-    assert B.metadata.tables["documents"] is doc.__table__
+    assert "files" in B.metadata.tables
+    assert B.metadata.tables["files"] is bound.__table__
 
 
-def test_bind_document_model_supports_multiple_bindings():
+def test_bind_file_model_supports_multiple_bindings():
     class B(DeclarativeBase):
         pass
 
-    attachment = bind_document_model(
+    attachment = bind_file_model(
         B,
         name="Attachment",
         tablename="attachments",
     )
-    profile_image = bind_document_model(
+    profile_image = bind_file_model(
         B,
         name="ProfileImage",
         tablename="profile_images",
@@ -282,7 +282,7 @@ def test_default_storage_raises_when_bucket_missing(monkeypatch):
 def fake_storage(monkeypatch):
     """Replace default_storage() with a MagicMock for the test."""
     storage = MagicMock()
-    monkeypatch.setattr(documents_mod, "default_storage", lambda: storage)
+    monkeypatch.setattr(files_mod, "default_storage", lambda: storage)
     return storage
 
 
@@ -312,11 +312,11 @@ async def test_request_upload_inserts_pending_row(fake_db, fake_storage):
         content_type="application/pdf",
         size_bytes=1234,
     )
-    response = await request_upload(model_cls=_Doc, db=fake_db, body=body)
+    response = await request_upload(model_cls=_File, db=fake_db, body=body)
 
     stmt = _executed_stmt(fake_db)
     assert isinstance(stmt, Insert)
-    assert stmt.table.name == "_test_docs"
+    assert stmt.table.name == "_test_files"
     params = stmt.compile(dialect=sqlite.dialect()).params
     assert params["id"] == response.id
     assert params["original_filename"] == "report.pdf"
@@ -336,14 +336,14 @@ async def test_complete_upload_issues_update(fake_db):
     from sqlalchemy.dialects import sqlite
     from sqlalchemy.sql.dml import Update
 
-    doc = _Doc(s3_key="k", id=uuid.uuid4())
+    doc = _File(s3_key="k", id=uuid.uuid4())
 
     result = await complete_upload(doc, db=fake_db)
 
     assert result is None  # 204 No Content
     stmt = _executed_stmt(fake_db)
     assert isinstance(stmt, Update)
-    assert stmt.table.name == "_test_docs"
+    assert stmt.table.name == "_test_files"
     params = stmt.compile(dialect=sqlite.dialect()).params
     assert isinstance(params["uploaded_at"], datetime.datetime)
     assert params["uploaded_at"].tzinfo is not None
@@ -354,7 +354,7 @@ async def test_complete_upload_issues_update(fake_db):
 
 async def test_download_returns_presigned_url(fake_db, fake_storage):
     fake_storage.presigned_get_url.return_value = "https://s3/get"
-    doc = _Doc(s3_key="k", id=uuid.uuid4())
+    doc = _File(s3_key="k", id=uuid.uuid4())
     doc.uploaded_at = datetime.datetime.now(tz=datetime.UTC)
 
     response = await download(doc, db=fake_db)
@@ -364,7 +364,7 @@ async def test_download_returns_presigned_url(fake_db, fake_storage):
 
 
 async def test_download_404s_when_pending(fake_db, fake_storage):
-    doc = _Doc(s3_key="k", id=uuid.uuid4())
+    doc = _File(s3_key="k", id=uuid.uuid4())
     doc.uploaded_at = None
 
     with pytest.raises(HTTPException) as exc:
@@ -373,25 +373,25 @@ async def test_download_404s_when_pending(fake_db, fake_storage):
     fake_storage.presigned_get_url.assert_not_called()
 
 
-async def test_delete_document_removes_object_then_row(fake_db, fake_storage):
+async def test_delete_file_removes_object_then_row(fake_db, fake_storage):
     from sqlalchemy.dialects import sqlite
     from sqlalchemy.sql.dml import Delete
 
-    doc = _Doc(s3_key="k", id=uuid.uuid4())
+    doc = _File(s3_key="k", id=uuid.uuid4())
 
-    result = await delete_document(doc, db=fake_db)
+    result = await delete_file(doc, db=fake_db)
 
     assert result is None  # 204 No Content
     fake_storage.delete.assert_called_once_with("k")
 
     stmt = _executed_stmt(fake_db)
     assert isinstance(stmt, Delete)
-    assert stmt.table.name == "_test_docs"
+    assert stmt.table.name == "_test_files"
     params = stmt.compile(dialect=sqlite.dialect()).params
     assert params["id_1"] == doc.id
 
 
-async def test_delete_document_s3_first_then_row(fake_storage):
+async def test_delete_file_s3_first_then_row(fake_storage):
     """S3 delete must precede the SQL delete -- crash leaves an
     orphan row (recoverable), not a leaked S3 object."""
     call_order: list[str] = []
@@ -400,7 +400,7 @@ async def test_delete_document_s3_first_then_row(fake_storage):
     db.execute = AsyncMock(side_effect=lambda *_: call_order.append("db"))
     fake_storage.delete.side_effect = lambda *_: call_order.append("s3")
 
-    doc = _Doc(s3_key="k", id=uuid.uuid4())
-    await delete_document(doc, db=db)
+    doc = _File(s3_key="k", id=uuid.uuid4())
+    await delete_file(doc, db=db)
 
     assert call_order == ["s3", "db"]
