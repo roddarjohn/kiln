@@ -1767,21 +1767,21 @@ class TestAction:
             model_param_name=None,
             model_class_param_name="model_cls",
             request_class="UploadRequest",
-            request_module="ingot.documents",
+            request_module="ingot.files",
             response_class="UploadResponse",
-            response_module="ingot.documents",
+            response_module="ingot.files",
         )
 
         op_config = OperationConfig(
             name="upload",
             type="action",
-            fn="ingot.documents.request_upload",
+            fn="ingot.files.request_upload",
         )
         ctx = _operation_ctx(resource, op_config)
 
         from kiln.operations.action import Action
 
-        opts = Action.Options(fn="ingot.documents.request_upload")
+        opts = Action.Options(fn="ingot.files.request_upload")
 
         with patch(
             "kiln.operations.action.introspect_action_fn",

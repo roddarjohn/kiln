@@ -94,7 +94,7 @@ class Action:
         # ``-> None`` action: emit 204 No Content (FastAPI default
         # for empty bodies) with no response model and skip the
         # ``return result`` line in the template.  Lets reusable
-        # actions (e.g. ``ingot.documents.delete_document``) be true
+        # actions (e.g. ``ingot.files.delete_file``) be true
         # side-effect endpoints without inventing a fake response
         # body just to satisfy the framework.  Caller-supplied
         # ``options.status_code`` always wins.

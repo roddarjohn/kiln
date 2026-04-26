@@ -188,7 +188,7 @@ def _matches_model_class_param(hint: object, model_cls: object) -> bool:
 
     Counterpart to :func:`_matches_model` for the *class* (not the
     instance) of the resource model.  Lets a generic collection
-    action declare ``model_cls: type[DocumentMixin]`` and have the
+    action declare ``model_cls: type[FileMixin]`` and have the
     handler plug in the concrete mapped class -- no per-resource
     factory binding required.
 
@@ -214,9 +214,9 @@ def _matches_model(hint: object, model_cls: object) -> bool:
     -- a user-written action annotates its first parameter with the
     same SQLAlchemy class the resource points at.  The subclass case
     is what lets generic actions live in shared modules: a function
-    annotated ``DocumentMixin`` matches any concrete model that
-    extends ``DocumentMixin``, so :mod:`ingot.documents` can ship
-    reusable upload/download actions.
+    annotated ``FileMixin`` matches any concrete model that extends
+    ``FileMixin``, so :mod:`ingot.files` can ship reusable
+    upload/download actions.
 
     ``object`` is rejected explicitly: any class is a subclass of
     ``object``, so without the guard a parameter typed ``object``

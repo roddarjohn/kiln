@@ -85,7 +85,7 @@ kiln.operations
 .. automodule:: ingot.auth
    :members:
 
-.. automodule:: ingot.documents
+.. automodule:: ingot.files
    :members:
 
 .. automodule:: ingot.filters

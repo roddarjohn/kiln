@@ -322,115 +322,114 @@ See :doc:`reference` for the full stdlib list.  The most common:
 * ``kiln/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
   and ``fields.nested(name, model, fields, many=false, load="selectin")``.
 * ``kiln/resources/presets.libsonnet`` -- ``resource.action(...)`` and
-  ``resource.documents(...)`` for bundling action operations onto a
-  resource.  See :ref:`document-uploads` for the documents flow.
+  ``resource.files(...)`` for bundling action operations onto a
+  resource.  See :ref:`file-uploads` for the file-upload flow.
 
-.. _document-uploads:
+.. _file-uploads:
 
-Document uploads
-----------------
+File uploads
+------------
 
 kiln supports a presigned-URL upload flow on top of the existing
 ``action`` machinery -- no new operation type, just a SQLAlchemy mixin
-plus four ready-made action functions in :mod:`ingot.documents`.
+plus four ready-made action functions in :mod:`ingot.files`.
 
-Install the ``documents`` extra to bring in the ``boto3`` runtime
+Install the ``files`` extra to bring in the ``boto3`` runtime
 dependency::
 
-    pip install 'kiln-generator[documents]'
-    # or: uv add 'kiln-generator[documents]'
+    pip install 'kiln-generator[files]'
+    # or: uv add 'kiln-generator[files]'
 
-Without the extra, importing :mod:`ingot.documents` raises
+Without the extra, importing :mod:`ingot.files` raises
 ``ModuleNotFoundError`` -- the gate is at the import boundary, not
 deferred to first call, so failures surface immediately at app
 startup rather than mid-request.
 
 The flow:
 
-1. Client ``POST /attachments/upload`` with ``{filename, content_type,
+1. Client ``POST /files/upload`` with ``{filename, content_type,
    size_bytes}``; server creates a ``pending`` row and returns
-   ``{id, key, upload_url}``.
+   ``{id, upload_url}``.
 2. Client ``PUT``s the file bytes to ``upload_url`` (S3 directly --
    bytes never touch the app server).
-3. Client ``POST /attachments/{id}/complete`` to flip the row out of
-   pending state.  Subsequent ``POST /attachments/{id}/download``
-   calls return short-lived presigned GET URLs.
-4. ``POST /attachments/{id}/delete-document`` cascades: deletes the
-   S3 object, then the row.  Returns 204 No Content.
+3. Client ``POST /files/{id}/complete`` to flip the row out of
+   pending state.  Subsequent ``POST /files/{id}/download`` calls
+   return short-lived presigned GET URLs.
+4. ``POST /files/{id}/delete-file`` cascades: deletes the S3
+   object, then the row.  Returns 204 No Content.
 
 The model
 ^^^^^^^^^
 
-Bind a concrete ``Document`` model to your ``Base`` once per app
-with :func:`ingot.documents.bind_document_model`:
+Bind a concrete ``File`` model to your ``Base`` once per app with
+:func:`ingot.files.bind_file_model`:
 
 .. code-block:: python
 
    # myapp/models.py
-   from ingot.documents import bind_document_model
+   from ingot.files import bind_file_model
    from myapp.db import Base
 
-   Document = bind_document_model(Base)
+   File = bind_file_model(Base)
 
-This creates ``class Document(Base, DocumentMixin)`` with
-``__tablename__ = "documents"`` and registers it on
-``Base.metadata`` so alembic discovers the table automatically --
-no env.py changes required.  The columns are ``id`` (UUID PK),
-``s3_key``, ``content_type``, ``size_bytes``,
-``original_filename``, ``created_at``, and ``uploaded_at`` (NULL
-until the upload is confirmed).
+This creates ``class File(Base, FileMixin)`` with
+``__tablename__ = "files"`` and registers it on ``Base.metadata``
+so alembic discovers the table automatically -- no env.py changes
+required.  The columns are ``id`` (UUID PK), ``s3_key``,
+``content_type``, ``size_bytes``, ``original_filename``,
+``created_at``, and ``uploaded_at`` (NULL until the upload is
+confirmed).
 
-For multi-table apps (rare), call ``bind_document_model`` again with
+For multi-table apps (rare), call ``bind_file_model`` again with
 distinct ``name=`` and ``tablename=`` per binding:
 
 .. code-block:: python
 
-   ProfileImage = bind_document_model(
+   ProfileImage = bind_file_model(
        Base, name="ProfileImage", tablename="profile_images",
    )
 
 The config
 ^^^^^^^^^^
 
-Point a resource at the bound model and call
-``resource.documents()``:
+Point a resource at the bound model and call ``resource.files()``:
 
 .. code-block:: jsonnet
 
    local resource = import "kiln/resources/presets.libsonnet";
 
    {
-     model: "myapp.models.Document",
+     model: "myapp.models.File",
      pk: "id",
      pk_type: "uuid",
-     operations: resource.documents(),
+     operations: resource.files(),
    }
 
 Routes generated (relative to the resource prefix):
 
-* ``GET  /{id}`` -- get (DocumentMixin columns by default)
+* ``GET  /{id}`` -- get (FileMixin columns by default)
 * ``POST /upload`` -- request_upload (mints presigned PUT URL)
 * ``POST /{id}/complete`` -- complete_upload (204 No Content)
 * ``POST /{id}/download`` -- download (returns presigned GET URL)
-* ``POST /{id}/delete-document`` -- delete_document (cascades S3 +
-  row delete; 204 No Content)
+* ``POST /{id}/delete-file`` -- delete_file (cascades S3 + row
+  delete; 204 No Content)
 
 The download endpoint is ``POST`` rather than ``GET`` because the
 underlying ``action`` operation only supports POST today; the
 response carries the GET URL the client follows.
 
-The action functions in :mod:`ingot.documents` use the resource's
+The action functions in :mod:`ingot.files` use the resource's
 mapped class via the introspector's supertype match -- object
-actions take ``document: DocumentMixin`` (any concrete subclass
-matches the instance), and ``request_upload`` takes
-``model_cls: type[DocumentMixin]`` so the handler can plug in the
+actions take ``file: FileMixin`` (any concrete subclass matches
+the instance), and ``request_upload`` takes
+``model_cls: type[FileMixin]`` so the handler can plug in the
 class for the ``INSERT``.  No per-resource glue module is needed.
 
 Customizing the get fields:
 
 .. code-block:: jsonnet
 
-   resource.documents(
+   resource.files(
      fields=[
        { name: "id", type: "uuid" },
        { name: "original_filename", type: "str" },
@@ -445,12 +444,12 @@ want to attach your own ``get`` op with extra non-mixin fields):
 
    operations: [
      { name: "get", fields: [...own fields including custom columns...] },
-   ] + resource.documents(include_get=false)
+   ] + resource.files(include_get=false)
 
 S3 configuration
 ^^^^^^^^^^^^^^^^
 
-The action functions call :func:`ingot.documents.default_storage`
+The action functions call :func:`ingot.files.default_storage`
 which reads three env vars:
 
 * ``KILN_S3_BUCKET`` -- bucket name (required).
@@ -459,9 +458,8 @@ which reads three env vars:
 * ``KILN_S3_ENDPOINT_URL`` -- override for MinIO / localstack /
   other S3-compatible endpoints; optional.
 
-For tests, monkey-patch ``ingot.documents.default_storage`` to
-return a mock ``S3Storage`` (or any object satisfying the
-:class:`ingot.documents.Storage` Protocol).
+For tests, monkey-patch ``ingot.files.default_storage`` to return
+a mock :class:`ingot.files.S3Storage`.
 
 Testing the generated code
 --------------------------
