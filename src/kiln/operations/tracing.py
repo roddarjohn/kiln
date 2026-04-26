@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from foundry.naming import Name
 from foundry.operation import operation
 from kiln.operations.types import RouteHandler
 
@@ -78,7 +79,8 @@ class Tracing:
         }
         # Lowercase model class -- dashboards read ``article.get``
         # better than ``Article.get``.
-        label = resource.model.rpartition(".")[2].lower()
+        _, model = Name.from_dotted(resource.model)
+        label = model.lower
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             if handler.op_name not in traced_ops:

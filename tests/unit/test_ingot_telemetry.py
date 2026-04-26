@@ -270,7 +270,10 @@ class TestTracedHandler:
         assert span.attributes[ATTR_RESOURCE] == "article"
         assert span.attributes[ATTR_OP] == "get"
 
-    async def test_records_exception(self, in_memory_tracer):
+    async def test_does_not_record_exception(self, in_memory_tracer):
+        # ``traced_handler`` deliberately does not record exceptions
+        # or set the span status to ERROR -- the surrounding FastAPI
+        # server span is the authoritative success/failure signal.
         @traced_handler("article.get", resource="article", op="get")
         async def handler() -> int:
             msg = "boom"
@@ -280,24 +283,6 @@ class TestTracedHandler:
             await handler()
         spans = in_memory_tracer.get_finished_spans()
         assert len(spans) == 1
-        # Exception event recorded; status set to ERROR.
-        assert spans[0].status.status_code.name == "ERROR"
-        assert any(e.name == "exception" for e in spans[0].events)
-
-    async def test_record_exceptions_disabled(self, in_memory_tracer):
-        @traced_handler(
-            "article.get",
-            resource="article",
-            op="get",
-            record_exceptions=False,
-        )
-        async def handler() -> int:
-            msg = "boom"
-            raise RuntimeError(msg)
-
-        with pytest.raises(RuntimeError):
-            await handler()
-        spans = in_memory_tracer.get_finished_spans()
         assert spans[0].status.status_code.name != "ERROR"
         assert not any(e.name == "exception" for e in spans[0].events)
 
