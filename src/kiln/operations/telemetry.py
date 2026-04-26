@@ -106,7 +106,5 @@ class TelemetryScaffold:
                 "sampler": telemetry.sampler,
                 "sampler_ratio": telemetry.sampler_ratio,
                 "exporter": telemetry.exporter,
-                "exporter_endpoint_env": telemetry.exporter_endpoint_env,
-                "exporter_headers_env": telemetry.exporter_headers_env,
             },
         )

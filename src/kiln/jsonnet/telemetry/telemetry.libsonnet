@@ -49,10 +49,6 @@
       opts.sampler_ratio,
 
     [if std.objectHas(opts, "exporter") then "exporter"]: opts.exporter,
-    exporter_endpoint_env:
-      std.get(opts, "exporter_endpoint_env", "OTEL_EXPORTER_OTLP_ENDPOINT"),
-    exporter_headers_env:
-      std.get(opts, "exporter_headers_env", "OTEL_EXPORTER_OTLP_HEADERS"),
 
     resource_attributes: std.get(opts, "resource_attributes", {}),
   },

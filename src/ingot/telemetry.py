@@ -110,7 +110,7 @@ def _build_resource(
     return Resource.create(attrs)
 
 
-def _build_sampler(name: str, ratio: float | None) -> Any:
+def _build_sampler(*, name: str, ratio: float | None) -> Any:
     """Translate the schema's sampler name to an SDK sampler.
 
     Validation already constrained ``name`` to a known string and
@@ -135,61 +135,33 @@ def _build_sampler(name: str, ratio: float | None) -> Any:
     raise ValueError(msg)
 
 
-def _build_span_exporter(
-    exporter: str | None,
-    endpoint_env: str,
-    headers_env: str,
-) -> Any | None:
+def _build_span_exporter(*, exporter: str | None) -> Any | None:
     """Build a span exporter from the schema's selection.
 
     Returns ``None`` when ``exporter`` is ``"none"`` (caller skips
-    the BatchSpanProcessor).  When ``exporter`` is ``"otlp_grpc"``
-    the gRPC exporter is imported lazily because its protobuf stack
-    is heavier than the HTTP exporter and would otherwise be
-    pulled in for every consumer.
+    the BatchSpanProcessor).  Otherwise the exporter is constructed
+    with no arguments -- the OTel SDK reads ``OTEL_EXPORTER_OTLP_*``
+    natively, so duplicating that here would just be churn.
+
+    The gRPC exporter is imported lazily because its protobuf /
+    grpc-io stack is roughly an order of magnitude heavier than the
+    HTTP transport.  HTTP-only consumers don't pay that import
+    cost; gRPC consumers install the
+    ``kiln-generator[opentelemetry-grpc]`` extra to make the import
+    succeed.
     """
     if exporter == "none":
         return None
     if exporter == "console":
         return ConsoleSpanExporter()
-    headers = _parse_otlp_headers(os.environ.get(headers_env, ""))
-    endpoint = os.environ.get(endpoint_env)
     if exporter == "otlp_grpc":
-        # gRPC stays lazy: the protobuf/grpc stack is roughly an
-        # order of magnitude heavier than the HTTP transport, and
-        # apps on OTLP/HTTP would otherwise pay that import cost
-        # every startup.  Install via the
-        # ``kiln-generator[opentelemetry-grpc]`` extra (additive on
-        # top of ``[opentelemetry]``).
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]  # noqa: PLC0415
             OTLPSpanExporter as GrpcSpanExporter,
         )
 
-        return GrpcSpanExporter(endpoint=endpoint, headers=headers or None)
-    # Default and "otlp_http": HTTP/protobuf transport which has
-    # the smallest dependency footprint and works through proxies.
-    return HttpSpanExporter(endpoint=endpoint, headers=headers or None)
-
-
-def _parse_otlp_headers(raw: str) -> dict[str, str]:
-    """Parse the standard ``OTEL_EXPORTER_OTLP_HEADERS`` format.
-
-    Format is comma-separated ``key=value`` pairs (per the OTel
-    spec).  Whitespace around keys and values is stripped; empty
-    pairs are skipped.  Returns ``{}`` for an empty input rather
-    than ``None`` so the caller can pass it directly to exporter
-    constructors that accept an optional dict.
-    """
-    out: dict[str, str] = {}
-    for pair in raw.split(","):
-        if "=" not in pair:
-            continue
-        key, _, value = pair.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if key:
-            out[key] = value
-    return out
+        return GrpcSpanExporter()
+    # Default and ``otlp_http``: HTTP/protobuf transport.
+    return HttpSpanExporter()
 
 
 def build_tracer_provider(

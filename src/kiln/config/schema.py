@@ -277,16 +277,13 @@ class TelemetryConfig(BaseModel):
     """Span exporter selection.  ``None`` defers to the standard
     ``OTEL_EXPORTER_OTLP_*`` environment variables at runtime
     (recommended for vendor-neutral deployments).  Set explicitly
-    to force a transport regardless of the environment."""
+    to force a transport regardless of the environment.
 
-    exporter_endpoint_env: str = "OTEL_EXPORTER_OTLP_ENDPOINT"
-    """Environment variable read at startup for the OTLP endpoint
-    when :attr:`exporter` is ``"otlp_http"`` / ``"otlp_grpc"``."""
-
-    exporter_headers_env: str = "OTEL_EXPORTER_OTLP_HEADERS"
-    """Environment variable read at startup for OTLP headers
-    (e.g. auth tokens for hosted backends).  Standard OTel format:
-    comma-separated ``key=value`` pairs."""
+    The OTel SDK already reads ``OTEL_EXPORTER_OTLP_ENDPOINT`` and
+    ``OTEL_EXPORTER_OTLP_HEADERS`` natively when the exporter is
+    constructed -- kiln does not duplicate that lookup, so override
+    the *values* of the standard variables in your deployment
+    config; there are no kiln-side knobs for the variable *names*."""
 
     resource_attributes: dict[str, str] = Field(default_factory=dict)
     """Extra static resource attributes added to every signal,
