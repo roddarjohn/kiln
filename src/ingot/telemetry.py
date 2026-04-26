@@ -24,7 +24,7 @@ import functools
 import os
 from typing import TYPE_CHECKING, Any
 
-from opentelemetry import metrics, trace
+from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter,
@@ -336,26 +336,3 @@ def scrub_current_span_attributes(*keys: str) -> None:
     span = trace.get_current_span()
     for key in keys:
         span.set_attribute(key, _SCRUB_PLACEHOLDER)
-
-
-# -------------------------------------------------------------------
-# Lifecycle
-# -------------------------------------------------------------------
-
-
-def shutdown_providers() -> None:
-    """Flush and shut down the active providers.
-
-    Useful in test teardown and SIGTERM handlers; production
-    deployments under uvicorn typically rely on the SDK's atexit
-    hook instead.
-    """
-    tracer_provider = trace.get_tracer_provider()
-    shutdown = getattr(tracer_provider, "shutdown", None)
-    if callable(shutdown):
-        shutdown()
-
-    meter_provider = metrics.get_meter_provider()
-    shutdown = getattr(meter_provider, "shutdown", None)
-    if callable(shutdown):
-        shutdown()
