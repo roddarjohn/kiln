@@ -131,69 +131,11 @@ Notes on inheritance:
 Background tasks (pgqueuer)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-kiln does not scaffold pgqueuer wiring; users follow pgqueuer's
-own idioms (the ``pgq run`` CLI plus a factory you write).  What
-kiln *does* contribute is two helpers in :mod:`ingot.queue` that
-bridge SQLAlchemy and pgqueuer:
-
-* :func:`ingot.queue.get_queue` — wraps a SQLAlchemy
-  ``AsyncSession`` so the request can enqueue jobs inside its own
-  transaction (transactional outbox).
-* :func:`ingot.queue.open_worker_driver` — opens an asyncpg
-  connection from a DSN, coercing SQLAlchemy's
-  ``postgresql+asyncpg://`` prefix to plain ``postgresql://`` so
-  the same env var works for both halves.
-
-**Producer side (enqueue from a request):**
-
-.. code-block:: python
-
-   from ingot.queue import get_queue
-
-   async def publish(article_id, session, ...):
-       # ... app logic that updates the row ...
-       queue = await get_queue(session)
-       await queue.enqueue(["index_article"], [str(article_id).encode()])
-       # If the request handler commits, the job is durable.
-       # If it rolls back, the job never existed.
-
-**Consumer side (worker factory):**
-
-.. code-block:: python
-
-   # blog/queue/main.py
-   import os
-
-   from pgqueuer import PgQueuer
-
-   from ingot.queue import open_worker_driver
-
-
-   async def main() -> PgQueuer:
-       """pgqueuer factory invoked by ``pgq run blog.queue.main:main``."""
-       async with open_worker_driver(os.environ["DATABASE_URL"]) as driver:
-           pgq = PgQueuer(driver)
-
-           @pgq.entrypoint("index_article", concurrency_limit=4)
-           async def index_article(job): ...
-
-           @pgq.entrypoint("send_welcome")
-           async def send_welcome(job): ...
-
-           return pgq
-
-**Run the worker** with pgqueuer's CLI (no kiln involvement):
-
-.. code-block:: bash
-
-   pgq install --pg-dsn "$DATABASE_URL"   # one-time, before first start
-   pgq run blog.queue.main:main           # long-running
-
-The ``pgq install`` step is the pgqueuer schema migration — kiln does
-**not** add the pgqueuer tables to your alembic chain.  Run it once
-per environment.  Per-task tuning (``concurrency_limit``,
-``retry_timer``, ``requests_per_second``, ``serialized_dispatch``)
-is set on each ``@pgq.entrypoint`` per pgqueuer's own docs.
+kiln-generated apps integrate with `pgqueuer
+<https://github.com/janbjorge/pgqueuer>`_ for background work.  See
+:doc:`pgqueuer` for the full runbook (schema setup, defining
+tasks, the worker factory, transactional-outbox enqueue from
+request handlers, and common pitfalls).
 
 Operations
 ----------

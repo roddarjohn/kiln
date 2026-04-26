@@ -421,10 +421,9 @@ Resources that omit ``db_key`` use the database with ``default: true``.
 pgqueuer integration
 ^^^^^^^^^^^^^^^^^^^^
 
-kiln does not scaffold pgqueuer wiring.  See :doc:`usage` for the
-two helpers in :mod:`ingot.queue` (:func:`ingot.queue.get_queue`
-for transactional-outbox enqueue,
+kiln does not scaffold pgqueuer wiring.  See :doc:`pgqueuer` for
+the full guide — the two helpers in :mod:`ingot.queue`
+(:func:`ingot.queue.get_queue` for transactional-outbox enqueue,
 :func:`ingot.queue.open_worker_driver` for the SQLAlchemy→asyncpg
-DSN bridge) and the worker-factory pattern.
-Run the worker with pgqueuer's own CLI:
-``pgq run path.to.module:main``.
+DSN bridge), the worker-factory pattern, and how to run the
+worker with pgqueuer's own CLI.
