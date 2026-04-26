@@ -233,10 +233,6 @@ def _handler_fragment(
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
 
-    _apply_tracing_decorator(
-        handler=handler, ctx=ctx, info=info, imports=imports
-    )
-
     if handler.status_code in (201, 204):
         imports.add_from("starlette", "status")
 
@@ -276,65 +272,6 @@ def _handler_fragment(
         context=_handler_context(handler=handler, info=info),
         imports=imports,
     )
-
-
-def _apply_tracing_decorator(
-    *,
-    handler: RouteHandler,
-    ctx: RenderCtx,
-    info: _ResourceInfo,
-    imports: ImportCollector,
-) -> None:
-    """Prepend a ``@traced_handler`` decorator when telemetry is on.
-
-    Composes the project / resource / op trace flags:
-
-    * Project: ``telemetry.span_per_handler`` (or ``span_per_action``
-      for action ops) gates whether *any* per-handler span is emitted.
-    * Resource: :attr:`ResourceConfig.trace` overrides for one
-      resource; ``None`` inherits, ``False`` disables.
-    * Operation: :attr:`OperationConfig.trace` overrides for one op
-      within a resource; same inheritance.
-
-    The decorator string is added at the head of
-    :attr:`RouteHandler.decorators` (so user-added decorators stay
-    closer to the function), and the import is registered against
-    the route file's import set.  No-op when telemetry is off or
-    any level explicitly opts out.
-    """
-    config = ctx.config
-    telemetry = getattr(config, "telemetry", None)
-    if telemetry is None:
-        return
-
-    # Resource lives one scope above the handler's operation scope.
-    # Operation config is *the* current instance for an op-scope
-    # output, but ``ctx`` only carries instance_id (not the instance
-    # itself for renderers).  ``body_template`` reliably identifies
-    # actions because the action op is the only one that points at
-    # ``fastapi/ops/action.py.j2``.
-    resource_config = ctx.store.ancestor_of(ctx.instance_id, "resource")
-    is_action = handler.body_template == "fastapi/ops/action.py.j2"
-
-    project_flag = (
-        telemetry.span_per_action if is_action else telemetry.span_per_handler
-    )
-    if not project_flag:
-        return
-    if getattr(resource_config, "trace", None) is False:
-        return
-
-    op_name = handler.op_name
-    span_name = f"{info.model.lower}.{op_name}"
-    record = "True" if telemetry.record_exceptions else "False"
-    imports.add_from("ingot.telemetry", "traced_handler")
-    decorator = (
-        f'@traced_handler("{span_name}", '
-        f'resource="{info.model.lower}", '
-        f'op="{op_name}", '
-        f"record_exceptions={record})"
-    )
-    handler.decorators = [decorator, *handler.decorators]
 
 
 def _handler_context(

@@ -82,6 +82,7 @@ update = "kiln.operations.update:Update"
 delete = "kiln.operations.delete:Delete"
 action = "kiln.operations.action:Action"
 auth = "kiln.operations.auth:Auth"
+tracing = "kiln.operations.tracing:Tracing"
 router = "kiln.operations.routing:Router"
 project_router = "kiln.operations.routing:ProjectRouter"
 

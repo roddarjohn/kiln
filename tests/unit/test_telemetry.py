@@ -7,9 +7,7 @@ from pydantic import ValidationError
 
 from foundry.engine import BuildContext
 from foundry.outputs import StaticFile
-from foundry.render import RenderCtx
-from foundry.render import registry as shared_registry
-from foundry.scope import PROJECT, ScopeTree, discover_scopes
+from foundry.scope import PROJECT, Scope, ScopeTree
 from foundry.store import BuildStore
 from kiln.config.schema import (
     App,
@@ -354,29 +352,57 @@ class TestAuthScaffoldTelemetryFlag:
 
 
 # ---------------------------------------------------------------------------
-# Per-handler @traced_handler injection via the
-# central handler renderer.  Goes through the real render registry so
-# the resource/operation scope walking and import collection paths
-# all run end to end.
+# Tracing operation -- prepends @traced_handler to RouteHandlers in the
+# build store.  Drives the op directly (resource scope,
+# after_children=True) rather than going through the renderer, since
+# the decoration is now a build-time concern not a render-time one.
 # ---------------------------------------------------------------------------
 
 
-_APP_ID = "project.apps.0"
-_RESOURCE_ID = f"{_APP_ID}.resources.0"
-_OP_ID = f"{_RESOURCE_ID}.operations.0"
+from kiln.operations.tracing import Tracing  # noqa: E402
 
 
-def _handler_render_ctx(
+def _crud_handler(op_name: str = "get") -> RouteHandler:
+    return RouteHandler(
+        method="GET",
+        path="/{id}",
+        function_name=f"{op_name}_post",
+        op_name=op_name,
+    )
+
+
+def _action_handler(op_name: str = "publish") -> RouteHandler:
+    return RouteHandler(
+        method="POST",
+        path=f"/{{id}}/{op_name}",
+        function_name=f"{op_name}_post",
+        op_name=op_name,
+        body_template="fastapi/ops/action.py.j2",
+    )
+
+
+_APP_SCOPE = Scope(name="app", config_key="apps", parent=PROJECT)
+_RESOURCE_SCOPE = Scope(
+    name="resource", config_key="resources", parent=_APP_SCOPE
+)
+_OP_SCOPE = Scope(
+    name="operation", config_key="operations", parent=_RESOURCE_SCOPE
+)
+_SCOPE_TREE = ScopeTree([PROJECT, _APP_SCOPE, _RESOURCE_SCOPE, _OP_SCOPE])
+
+
+def _resource_ctx(
     *,
     telemetry: TelemetryConfig | None,
-    resource: ResourceConfig | None = None,
-) -> RenderCtx:
-    """Build a RenderCtx wired up to the real project/app/resource tree.
+    resource: ResourceConfig,
+    handlers: list[RouteHandler],
+) -> BuildContext:
+    """Build a resource-scope BuildContext with handlers registered.
 
-    Mirrors the ``_rctx`` helper in ``test_renderers.py`` but exposes
-    the telemetry / resource overrides this test module needs.
+    Mirrors how the engine sets things up: a project carries the
+    telemetry config; the resource scope holds OperationConfig
+    children; each child's outputs include RouteHandlers.
     """
-    resource = resource or ResourceConfig(model="myapp.models.Post")
     cfg = ProjectConfig(
         databases=[DatabaseConfig(key="primary", default=True)],
         telemetry=telemetry,
@@ -387,186 +413,168 @@ def _handler_render_ctx(
             )
         ],
     )
-    store = BuildStore(scope_tree=discover_scopes(ProjectConfig))
+    store = BuildStore(scope_tree=_SCOPE_TREE)
     store.register_instance("project", cfg)
-    store.register_instance(_APP_ID, object(), parent="project")
-    store.register_instance(_RESOURCE_ID, resource, parent=_APP_ID)
-    store.register_instance(_OP_ID, object(), parent=_RESOURCE_ID)
-    return RenderCtx(
-        env=None,
+    store.register_instance("project.apps.0", cfg.apps[0], parent="project")
+    resource_id = "project.apps.0.resources.0"
+    store.register_instance(resource_id, resource, parent="project.apps.0")
+    for idx, handler in enumerate(handlers):
+        op_id = f"{resource_id}.operations.{idx}"
+        op_cfg = next(
+            (op for op in resource.operations if op.name == handler.op_name),
+            OperationConfig(name=handler.op_name),
+        )
+        store.register_instance(op_id, op_cfg, parent=resource_id)
+        store.add(op_id, "tracing-test", handler)
+    return BuildContext(
         config=cfg,
-        package_prefix="_generated",
-        language="python",
+        scope=_RESOURCE_SCOPE,
+        instance=resource,
+        instance_id=resource_id,
         store=store,
-        instance_id=_OP_ID,
     )
 
 
-def _crud_handler() -> RouteHandler:
-    return RouteHandler(
-        method="GET",
-        path="/{id}",
-        function_name="get_post",
-        op_name="get",
+def _run_tracing(
+    *,
+    telemetry: TelemetryConfig | None,
+    resource: ResourceConfig | None = None,
+    handlers: list[RouteHandler] | None = None,
+) -> list[RouteHandler]:
+    """Run the Tracing op against a single resource and return the handlers."""
+    handlers = handlers if handlers is not None else [_crud_handler()]
+    op_configs = [
+        OperationConfig(name=h.op_name)
+        for h in handlers
+        if h.body_template != "fastapi/ops/action.py.j2"
+    ] + [
+        OperationConfig(name=h.op_name, type="action")
+        for h in handlers
+        if h.body_template == "fastapi/ops/action.py.j2"
+    ]
+    resource = resource or ResourceConfig(
+        model="myapp.models.Post", operations=op_configs
     )
-
-
-def _action_handler() -> RouteHandler:
-    return RouteHandler(
-        method="POST",
-        path="/{id}/publish",
-        function_name="publish_post",
-        op_name="publish",
-        body_template="fastapi/ops/action.py.j2",
+    ctx = _resource_ctx(
+        telemetry=telemetry, resource=resource, handlers=handlers
     )
+    op = Tracing()
+    if op.when(ctx):
+        list(op.build(ctx, _options=Tracing.Options()))
+    return handlers
 
 
-def _decorators(handler: RouteHandler) -> list[str]:
-    return list(handler.decorators)
+class TestTracingOp:
+    def test_when_returns_false_without_telemetry(self):
+        ctx = _resource_ctx(
+            telemetry=None,
+            resource=ResourceConfig(model="myapp.models.Post"),
+            handlers=[],
+        )
+        assert Tracing().when(ctx) is False
 
+    def test_when_returns_true_with_telemetry(self):
+        ctx = _resource_ctx(
+            telemetry=TelemetryConfig(service_name="svc"),
+            resource=ResourceConfig(model="myapp.models.Post"),
+            handlers=[],
+        )
+        assert Tracing().when(ctx) is True
 
-def _all_imports(fragments) -> str:
-    from foundry.imports import ImportCollector
-    from foundry.render import SnippetFragment
-
-    merged = ImportCollector()
-    for f in fragments:
-        if isinstance(f, SnippetFragment) and f.imports is not None:
-            merged.update(f.imports)
-    return merged.format("python")
-
-
-class TestHandlerTracingDecorator:
     def test_no_decorator_when_telemetry_off(self):
-        handler = _crud_handler()
-        shared_registry.render(handler, _handler_render_ctx(telemetry=None))
-        assert _decorators(handler) == []
+        handlers = _run_tracing(telemetry=None)
+        assert handlers[0].decorators == []
+        assert handlers[0].extra_imports == []
 
     def test_traced_handler_added_for_crud(self):
-        handler = _crud_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(telemetry=TelemetryConfig(service_name="svc")),
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(service_name="svc"),
         )
-        decs = _decorators(handler)
+        decs = handlers[0].decorators
         assert len(decs) == 1
         assert decs[0].startswith("@traced_handler(")
         assert '"post.get"' in decs[0]
         assert 'resource="post"' in decs[0]
         assert 'op="get"' in decs[0]
         assert "record_exceptions=True" in decs[0]
+        assert (
+            "ingot.telemetry",
+            "traced_handler",
+        ) in handlers[0].extra_imports
 
-    def test_traced_handler_emitted_for_action_body_template(self):
-        # Actions go through the same decorator as CRUD ops; only
-        # the ``op`` kwarg's value distinguishes them (user-defined
-        # name vs the fixed CRUD name set).
-        handler = _action_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(telemetry=TelemetryConfig(service_name="svc")),
+    def test_traced_handler_emitted_for_action(self):
+        # Actions reuse traced_handler; the user-defined ``op`` name
+        # discriminates from the fixed CRUD name set.
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(service_name="svc"),
+            handlers=[_action_handler("publish")],
         )
-        decs = _decorators(handler)
+        decs = handlers[0].decorators
         assert len(decs) == 1
         assert decs[0].startswith("@traced_handler(")
         assert 'op="publish"' in decs[0]
         assert "action=" not in decs[0]
 
     def test_record_exceptions_threaded_through(self):
-        handler = _crud_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(
-                telemetry=TelemetryConfig(
-                    service_name="svc",
-                    record_exceptions=False,
-                ),
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(
+                service_name="svc", record_exceptions=False
             ),
         )
-        assert "record_exceptions=False" in _decorators(handler)[0]
+        assert "record_exceptions=False" in handlers[0].decorators[0]
 
     def test_resource_trace_false_skips_decorator(self):
-        handler = _crud_handler()
-        resource = ResourceConfig(model="myapp.models.Post", trace=False)
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(
-                telemetry=TelemetryConfig(service_name="svc"),
-                resource=resource,
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(service_name="svc"),
+            resource=ResourceConfig(
+                model="myapp.models.Post",
+                trace=False,
+                operations=[OperationConfig(name="get")],
             ),
         )
-        assert _decorators(handler) == []
+        assert handlers[0].decorators == []
 
-    def test_span_per_handler_off_skips_decorator(self):
-        handler = _crud_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(
-                telemetry=TelemetryConfig(
-                    service_name="svc",
-                    span_per_handler=False,
-                ),
+    def test_op_trace_false_skips_only_that_op(self):
+        # Per-op opt-out leaves siblings untouched.
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(service_name="svc"),
+            resource=ResourceConfig(
+                model="myapp.models.Post",
+                operations=[
+                    OperationConfig(name="get", trace=False),
+                    OperationConfig(name="list"),
+                ],
             ),
+            handlers=[_crud_handler("get"), _crud_handler("list")],
         )
-        assert _decorators(handler) == []
+        assert handlers[0].decorators == []  # get: opted out
+        assert handlers[1].decorators != []  # list: still traced
 
-    def test_span_per_action_off_skips_action_decorator(self):
-        handler = _action_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(
-                telemetry=TelemetryConfig(
-                    service_name="svc",
-                    span_per_action=False,
-                ),
+    def test_span_per_handler_off_skips_crud(self):
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(
+                service_name="svc", span_per_handler=False
             ),
         )
-        assert _decorators(handler) == []
+        assert handlers[0].decorators == []
+
+    def test_span_per_action_off_skips_actions(self):
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(
+                service_name="svc", span_per_action=False
+            ),
+            handlers=[_action_handler("publish")],
+        )
+        assert handlers[0].decorators == []
 
     def test_span_per_handler_off_does_not_disable_actions(self):
-        # Action handlers are gated by span_per_action, not
-        # span_per_handler -- the two flags are independent (the
-        # decorator emitted is the same in either case, but the
-        # gate that decides whether to emit it is different).
-        handler = _action_handler()
-        shared_registry.render(
-            handler,
-            _handler_render_ctx(
-                telemetry=TelemetryConfig(
-                    service_name="svc",
-                    span_per_handler=False,
-                    span_per_action=True,
-                ),
+        # span_per_handler and span_per_action are independent gates.
+        handlers = _run_tracing(
+            telemetry=TelemetryConfig(
+                service_name="svc",
+                span_per_handler=False,
+                span_per_action=True,
             ),
+            handlers=[_action_handler("publish")],
         )
-        assert _decorators(handler)[0].startswith("@traced_handler(")
-
-    def test_decorator_import_added(self):
-        handler = _crud_handler()
-        fragments = list(
-            shared_registry.render(
-                handler,
-                _handler_render_ctx(
-                    telemetry=TelemetryConfig(service_name="svc"),
-                ),
-            )
-        )
-        block = _all_imports(fragments)
-        # Imports point at ingot.telemetry directly -- no per-project
-        # re-export module sits between the generated handler and
-        # the kiln-shipped decorator.
-        assert "from ingot.telemetry import traced_handler" in block
-
-    def test_action_uses_same_decorator_import(self):
-        # No traced_action symbol -- actions reuse traced_handler.
-        handler = _action_handler()
-        fragments = list(
-            shared_registry.render(
-                handler,
-                _handler_render_ctx(
-                    telemetry=TelemetryConfig(service_name="svc"),
-                ),
-            )
-        )
-        block = _all_imports(fragments)
-        assert "from ingot.telemetry import traced_handler" in block
-        assert "traced_action" not in block
+        assert handlers[0].decorators[0].startswith("@traced_handler(")
