@@ -75,4 +75,4 @@ class Order:
             handler.body_context["default_sort_field"] = options.default
 
         handler.body_context["default_sort_dir"] = options.default_dir
-        handler.extra_imports.append(("ingot", "apply_ordering"))
+        handler.extra_imports.append(("ingot.ordering", "apply_ordering"))

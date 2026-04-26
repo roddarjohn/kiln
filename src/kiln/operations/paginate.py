@@ -73,7 +73,7 @@ class Paginate:
         handler.body_context["cursor_field"] = options.cursor_field
         handler.extra_imports.append(
             (
-                "ingot",
+                "ingot.pagination",
                 "apply_keyset_pagination"
                 if options.mode == "keyset"
                 else "apply_offset_pagination",
