@@ -61,12 +61,15 @@ import boto3
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import BigInteger, DateTime, String, delete, insert, update
+
+# Imported at runtime (not under TYPE_CHECKING) because kiln's
+# action introspector calls typing.get_type_hints() on these
+# functions and would fail to resolve 'AsyncSession' otherwise.
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 DEFAULT_PRESIGN_TTL = 900
