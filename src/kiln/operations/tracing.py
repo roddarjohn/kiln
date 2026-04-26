@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ResourceConfig, TelemetryConfig
+    from kiln.config.schema import ProjectConfig, ResourceConfig
 
 
 @operation("tracing", scope="resource", after_children=True)
@@ -52,7 +52,7 @@ class Tracing:
         Per-resource and per-op gating lives in :meth:`build`; gating
         here too would duplicate it.
         """
-        return getattr(ctx.config, "telemetry", None) is not None
+        return bool(getattr(ctx.config, "telemetry", None))
 
     def build(
         self,
@@ -60,9 +60,9 @@ class Tracing:
         _options: BaseModel,
     ) -> Iterable[object]:
         """Prepend ``@traced_handler`` to handlers whose op opts in."""
-        telemetry = cast(
-            "TelemetryConfig", getattr(ctx.config, "telemetry", None)
-        )
+        config = cast("ProjectConfig", ctx.config)
+        telemetry = config.telemetry
+        assert telemetry is not None  # noqa: S101 -- guaranteed by when()
 
         resource = ctx.instance
         if resource.trace is False:
