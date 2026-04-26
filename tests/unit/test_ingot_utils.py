@@ -1,4 +1,4 @@
-"""Tests for ingot.responses."""
+"""Tests for ingot.utils."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from ingot.responses import assert_rowcount, get_object_from_query_or_404
+from ingot.utils import assert_rowcount, get_object_from_query_or_404
 
 
 def _mock_db(row: object) -> MagicMock:

@@ -30,19 +30,29 @@ class IntrospectedAction:
         model_param_name: Name of the parameter holding the model
             instance, or ``None`` if the function doesn't take one
             (collection action).
+        model_class_param_name: Name of the parameter typed
+            ``type[X]`` where the resource model is a subclass of
+            X.  The generated handler passes the resource's mapped
+            class as that kwarg, so a collection action can INSERT
+            without a per-resource factory binding.  ``None`` when
+            no such parameter exists.
         request_class: Name of the Pydantic request-body class, if
             any.
         request_module: Module containing ``request_class``.
-        response_class: Name of the Pydantic response class.
-        response_module: Module containing ``response_class``.
+        response_class: Name of the Pydantic response class, or
+            ``None`` when the function returns ``-> None`` (the
+            generated route emits 204 No Content with no body).
+        response_module: Module containing ``response_class``, or
+            ``None`` when the function returns ``-> None``.
 
     """
 
     model_param_name: str | None
+    model_class_param_name: str | None
     request_class: str | None
     request_module: str | None
-    response_class: str
-    response_module: str
+    response_class: str | None
+    response_module: str | None
 
     @property
     def is_object_action(self) -> bool:
@@ -53,6 +63,15 @@ class IntrospectedAction:
         and operate on the whole table.
         """
         return bool(self.model_param_name)
+
+    @property
+    def returns_none(self) -> bool:
+        """``True`` when the function is annotated ``-> None``.
+
+        The generated route emits 204 No Content with no body in
+        this case; the action template skips ``return result``.
+        """
+        return self.response_class is None
 
 
 def introspect_action_fn(
@@ -83,6 +102,7 @@ def introspect_action_fn(
     sig = inspect.signature(fn)
 
     model_param_name: str | None = None
+    model_class_param_name: str | None = None
     request_class: str | None = None
     request_module: str | None = None
 
@@ -92,8 +112,12 @@ def introspect_action_fn(
         if hint is None or _is_async_session(hint):
             continue
 
-        if hint is model_cls:
+        if _matches_model(hint, model_cls):
             model_param_name = param_name
+            continue
+
+        if _matches_model_class_param(hint, model_cls):
+            model_class_param_name = param_name
             continue
 
         if not _is_pydantic_model(hint):
@@ -113,6 +137,7 @@ def introspect_action_fn(
 
     return IntrospectedAction(
         model_param_name=model_param_name,
+        model_class_param_name=model_class_param_name,
         request_class=request_class,
         request_module=request_module,
         response_class=response_class,
@@ -158,6 +183,53 @@ def _resolve_hints(
         raise ValueError(msg) from exc
 
 
+def _matches_model_class_param(hint: object, model_cls: object) -> bool:
+    """Return ``True`` when *hint* is ``type[X]`` and *model_cls* is X or a sub.
+
+    Counterpart to :func:`_matches_model` for the *class* (not the
+    instance) of the resource model.  Lets a generic collection
+    action declare ``model_cls: type[FileMixin]`` and have the
+    handler plug in the concrete mapped class -- no per-resource
+    factory binding required.
+
+    The match goes through :func:`typing.get_origin`/``get_args`` so
+    only true ``type[X]`` parameterizations qualify; a bare ``type``
+    annotation doesn't, and neither does ``Type[X]`` from older
+    pre-3.9 code paths because ``typing.Type`` resolves to ``type``
+    under modern annotation evaluation.
+    """
+    origin = typing.get_origin(hint)
+    if origin is not type:
+        return False
+    args = typing.get_args(hint)
+    if len(args) != 1:
+        return False
+    return _matches_model(args[0], model_cls)
+
+
+def _matches_model(hint: object, model_cls: object) -> bool:
+    """Return ``True`` when *hint* is the model class or a supertype.
+
+    The exact-identity case (``hint is model_cls``) is the common one
+    -- a user-written action annotates its first parameter with the
+    same SQLAlchemy class the resource points at.  The subclass case
+    is what lets generic actions live in shared modules: a function
+    annotated ``FileMixin`` matches any concrete model that extends
+    ``FileMixin``, so :mod:`ingot.files` can ship reusable
+    upload/download actions.
+
+    ``object`` is rejected explicitly: any class is a subclass of
+    ``object``, so without the guard a parameter typed ``object``
+    would silently be treated as the model param.
+    """
+    return (
+        isinstance(hint, type)
+        and isinstance(model_cls, type)
+        and hint is not object
+        and issubclass(model_cls, hint)
+    )
+
+
 def _is_async_session(hint: object) -> bool:
     """Return ``True`` when *hint* is SQLAlchemy's ``AsyncSession``.
 
@@ -176,30 +248,35 @@ def _is_pydantic_model(hint: object) -> bool:
 def _validate_return_type(
     hints: dict[str, type],
     fn_dotted: str,
-) -> tuple[str, str]:
+) -> tuple[str | None, str | None]:
     """Extract and validate the return type annotation.
 
     Returns:
-        ``(class_name, module_path)`` tuple.
+        ``(class_name, module_path)`` tuple, or ``(None, None)``
+        when the function is annotated ``-> None`` -- the action op
+        treats that as "no body, 204 No Content".
 
     Raises:
-        TypeError: If the return annotation is missing or is not a
-            ``BaseModel`` subclass.
+        TypeError: If the return annotation is missing or is neither
+            a ``BaseModel`` subclass nor ``None``.
 
     """
     return_hint = hints.get("return")
     if return_hint is None:
         msg = (
             f"Action '{fn_dotted}' has no return type annotation. "
-            f"A BaseModel return type is required."
+            f"Annotate the return as a BaseModel subclass or 'None'."
         )
         raise TypeError(msg)
+
+    # ``-> None`` resolves to the NoneType class via get_type_hints.
+    if return_hint is type(None):
+        return None, None
 
     if not _is_pydantic_model(return_hint):
         msg = (
             f"Action '{fn_dotted}' return type '{return_hint}' is "
-            f"not a BaseModel subclass. A BaseModel return type is "
-            f"required."
+            f"not a BaseModel subclass or 'None'."
         )
         raise TypeError(msg)
 

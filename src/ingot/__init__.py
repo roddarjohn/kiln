@@ -1,40 +1,25 @@
 """Runtime helpers for kiln-generated FastAPI projects.
 
-These are the shared route utilities that generated code imports
-directly (``from ingot import apply_offset_pagination, ...``) rather
-than having its own copy emitted into the target project.
+Each submodule groups related primitives:
 
-Everything here is pure Python — the kiln CLI knows to emit imports
-pointing at this module instead of scaffolding a ``utils.py`` into
-the generated app.
+* :mod:`ingot.auth` -- JWT session auth (bearer + cookie transports).
+* :mod:`ingot.files` -- :class:`~ingot.files.FileMixin` +
+  :func:`~ingot.files.bind_file_model` factory + S3 client + four
+  ready-made action functions.  Requires the ``files`` extra
+  (``pip install 'kiln-generator[files]'``) for ``boto3``.
+* :mod:`ingot.filters` -- declarative filter expressions.
+* :mod:`ingot.ordering` -- sort-direction + apply-ordering helper.
+* :mod:`ingot.pagination` -- keyset and offset pagination.
+* :mod:`ingot.utils` -- HTTP-status row-lookup guards
+  (``get_object_from_query_or_404``, ``assert_rowcount``).
+
+Generated code imports from the owning submodule directly --
+``from ingot.files import bind_file_model``,
+``from ingot.auth import session_auth`` -- so the package root is
+intentionally empty.  This keeps the public surface organized by
+concern rather than as one flat namespace.
+
+Everything here is pure Python -- the kiln CLI knows to emit
+imports pointing at these submodules instead of scaffolding a
+``utils.py`` into the generated app.
 """
-
-from __future__ import annotations
-
-from ingot.auth import (
-    clear_session,
-    decode_jwt,
-    encode_jwt,
-    issue_session,
-    session_auth,
-)
-from ingot.filters import FilterOp, apply_filters
-from ingot.ordering import SortDirection, apply_ordering
-from ingot.pagination import apply_keyset_pagination, apply_offset_pagination
-from ingot.responses import assert_rowcount, get_object_from_query_or_404
-
-__all__ = [
-    "FilterOp",
-    "SortDirection",
-    "apply_filters",
-    "apply_keyset_pagination",
-    "apply_offset_pagination",
-    "apply_ordering",
-    "assert_rowcount",
-    "clear_session",
-    "decode_jwt",
-    "encode_jwt",
-    "get_object_from_query_or_404",
-    "issue_session",
-    "session_auth",
-]

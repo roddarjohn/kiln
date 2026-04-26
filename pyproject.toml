@@ -25,6 +25,9 @@ dependencies = [
   "pyjwt>=2.0",
 ]
 
+[project.optional-dependencies]
+files = ["boto3>=1.34"]
+
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
 Documentation = "https://roddarjohn.github.io/kiln/"
@@ -72,6 +75,9 @@ dev = [
   "coverage[toml]>=7.0",
   "tox>=4.49.1",
   "tox-uv>=1.33.2",
+  # Ingot's files extra ships boto3 as optional; CI installs it
+  # here so the full test suite can run without an explicit --extra.
+  "boto3>=1.34",
 ]
 playground = [
   "fastapi>=0.115",

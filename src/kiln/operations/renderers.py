@@ -525,8 +525,8 @@ def utils_imports() -> list[tuple[str, str]]:
     ``assert_rowcount``; this centralizes the pair.
     """
     return [
-        ("ingot", "get_object_from_query_or_404"),
-        ("ingot", "assert_rowcount"),
+        ("ingot.utils", "get_object_from_query_or_404"),
+        ("ingot.utils", "assert_rowcount"),
     ]
 
 
