@@ -49,7 +49,7 @@ class Update:
 
         Args:
             ctx: Build context for the ``"update"`` operation entry.
-            options: Parsed :class:`FieldsOptions`.
+            options: Parsed :class:`~kiln.operations.types.FieldsOptions`.
 
         Yields:
             The ``{Model}UpdateRequest`` schema (all fields

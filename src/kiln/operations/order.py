@@ -41,7 +41,7 @@ class Order:
 
         Args:
             ctx: Build context for the ``"order"`` op entry.
-            options: Parsed :class:`OrderConfig`.
+            options: Parsed :class:`~kiln.config.schema.OrderConfig`.
 
         Yields:
             ``{Model}SortField`` enum and ``{Model}SortClause``

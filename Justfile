@@ -36,6 +36,25 @@ generate-pgcraft-stdlib:
 docs:
     uv run python scripts/docs/build_versioned_docs.py
 
+# Strict single-version docs build (CI uses this to fail PRs that
+# introduce sphinx warnings).  No version-shim, no caching -- just
+# the current tree under -W so any warning trips a non-zero exit.
+#
+# A small docutils-level filter excludes RST-parse messages with no
+# source location: those come from sphinx-autodoc-typehints inlining
+# foreign-library docstrings (notably SQLAlchemy's, which use
+# library-internal RST conventions docutils flags).  Real warnings
+# against our source always carry a location, so the filter never
+# masks anything from our own code.
+docs-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run --group docs sphinx-build -W --keep-going -b html \
+        docs docs/_build/check 2> >(
+            grep -v -E '^:[0-9]+: \(WARNING/2\) (Inline (literal|interpreted text)|Block quote ends)' \
+            | grep -v -E '^:[0-9]+: \(ERROR/3\) Unexpected indentation' >&2
+        )
+
 # Serve docs with live reload for editing (http://127.0.0.1:8000)
 serve-docs-autoreload:
     uv run --group docs sphinx-autobuild docs docs/_build/html

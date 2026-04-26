@@ -314,7 +314,7 @@ def default_storage() -> S3Storage:
 class UploadRequest(BaseModel):
     """Body for the request-upload action.
 
-    Carries everything :func:`make_request_upload` needs to reserve
+    Carries everything :func:`~ingot.files.request_upload` needs to reserve
     a key and bind the presigned PUT URL to the right content type.
     """
 
@@ -359,7 +359,7 @@ async def request_upload(
     *model_cls* is supplied by the action handler, which detects
     the ``type[FileMixin]`` annotation and passes the resource's
     mapped class.  No per-resource factory binding needed --
-    consumers point :func:`resource.action` at this function
+    consumers point a resource's ``action`` config at this function
     directly.
     """
     file_id = uuid.uuid4()

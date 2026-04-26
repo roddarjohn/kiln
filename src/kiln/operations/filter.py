@@ -48,7 +48,7 @@ class Filter:
 
         Args:
             ctx: Build context for the ``"filter"`` op entry.
-            options: Parsed :class:`FilterConfig`.
+            options: Parsed :class:`~kiln.config.schema.FilterConfig`.
 
         Yields:
             ``{Model}FilterCondition`` schema.  (The expression

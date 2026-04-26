@@ -10,12 +10,13 @@ renders each wrapper template once.
 
 Per-op RouteHandler rendering is owned by each op module (e.g.
 :mod:`kiln.operations.list`).  Those modules call
-:func:`build_handler_fragment` with their op-specific body
-template, context, and import tuple.  This module keeps only
-the cross-cutting renderers (schema / enum / serializer /
-testcase / static) plus a generic :class:`RouteHandler`
-fallback for hand-written handlers that aren't one of the
-registered subclasses.
+``build_handler_fragment`` with their op-specific body template,
+context, and import tuple.  This module keeps only the
+cross-cutting renderers (schema / enum / serializer / testcase /
+static) plus a generic
+:class:`~kiln.operations.types.RouteHandler` fallback for
+hand-written handlers that aren't one of the registered
+subclasses.
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
 @registry.renders(SchemaClass)
 def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
-    """Render a :class:`SchemaClass` into the schemas file.
+    """Render a SchemaClass into the schemas file.
 
     Dispatches on :attr:`SchemaClass.body_template`:
 
@@ -542,7 +543,7 @@ def render_enum_class(enum: EnumClass) -> str:
 
     Kept as a Python string builder because repr-formatted
     member values aren't something jinja filters express
-    cleanly.  Called from :func:`_enum_fragment` to pre-render
+    cleanly.  Called from ``_enum_fragment`` to pre-render
     the slot value.
     """
     lines = [f"class {enum.name}({enum.base}):"]

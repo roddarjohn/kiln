@@ -3,6 +3,7 @@ name: docs
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -15,7 +16,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+      - uses: extractions/setup-just@v4
+      - run: just docs-check
+
   build:
+    if: github.event_name != 'pull_request'
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

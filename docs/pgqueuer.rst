@@ -66,7 +66,7 @@ Defining tasks
 --------------
 
 A pgqueuer task is just an async function taking a
-:class:`pgqueuer.Job`.  Put them anywhere importable:
+``pgqueuer.Job``.  Put them anywhere importable:
 
 .. code-block:: python
 
@@ -89,7 +89,7 @@ structured data: ``json.dumps({"id": ...}).encode()``.
 Worker factory
 --------------
 
-The factory creates a :class:`pgqueuer.PgQueuer`, registers each
+The factory creates a ``pgqueuer.PgQueuer``, registers each
 entrypoint, and returns it.  Use
 :func:`ingot.queue.open_worker_driver` to open the connection — it
 strips the ``+asyncpg`` prefix so the same ``DATABASE_URL`` env var
@@ -179,7 +179,7 @@ Enqueueing from a request
 -------------------------
 
 This is where kiln's :func:`~ingot.queue.get_queue` shines.  It
-returns a :class:`pgqueuer.Queries` bound to the asyncpg connection
+returns a ``pgqueuer.Queries`` bound to the asyncpg connection
 underlying your SQLAlchemy session — so ``enqueue`` runs in the
 **same transaction** as your other writes.  If the request commits,
 the job is durable; if it rolls back, the job never existed.
@@ -211,7 +211,7 @@ automatically):
        # update AND the job insert durable atomically.  Roll back
        # and neither one happened.
 
-:meth:`pgqueuer.Queries.enqueue` accepts:
+``pgqueuer.Queries.enqueue`` accepts:
 
 .. code-block:: python
 
@@ -230,7 +230,7 @@ Testing
 -------
 
 Tasks are plain async functions; test them directly with a fake
-:class:`~pgqueuer.Job`:
+``pgqueuer.Job``:
 
 .. code-block:: python
 

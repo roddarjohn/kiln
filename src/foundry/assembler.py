@@ -1,10 +1,11 @@
 """Assembler: combine fragments into output files.
 
-Each dispatched render gets a :class:`RenderCtx` with ``store``
-and ``instance_id`` set to the current entry.  Renderers yield a
-:class:`FileFragment` (declaring the output file and its
-wrapper template) plus one or more :class:`SnippetFragment`
-contributions into the file's slot lists.  This module folds
+Each dispatched render gets a :class:`~foundry.render.RenderCtx`
+with ``store`` and ``instance_id`` set to the current entry.
+Renderers yield a :class:`~foundry.render.FileFragment` (declaring
+the output file and its wrapper template) plus one or more
+:class:`~foundry.render.SnippetFragment` contributions into the
+file's slot lists.  This module folds
 them: files with the same path merge via ``|``, snippets render
 (either from ``value`` or their ``template``), and each file's
 wrapper is rendered once with every slot's items in order.
@@ -45,8 +46,8 @@ def assemble(
         ctx: Render context -- env, config, package prefix.
 
     Returns:
-        Flat list of :class:`GeneratedFile` objects ready for
-        output.
+        Flat list of :class:`~foundry.spec.GeneratedFile` objects
+        ready for output.
 
     """
     ctx = replace(ctx, store=store)

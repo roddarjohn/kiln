@@ -2,8 +2,8 @@
 
 Resource-scoped, ``after_children=True``, emits nothing.  Stamps a
 ``Depends(get_session)`` parameter onto each handler whose op has
-effective ``require_auth`` and flips :attr:`TestCase.requires_auth`
-to match.
+effective ``require_auth`` and flips
+:attr:`~kiln.operations.types.TestCase.requires_auth` to match.
 """
 
 from __future__ import annotations

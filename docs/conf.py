@@ -61,13 +61,92 @@ html_sidebars = {
 exclude_patterns = ["_generated"]
 myst_heading_anchors = 3
 add_module_names = False
+#: Render type annotations only in signatures, not in description
+#: blocks.  sphinx-autodoc-typehints inlines third-party
+#: docstrings (notably SQLAlchemy's) when given the chance, and
+#: those docstrings carry RST that docutils can't parse cleanly
+#: -- ``signature``-only avoids that whole class of noise.
+autodoc_typehints = "signature"
 nitpicky = True
-nitpick_ignore = []
+#: Targets that aren't worth resolving (third-party libraries
+#: without an intersphinx inventory, or scoped-name placeholders
+#: that the Pydantic Annotated[..., Scoped(name="...")] pattern
+#: surfaces to autodoc as bare class names).
+nitpick_ignore = [
+    # pgqueuer has no published Sphinx inventory.
+    ("py:class", "pgqueuer.Queries"),
+    ("py:class", "pgqueuer.Job"),
+    ("py:class", "pgqueuer.PgQueuer"),
+    ("py:meth", "pgqueuer.Queries.enqueue"),
+    ("py:class", "pgqueuer.adapters.persistence.queries.Queries"),
+    ("py:class", "AsyncpgDriver"),
+    # FastAPI exposes HTTPException via runtime imports but its
+    # docs site doesn't ship an objects.inv with API-level entries.
+    ("py:exc", "HTTPException"),
+    # Annotated[..., Scoped(name="<scope>")] surfaces the scope
+    # name string to autodoc as if it were a class.
+    ("py:class", "app"),
+    ("py:class", "resource"),
+    ("py:class", "operation"),
+    ("py:class", "modifier"),
+    # NamedTuple internals (private API).
+    ("py:class", "foundry.operation.OperationEntry"),
+]
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
+    "pydantic": ("https://docs.pydantic.dev/latest", None),
+    "sqlalchemy": ("https://docs.sqlalchemy.org/en/20", None),
+    "jinja2": ("https://jinja.palletsprojects.com/en/stable", None),
+    "boto3": ("https://boto3.amazonaws.com/v1/documentation/api/latest", None),
+    "fastapi": ("https://fastapi.tiangolo.com", None),
 }
 
-suppress_warnings = ["sphinx_autodoc_typehints.forward_reference"]
+suppress_warnings = [
+    "sphinx_autodoc_typehints.forward_reference",
+    # SQLAlchemy ships docstrings that pull in psycopg-only types;
+    # the guarded import warns even though we use the asyncpg path.
+    "sphinx_autodoc_typehints.guarded_import",
+    # Pygments doesn't have a strict jsonnet lexer; relaxed mode
+    # produces correct output, the warning is just noise.
+    "misc.highlighting_failure",
+    # SQLAlchemy ships docstrings using its own RST conventions
+    # (:paramref:, deeper indentation than docutils accepts).  The
+    # typehints extension inlines them while resolving cross-refs.
+    # These messages have no source location because the parser
+    # context is the inlined string, not a tracked file.
+    "docutils",
+]
 
 templates_path = ["_templates"]
+
+
+def setup(app):  # noqa: D103, ANN001, ANN201
+    """Register a no-op ``:paramref:`` role.
+
+    SQLAlchemy uses ``:paramref:`` in its own docstrings.  When
+    sphinx-autodoc-typehints inlines those docstrings to resolve
+    cross-references, the unknown role would error out under
+    ``-W``.  We register a passthrough that renders the contents
+    as inline literal -- equivalent to declaring the role a
+    no-op, without depending on sphinx-paramlinks.
+
+    Note: the same docstring inlining surfaces other docutils
+    parse warnings (mismatched backticks, indentation jumps in
+    SQLAlchemy's RST).  Those go straight to stderr without a
+    source location, so they can't be filtered via sphinx config.
+    The ``just docs-check`` recipe filters them at the shell
+    level instead -- only docutils system messages with no
+    source path are dropped, so warnings against our own code
+    always reach the build.
+    """
+    from docutils import nodes
+    from docutils.parsers.rst import roles
+
+    def paramref(  # noqa: PLR0913
+        _name, _rawtext, text, _lineno, _inliner, options=None, content=None
+    ):
+        del options, content
+        return [nodes.literal(text, text)], []
+
+    roles.register_local_role("paramref", paramref)

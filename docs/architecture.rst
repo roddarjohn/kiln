@@ -15,8 +15,7 @@ kiln is split into two packages that serve very different audiences:
    dispatches to a plugin-provided :class:`~foundry.target.Target`
    discovered via the ``foundry.targets`` entry-point group.
 
-``kiln`` -- a concrete FastAPI / SQLAlchemy generator registered as a
-``foundry`` target.
+``kiln`` -- a concrete FastAPI / SQLAlchemy generator registered as a ``foundry`` target.
    Defines the config schema, ships a set of built-in operations (CRUD,
    actions, scaffolding, routing), and a set of renderers backed by
    Jinja2 templates.  Registers itself as the ``kiln`` target so
@@ -67,9 +66,9 @@ Every ``foundry generate`` invocation flows through the same four steps:
 2. **Build** runs every registered operation.
    :class:`~foundry.engine.Engine` walks the config tree scope by
    scope (project → app → resource), running each operation's
-   :meth:`build` method.  Operations return *typed output objects*
+   ``build()`` method.  Operations return *typed output objects*
    (``RouteHandler``, ``SchemaClass``, ``StaticFile`` …) which are
-   stored in a :class:`~foundry.render.BuildStore`.  Operations can
+   stored in a :class:`~foundry.store.BuildStore`.  Operations can
    also inspect and mutate output produced by earlier operations --
    see :doc:`extending` for an example.
 
@@ -163,7 +162,10 @@ Typed output objects
 --------------------
 
 Operations do not produce strings or files directly.  They produce
-mutable dataclass instances in :mod:`foundry.outputs`:
+mutable dataclass instances.  The framework-agnostic
+:class:`~foundry.outputs.StaticFile` lives in
+``foundry.outputs``; the FastAPI-specific output types live in
+``kiln.operations.types``:
 
 .. list-table::
    :header-rows: 1
@@ -171,19 +173,19 @@ mutable dataclass instances in :mod:`foundry.outputs`:
 
    * - Type
      - Represents
-   * - :class:`~foundry.outputs.RouteHandler`
+   * - :class:`~kiln.operations.types.RouteHandler`
      - One FastAPI route handler function.
-   * - :class:`~foundry.outputs.SchemaClass`
+   * - :class:`~kiln.operations.types.SchemaClass`
      - One Pydantic model class.
-   * - :class:`~foundry.outputs.SerializerFn`
+   * - :class:`~kiln.operations.types.SerializerFn`
      - A model-to-schema serializer function.
-   * - :class:`~foundry.outputs.TestCase`
+   * - :class:`~kiln.operations.types.TestCase`
      - Metadata for a generated pytest test.
-   * - :class:`~foundry.outputs.RouterMount`
+   * - :class:`~kiln.operations.types.RouterMount`
      - One ``include_router`` call in an app/project router.
    * - :class:`~foundry.outputs.StaticFile`
      - A file rendered directly from a template (auth, db session).
-   * - :class:`~foundry.outputs.EnumClass`
+   * - :class:`~kiln.operations.types.EnumClass`
      - An enum definition (used for list-sort fields).
 
 Every type is a plain dataclass, so later operations can freely
@@ -191,12 +193,12 @@ inspect and mutate earlier output:
 
 .. code-block:: python
 
-   from foundry.outputs import RouteHandler
+   from kiln.operations.types import RouteHandler
 
    for handler in ctx.store.get_by_type(RouteHandler):
        handler.extra_deps.append("user: Annotated[dict, Depends(...)]")
 
-The :class:`~foundry.render.BuildStore` exposes lookup helpers:
+The :class:`~foundry.store.BuildStore` exposes lookup helpers:
 
 ``get(scope, instance_id, op_name)``
     Outputs from a specific build step.
@@ -214,7 +216,7 @@ string.  Renderers live in a
 
 .. code-block:: python
 
-   from foundry.outputs import RouteHandler
+   from kiln.operations.types import RouteHandler
    from foundry.render import RenderRegistry
 
    registry = RenderRegistry()
@@ -234,7 +236,7 @@ The ``when`` parameter selects between competing renderers:
        ...  # called instead when config.grpc is truthy
 
 Kiln's built-in renderers are colocated with their operations:
-op-specific :class:`RouteHandler` subclasses register at the bottom
+op-specific :class:`~kiln.operations.types.RouteHandler` subclasses register at the bottom
 of each op module (``kiln.operations.get``, ``kiln.operations.list``,
 …), and the shared cross-cutting renderers plus fragment-builder
 helpers live in ``kiln.operations.renderers``.  All registrations run
@@ -253,7 +255,7 @@ The assembler (:mod:`foundry.assembler`) is the last step.  It:
    ``routes/{name}.py``).
 2. Runs each output through its renderer.
 3. Collects and deduplicates imports from
-   :attr:`RouteHandler.extra_imports` and schema references.
+   :attr:`~kiln.operations.types.RouteHandler.extra_imports` and schema references.
 4. Renders the *outer* template
    (``fastapi/route.py.j2``, ``fastapi/schema_outer.py.j2``) with the
    collected snippets and import list.
@@ -268,7 +270,7 @@ Discovery via entry points
 --------------------------
 
 Operations are loaded from the ``foundry.operations`` entry-point
-group by :func:`foundry.operation.discover_operations`.  From foundry's
+group at import time.  From foundry's
 perspective, kiln is just one of potentially many packages that
 register operations; kiln's built-ins live in kiln's own
 ``pyproject.toml``:

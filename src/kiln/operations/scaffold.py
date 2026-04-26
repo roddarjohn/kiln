@@ -49,8 +49,9 @@ class Scaffold:
             _options: Unused (no options).
 
         Yields:
-            :class:`StaticFile` objects for the ``db/`` package and
-            one session module per configured database.
+            :class:`~foundry.outputs.StaticFile` objects for the
+            ``db/`` package and one session module per configured
+            database.
 
         """
         config = ctx.instance
@@ -88,16 +89,18 @@ class Scaffold:
 class AuthScaffold:
     """Generate the ``auth/`` package.
 
-    Emits three :class:`StaticFile` objects:
+    Emits three :class:`~foundry.outputs.StaticFile` objects:
 
     * ``auth/__init__.py`` -- package marker.
     * ``auth/dependencies.py`` -- binds :func:`ingot.auth.session_auth`
-      against the consumer's :attr:`session_schema` to produce the
-      ``get_session`` FastAPI dependency used by every protected
-      route.
+      against the consumer's
+      :attr:`~kiln.config.schema.AuthConfig.session_schema` to
+      produce the ``get_session`` FastAPI dependency used by every
+      protected route.
     * ``auth/router.py`` -- login (``POST {token_url}``) and logout
       (``POST {token_url}/logout``) handlers that call
-      :func:`ingot.auth.issue_session` / :func:`clear_session`.
+      :func:`ingot.auth.issue_session` /
+      :func:`~ingot.auth.clear_session`.
     """
 
     def when(self, ctx: BuildContext[ProjectConfig, ProjectConfig]) -> bool:
@@ -125,7 +128,8 @@ class AuthScaffold:
             _options: Unused (no options).
 
         Yields:
-            A single :class:`StaticFile` for ``auth/router.py``.
+            A single :class:`~foundry.outputs.StaticFile` for
+            ``auth/router.py``.
 
         """
         auth = ctx.instance.auth

@@ -13,8 +13,9 @@ from __future__ import annotations
 class CLIError(Exception):
     """Base class for errors the CLI should render cleanly.
 
-    Subclasses set :attr:`prefix` to control how the error is
-    labelled when rendered at the CLI boundary.
+    Subclasses set :attr:`~foundry.errors.CLIError.prefix` to
+    control how the error is labelled when rendered at the CLI
+    boundary.
     """
 
     prefix: str = "Error"

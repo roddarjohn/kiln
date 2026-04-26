@@ -41,7 +41,7 @@ _PLAIN_POSTGRES_PREFIX = "postgresql://"
 
 
 async def get_queue(session: AsyncSession) -> Queries:
-    """Return a :class:`pgqueuer.Queries` bound to *session*'s connection.
+    """Return a ``pgqueuer.Queries`` bound to *session*'s connection.
 
     Calls to ``await queue.enqueue(...)`` issue SQL on the same
     asyncpg connection the SQLAlchemy session is using, so they
@@ -55,7 +55,7 @@ async def get_queue(session: AsyncSession) -> Queries:
             unwrapped.
 
     Returns:
-        A :class:`pgqueuer.Queries` whose driver wraps the
+        A ``pgqueuer.Queries`` whose driver wraps the
         session's asyncpg connection.
 
     """

@@ -1,8 +1,8 @@
 """Registration of kiln as a foundry target.
 
-Exposes :data:`target`, the :class:`~foundry.target.Target`
-instance the foundry CLI picks up via the ``foundry.targets``
-entry-point group declared in kiln's ``pyproject.toml``.
+Exposes ``target``, the :class:`~foundry.target.Target` instance
+the foundry CLI picks up via the ``foundry.targets`` entry-point
+group declared in kiln's ``pyproject.toml``.
 
 Importing this module transitively imports kiln's renderer and
 operation modules (via foundry's entry-point discovery), which

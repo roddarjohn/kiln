@@ -7,7 +7,7 @@ routes, schemas, and (optionally) auth wired to SQLAlchemy models you
 define yourself.
 
 What foundry generates -- and doesn't
-----------------------------------
+-------------------------------------
 
 foundry generates FastAPI code from a config file.  Specifically, it
 produces:

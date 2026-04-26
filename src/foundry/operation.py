@@ -100,7 +100,7 @@ class OperationRegistry:
     entries: list[OperationEntry] = field(default_factory=list)
 
     def register(self, meta: OperationMeta, cls: type) -> None:
-        """Append an :class:`OperationEntry` to :attr:`entries`."""
+        """Append an ``OperationEntry`` to :attr:`entries`."""
         self.entries.append(OperationEntry(meta=meta, cls=cls))
 
     def validate_scopes(self, known: set[str]) -> None:
@@ -183,10 +183,11 @@ def operation(  # noqa: PLR0913
       has auth configured).
 
     Operations can also modify earlier operations' outputs by
-    inspecting :attr:`BuildContext.store` and mutating the
-    objects returned by :meth:`BuildStore.outputs_under` in
-    place.  Combined with ``requires`` for ordering and ``when``
-    for activation, a single operation mechanism covers both
+    inspecting :attr:`~foundry.engine.BuildContext.store` and
+    mutating the objects returned by
+    :meth:`~foundry.store.BuildStore.outputs_under` in place.
+    Combined with ``requires`` for ordering and ``when`` for
+    activation, a single operation mechanism covers both
     "produce" and "augment" roles.
 
     Args:

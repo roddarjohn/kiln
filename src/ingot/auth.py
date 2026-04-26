@@ -315,7 +315,7 @@ def session_auth[SessionT: BaseModel](
 
     The returned callable takes one parameter per supported
     transport; configured sources plug in their real extractors,
-    unconfigured ones get :func:`_no_token` (returns ``None``).
+    unconfigured ones get a no-token shim (returns ``None``).
     The first non-``None`` token wins.  Claims parse through
     :meth:`~pydantic.BaseModel.model_validate` so handlers get the
     full model, not a raw dict.

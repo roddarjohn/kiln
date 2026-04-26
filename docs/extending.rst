@@ -25,7 +25,7 @@ Adding an operation
 
 An operation is a class decorated with
 :func:`~foundry.operation.operation` that produces typed output
-objects in its :meth:`build` method.  The engine takes care of
+objects in its ``build()`` method.  The engine takes care of
 scheduling: scope walking, dependency ordering, and options parsing.
 
 Step 1 -- write the class
@@ -37,7 +37,7 @@ Step 1 -- write the class
 
    from foundry.engine import BuildContext
    from foundry.operation import operation
-   from foundry.outputs import RouteHandler, RouteParam
+   from kiln.operations.types import RouteHandler, RouteParam
 
 
    @operation("bulk_create", scope="resource", requires=["create"])
@@ -138,7 +138,7 @@ Declare a ``when()`` method instead of relying on the opt-in list:
 
    from foundry.engine import BuildContext
    from foundry.operation import operation
-   from foundry.outputs import RouteHandler
+   from kiln.operations.types import RouteHandler
 
 
    @operation(
@@ -208,12 +208,12 @@ earlier ones in the same ``build`` call.
 Mutating output objects
 -----------------------
 
-Every type in :mod:`foundry.outputs` is a mutable dataclass with
-helpers for safe modification:
+Every type in ``foundry.outputs`` and ``kiln.operations.types``
+is a mutable dataclass with helpers for safe modification:
 
 .. code-block:: python
 
-   from foundry.outputs import RouteHandler, SchemaClass
+   from kiln.operations.types import RouteHandler, SchemaClass
 
    for handler in ctx.store.get_by_type(RouteHandler):
        handler.add_decorator("@cache(ttl=60)")
@@ -224,7 +224,7 @@ helpers for safe modification:
        if schema.name.endswith("Resource"):
            schema.add_field("cached_at", "datetime", optional=True)
 
-:meth:`RouteHandler.extra_imports` is the recommended way to add
+:attr:`~kiln.operations.types.RouteHandler.extra_imports` is the recommended way to add
 imports.  The assembler merges every handler's ``extra_imports`` into
 the route file's top-of-file import block automatically.
 
@@ -245,7 +245,7 @@ registrations in order and uses the first whose predicate matches:
 
 .. code-block:: python
 
-   from foundry.outputs import RouteHandler
+   from kiln.operations.types import RouteHandler
    from foundry.render import registry
 
    @registry.renders(
@@ -422,7 +422,7 @@ Run your operations through the engine directly -- no CLI needed:
 
    from kiln.config.schema import ProjectConfig
    from foundry.engine import Engine
-   from foundry.outputs import RouteHandler
+   from kiln.operations.types import RouteHandler
 
    from my_pkg.ops import BulkCreate
 

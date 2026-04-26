@@ -74,7 +74,7 @@ class TelemetryScaffold:
             _options: Unused.
 
         Yields:
-            One :class:`StaticFile` per file in the
+            One :class:`~foundry.outputs.StaticFile` per file in the
             ``telemetry/`` package.
 
         """

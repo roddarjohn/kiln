@@ -233,7 +233,7 @@ Strategies mix across nesting levels, producing chains like
 outer ``select(...)``.  See :ref:`nested-fields` in the reference
 for all keys.
 
-The :mod:`kiln/fields.libsonnet` helper shortens the common shape:
+The ``kiln/fields.libsonnet`` helper shortens the common shape:
 
 .. code-block:: jsonnet
 

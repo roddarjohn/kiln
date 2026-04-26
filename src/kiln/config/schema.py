@@ -47,7 +47,7 @@ PYTHON_TYPES: dict[FieldType, str] = {
     "date": "date",
     "json": "dict[str, Any]",
 }
-"""Python annotation strings for each :data:`FieldType` value.
+"""Python annotation strings for each :data:`~kiln.config.schema.FieldType`.
 
 Used by op builders to render pk/field type annotations into the
 generated Pydantic schemas and route handlers.
@@ -119,7 +119,8 @@ class AuthConfig(BaseModel):
     """Dotted path to an :class:`ingot.auth.SessionStore` instance
     (e.g. ``"myapp.revocation.revocations"``).  When set, the
     generated ``get_session`` enforces the deny-list and logout
-    calls :meth:`revoke` before clearing; ``None`` = stateless."""
+    calls :meth:`~ingot.auth.SessionStore.revoke` before clearing;
+    ``None`` = stateless."""
 
     cookie_name: str = "access_token"
     """Name of the cookie carrying the JWT when ``"cookie"`` is in
@@ -336,7 +337,7 @@ class DatabaseConfig(BaseModel):
     def session_module(self) -> str:
         """Dotted module path of the scaffolded session file.
 
-        Matches what :class:`DbScaffold` emits at
+        Matches what :class:`~kiln.operations.scaffold.Scaffold` emits at
         ``db/{key}_session.py``.
         """
         return f"db.{self.key}_session"
@@ -350,9 +351,10 @@ class DatabaseConfig(BaseModel):
 class FieldSpec(BaseModel):
     """A named, typed field — used in operation schemas and action params.
 
-    Most fields are scalars: ``{name, type}`` where ``type`` is one of
-    the :data:`FieldType` values.  A field can also be *nested* — a
-    dump of a related model — by setting ``type: "nested"`` and
+    Most fields are scalars: ``{name, type}`` where ``type`` is one
+    of the :data:`~kiln.config.schema.FieldType` values.  A field
+    can also be *nested* — a dump of a related model — by setting
+    ``type: "nested"`` and
     supplying ``model`` (dotted import path to the related
     SQLAlchemy class) and ``fields`` (the sub-field list).  Set
     ``many=True`` when the relationship returns a collection.
