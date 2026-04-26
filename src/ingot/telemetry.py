@@ -144,10 +144,6 @@ def _build_sampler(*, name: SamplerName, ratio: float | None) -> Sampler:
     if name == "parentbased_traceidratio":
         assert ratio is not None  # noqa: S101 -- guaranteed by config validator
         return ParentBased(TraceIdRatioBased(ratio))
-    # Exhaustiveness check: ``SamplerName`` is a closed Literal, so
-    # adding a value to it without updating this dispatch becomes a
-    # type error here.  At runtime this also raises ``AssertionError``
-    # if a non-literal string sneaks in via untyped callers.
     assert_never(name)
 
 
