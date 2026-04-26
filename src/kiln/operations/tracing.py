@@ -79,7 +79,6 @@ class Tracing:
         # Lowercase model class -- dashboards read ``article.get``
         # better than ``Article.get``.
         label = resource.model.rpartition(".")[2].lower()
-        record = telemetry.record_exceptions
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             if handler.op_name not in traced_ops:
@@ -87,8 +86,7 @@ class Tracing:
             handler.decorators.insert(
                 0,
                 f'@traced_handler("{label}.{handler.op_name}", '
-                f'resource="{label}", op="{handler.op_name}", '
-                f"record_exceptions={record})",
+                f'resource="{label}", op="{handler.op_name}")',
             )
             handler.extra_imports.append(("ingot.telemetry", "traced_handler"))
 

@@ -251,9 +251,6 @@ class TelemetryConfig(BaseModel):
     and includes resource/op as low-cardinality attributes."""
     span_per_action: bool = True
     """Wrap every generated action handler in an internal span."""
-    record_exceptions: bool = True
-    """Set the span status to ERROR and record the exception when a
-    handler raises."""
 
     capture_request_body: bool = False
     """Attach a (truncated) request body string as a span attribute.

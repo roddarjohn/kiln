@@ -285,7 +285,6 @@ def traced_handler(
     *,
     resource: str,
     op: str,
-    record_exceptions: bool = True,
 ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     """Wrap an async route handler in an internal span.
 
@@ -296,15 +295,22 @@ def traced_handler(
     actions in dashboards is left to the value: kiln's CRUD names
     are a fixed small set, anything else is user-defined.
 
+    Exceptions raised from the handler are deliberately *not*
+    recorded on this span and the span status is left ``OK``.  The
+    final HTTP status -- including FastAPI's conversion of
+    ``HTTPException`` into 4xx / 5xx responses -- is captured by the
+    surrounding ``FastAPIInstrumentor`` server span, which is the
+    authoritative signal for "did the request succeed."  Recording
+    here would double-count routine flow-control exceptions
+    (``HTTPException(404)`` from ``get_object_from_query_or_404``,
+    ``HTTPException(401)`` from the auth dep) as backend errors.
+
     Args:
         span_name: Span name, conventionally ``f"{resource}.{op}"``.
         resource: Low-cardinality resource label (e.g. ``"article"``)
             attached as :data:`ATTR_RESOURCE`.
         op: Low-cardinality op label (e.g. ``"get"``, ``"publish"``)
             attached as :data:`ATTR_OP`.
-        record_exceptions: When ``True`` (default), exceptions raised
-            from the handler set the span status to ERROR and call
-            :meth:`Span.record_exception` before re-raising.
 
     The returned decorator preserves the wrapped function's signature
     so FastAPI's dependency-injection introspection still works.
@@ -319,8 +325,8 @@ def traced_handler(
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             with tracer.start_as_current_span(
                 span_name,
-                record_exception=record_exceptions,
-                set_status_on_exception=record_exceptions,
+                record_exception=False,
+                set_status_on_exception=False,
             ) as span:
                 span.set_attribute(ATTR_RESOURCE, resource)
                 span.set_attribute(ATTR_OP, op)
