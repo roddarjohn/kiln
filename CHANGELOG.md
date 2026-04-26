@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.4](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.3...kiln-v0.7.4) (2026-04-26)
+
+
+### Features
+
+* document handling ([#39](https://github.com/roddarjohn/kiln/issues/39)) ([9468f68](https://github.com/roddarjohn/kiln/commit/9468f6873ad4cfe8706fb96faf4ee78d35269fbb))
+* pgquerer support ([#38](https://github.com/roddarjohn/kiln/issues/38)) ([99f12ed](https://github.com/roddarjohn/kiln/commit/99f12edc73af7c11109073e987c2fd67038ff0d3))
+* telemetry ([#40](https://github.com/roddarjohn/kiln/issues/40)) ([e622055](https://github.com/roddarjohn/kiln/commit/e622055330a94e334b36c59369fee8aa56fab55f))
+
 ## [0.7.3](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.2...kiln-v0.7.3) (2026-04-24)
 
 
