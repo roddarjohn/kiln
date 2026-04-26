@@ -17,7 +17,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import OperationConfig, ResourceConfig
+    from kiln.config.schema import (
+        OperationConfig,
+        ProjectConfig,
+        ResourceConfig,
+    )
 
 
 @operation("action", scope="operation", dispatch_on="type")
@@ -35,10 +39,18 @@ class Action:
         """Options for action operations."""
 
         fn: str
+        status_code: int | None = None
+        """Override the response status code.
+
+        When unset, the action defaults to 204 for ``-> None``
+        functions and the FastAPI default (200) for everything else.
+        Set to e.g. ``201`` for create-style actions or ``202`` for
+        async-accepted endpoints.
+        """
 
     def build(
         self,
-        ctx: BuildContext[OperationConfig],
+        ctx: BuildContext[OperationConfig, ProjectConfig],
         options: Options,
     ) -> Iterable[object]:
         """Produce output for a custom action endpoint.
@@ -83,6 +95,21 @@ class Action:
                 RouteParam(name="body", annotation=info.request_class),
             )
 
+        # ``-> None`` action: emit 204 No Content (FastAPI default
+        # for empty bodies) with no response model and skip the
+        # ``return result`` line in the template.  Lets reusable
+        # actions (e.g. ``ingot.files.delete_file``) be true
+        # side-effect endpoints without inventing a fake response
+        # body just to satisfy the framework.  Caller-supplied
+        # ``options.status_code`` always wins.
+        default_status = 204 if info.returns_none else None
+        status_code = (
+            options.status_code
+            if options.status_code is not None
+            else default_status
+        )
+        return_type = "None" if info.returns_none else info.response_class
+
         yield RouteHandler(
             method="POST",
             path=path,
@@ -91,7 +118,8 @@ class Action:
             params=params,
             response_model=info.response_class,
             response_schema_module=info.response_module,
-            return_type=info.response_class,
+            return_type=return_type,
+            status_code=status_code,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
             request_schema_module=info.request_module,
@@ -100,7 +128,9 @@ class Action:
                 "is_object_action": info.is_object_action,
                 "fn_name": fn_name,
                 "model_param_name": info.model_param_name,
+                "model_class_param_name": info.model_class_param_name,
                 "has_request_body": info.request_class is not None,
+                "returns_none": info.returns_none,
             },
             extra_imports=extra_imports,
         )
@@ -109,7 +139,7 @@ class Action:
             op_name="action",
             method="post",
             path=path,
-            status_success=200,
+            status_success=status_code or 200,
             status_not_found=404 if info.is_object_action else None,
             has_request_body=info.request_class is not None,
             request_schema=info.request_class,

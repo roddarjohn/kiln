@@ -94,7 +94,7 @@ async def open_worker_driver(dsn: str) -> AsyncIterator[AsyncpgDriver]:
     the outermost ``async with`` in the factory you hand to
     ``pgq run``::
 
-        from ingot import open_worker_driver
+        from ingot.queue import open_worker_driver
         from pgqueuer import PgQueuer
 
         async def main() -> PgQueuer:

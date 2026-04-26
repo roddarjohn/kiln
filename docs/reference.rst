@@ -422,8 +422,9 @@ pgqueuer integration
 ^^^^^^^^^^^^^^^^^^^^
 
 kiln does not scaffold pgqueuer wiring.  See :doc:`usage` for the
-two helpers in :mod:`ingot.queue` (:func:`ingot.get_queue` for
-transactional-outbox enqueue, :func:`ingot.open_worker_driver` for
-the SQLAlchemy→asyncpg DSN bridge) and the worker-factory pattern.
+two helpers in :mod:`ingot.queue` (:func:`ingot.queue.get_queue`
+for transactional-outbox enqueue,
+:func:`ingot.queue.open_worker_driver` for the SQLAlchemy→asyncpg
+DSN bridge) and the worker-factory pattern.
 Run the worker with pgqueuer's own CLI:
 ``pgq run path.to.module:main``.

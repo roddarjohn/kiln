@@ -52,11 +52,30 @@ from {{ session_module }} import {{ session_name }}
 from {{ store_module }} import {{ store_name }}
 {% endif %}
 
+{% if has_telemetry %}
+from ingot.telemetry import scrub_current_span_attributes
+{% endif %}
+
 from .dependencies import get_session
 
 router = APIRouter()
 
 
+{% if has_telemetry %}
+# Span-attribute keys that *would* otherwise carry the credentials
+# payload or the issued-session payload.  Listed once so the login
+# and logout handlers stay in sync, and so a future body-capture
+# hook adding new keys updates one tuple.
+_AUTH_SCRUB_KEYS = (
+    "http.request.body",
+    "http.response.body",
+    "http.request.header.authorization",
+    "http.request.header.cookie",
+    "http.response.header.set-cookie",
+)
+
+
+{% endif %}
 @router.post("{{ token_url }}")
 def create_token(
     response: Response,
@@ -66,6 +85,9 @@ def create_token(
 
     Raises HTTP 401 if ``{{ validate_name }}`` returns ``None``.
     """
+{% if has_telemetry %}
+    scrub_current_span_attributes(*_AUTH_SCRUB_KEYS)
+{% endif %}
     return issue_session(
         response,
         {{ validate_name }}(credentials),
@@ -105,6 +127,9 @@ async def logout(
     Revoke-before-clear: a revoke failure leaves the token
     non-verifying rather than zombie-valid.
     """
+{% if has_telemetry %}
+    scrub_current_span_attributes(*_AUTH_SCRUB_KEYS)
+{% endif %}
     await {{ store_name }}.revoke(session)
     return clear_session(
         response,
@@ -122,6 +147,9 @@ def logout(response: Response) -> OkResponse:
     Cookie source: ``Set-Cookie`` header deletes the cookie.
     Bearer source: client discards its token.
     """
+{% if has_telemetry %}
+    scrub_current_span_attributes(*_AUTH_SCRUB_KEYS)
+{% endif %}
     return clear_session(
         response,
         sources={{ sources }},

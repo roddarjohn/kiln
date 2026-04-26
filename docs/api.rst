@@ -81,3 +81,21 @@ kiln.operations
 
 .. automodule:: ingot
    :members:
+
+.. automodule:: ingot.auth
+   :members:
+
+.. automodule:: ingot.files
+   :members:
+
+.. automodule:: ingot.filters
+   :members:
+
+.. automodule:: ingot.ordering
+   :members:
+
+.. automodule:: ingot.pagination
+   :members:
+
+.. automodule:: ingot.utils
+   :members:

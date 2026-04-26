@@ -97,3 +97,65 @@ def test_introspect_multiple_basemodel_params_raises():
             f"{_STUB}.action_two_bodies",
             f"{_STUB}.StubModel",
         )
+
+
+def test_introspect_matches_supertype_model_param():
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_supertype",
+        f"{_STUB}.StubModelWithMixin",
+    )
+    assert info.is_object_action is True
+    assert info.model_param_name == "obj"
+
+
+def test_introspect_object_typed_param_is_not_model():
+    # A param annotated ``object`` must not be silently treated as
+    # the model -- every class is a subclass of object.
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_object_typed",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is False
+    assert info.model_param_name is None
+
+
+def test_introspect_object_action_returning_none():
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_returns_none",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is True
+    assert info.returns_none is True
+    assert info.response_class is None
+    assert info.response_module is None
+
+
+def test_introspect_collection_action_returning_none():
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_returns_none",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is False
+    assert info.returns_none is True
+    assert info.response_class is None
+
+
+def test_introspect_collection_action_with_model_class_param():
+    """``model_cls: type[StubMixin]`` is detected as the model-class param."""
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_with_model_class",
+        f"{_STUB}.StubModelWithMixin",
+    )
+    assert info.is_object_action is False  # no instance param
+    assert info.model_class_param_name == "model_cls"
+    assert info.request_class == "StubRequest"
+    assert info.model_param_name is None
+
+
+def test_introspect_no_model_class_param_when_supertype_mismatch():
+    """``type[StubMixin]`` does NOT match a model that doesn't extend it."""
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_with_model_class",
+        f"{_STUB}.StubModel",  # plain StubModel, not StubModelWithMixin
+    )
+    assert info.model_class_param_name is None

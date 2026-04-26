@@ -8,7 +8,7 @@ to match.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from foundry.naming import prefix_import
 from foundry.operation import operation
@@ -20,24 +20,24 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import AuthConfig, ResourceConfig
+    from kiln.config.schema import ProjectConfig, ResourceConfig
 
 
 @operation("auth", scope="resource", after_children=True)
 class Auth:
     """Augment CRUD/action handlers and tests with auth."""
 
-    def when(self, ctx: BuildContext[ResourceConfig]) -> bool:
+    def when(self, ctx: BuildContext[ResourceConfig, ProjectConfig]) -> bool:
         """Run whenever auth is configured.
 
         Per-op filtering lives in :meth:`build`; gating here too
         would duplicate it.
         """
-        return getattr(ctx.config, "auth", None) is not None
+        return bool(ctx.config.auth)
 
     def build(
         self,
-        ctx: BuildContext[ResourceConfig],
+        ctx: BuildContext[ResourceConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
         """Stamp session dep onto handlers whose op opts in.
@@ -46,7 +46,8 @@ class Auth:
         resource default.  Skipping non-auth ops keeps the session
         dep from leaking onto open routes.
         """
-        auth_cfg = cast("AuthConfig", getattr(ctx.config, "auth", None))
+        auth_cfg = ctx.config.auth
+        assert auth_cfg is not None  # noqa: S101 -- guaranteed by when()
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 

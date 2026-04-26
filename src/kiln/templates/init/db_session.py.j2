@@ -34,6 +34,18 @@ _engine = create_async_engine(
     pool_pre_ping={{ pool_pre_ping }},
 )
 
+{% if instrument_sqlalchemy %}
+# OpenTelemetry: instrument the engine so each query becomes a
+# client span.  The instrumentor hooks the underlying sync engine
+# of the async wrapper, so spans show up under whichever request
+# span is currently active.
+from opentelemetry.instrumentation.sqlalchemy import (  # noqa: E402
+    SQLAlchemyInstrumentor,
+)
+
+SQLAlchemyInstrumentor().instrument(engine=_engine.sync_engine)
+
+{% endif %}
 _SessionLocal = async_sessionmaker(
     _engine,
     class_=AsyncSession,

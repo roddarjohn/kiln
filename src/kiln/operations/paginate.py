@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ModifierConfig
+    from kiln.config.schema import ModifierConfig, ProjectConfig
 
 
 @operation(
@@ -35,7 +35,7 @@ class Paginate:
 
     def build(
         self,
-        ctx: BuildContext[ModifierConfig],
+        ctx: BuildContext[ModifierConfig, ProjectConfig],
         options: PaginateConfig,
     ) -> Iterable[object]:
         """Emit Page schema and amend List's outputs.
@@ -73,7 +73,7 @@ class Paginate:
         handler.body_context["cursor_field"] = options.cursor_field
         handler.extra_imports.append(
             (
-                "ingot",
+                "ingot.pagination",
                 "apply_keyset_pagination"
                 if options.mode == "keyset"
                 else "apply_offset_pagination",

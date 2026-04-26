@@ -39,7 +39,7 @@ class Scaffold:
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce static files for db sessions.
@@ -54,6 +54,10 @@ class Scaffold:
 
         """
         config = ctx.instance
+        instrument_sqlalchemy = (
+            config.telemetry is not None
+            and config.telemetry.instrument_sqlalchemy
+        )
 
         yield StaticFile(
             path="db/__init__.py",
@@ -75,6 +79,7 @@ class Scaffold:
                     "pool_recycle": db.pool_recycle,
                     "pool_pre_ping": db.pool_pre_ping,
                     "get_db_fn": f"get_{db.key}_db",
+                    "instrument_sqlalchemy": instrument_sqlalchemy,
                 },
             )
 
@@ -95,7 +100,7 @@ class AuthScaffold:
       :func:`ingot.auth.issue_session` / :func:`clear_session`.
     """
 
-    def when(self, ctx: BuildContext[ProjectConfig]) -> bool:
+    def when(self, ctx: BuildContext[ProjectConfig, ProjectConfig]) -> bool:
         """Apply only when the project config has ``auth`` set.
 
         Args:
@@ -105,11 +110,11 @@ class AuthScaffold:
             ``True`` when ``ctx.instance.auth`` is not ``None``.
 
         """
-        return ctx.instance.auth is not None
+        return bool(ctx.instance.auth)
 
     def build(
         self,
-        ctx: BuildContext[ProjectConfig],
+        ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
         """Produce the auth router static file.
@@ -125,6 +130,8 @@ class AuthScaffold:
         """
         auth = ctx.instance.auth
         assert auth is not None  # noqa: S101 -- guaranteed by when()
+
+        has_telemetry = bool(ctx.instance.telemetry)
 
         yield StaticFile(
             path="auth/__init__.py",
@@ -176,5 +183,6 @@ class AuthScaffold:
                 "cookie_samesite": auth.cookie_samesite,
                 "store_module": store_module,
                 "store_name": store_name,
+                "has_telemetry": has_telemetry,
             },
         )
