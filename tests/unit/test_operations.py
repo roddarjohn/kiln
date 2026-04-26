@@ -1171,7 +1171,10 @@ class TestList:
         assert handler.response_model == "list[UserListItem]"
         assert handler.body_context["pagination_mode"] is None
         assert ("sqlalchemy", "select") in handler.extra_imports
-        assert not any(mod == "ingot" for mod, _ in handler.extra_imports)
+        assert not any(
+            mod == "ingot" or mod.startswith("ingot.")
+            for mod, _ in handler.extra_imports
+        )
 
     def test_test_case(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1365,7 +1368,8 @@ class TestPaginate:
         assert handler.return_type == "UserPage"
         assert handler.body_context["pagination_mode"] == "keyset"
         assert handler.body_context["cursor_field"] == "id"
-        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
+        assert keyset in handler.extra_imports
 
     def test_offset_uses_offset_helper(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1378,8 +1382,10 @@ class TestPaginate:
         )
         handler = _find_handler(list_ctx.store, path="/search")
         assert handler.body_context["pagination_mode"] == "offset"
-        assert ("ingot", "apply_offset_pagination") in handler.extra_imports
-        assert ("ingot", "apply_keyset_pagination") not in handler.extra_imports
+        offset = ("ingot.pagination", "apply_offset_pagination")
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
+        assert offset in handler.extra_imports
+        assert keyset not in handler.extra_imports
 
     def test_flips_list_test_case_is_list_response(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1428,9 +1434,10 @@ class TestListExtensionsCompose:
         assert handler.body_context["has_filter"] is True
         assert handler.body_context["has_sort"] is True
         assert handler.body_context["pagination_mode"] == "keyset"
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
         assert ("ingot.filters", "apply_filters") in handler.extra_imports
         assert ("ingot.ordering", "apply_ordering") in handler.extra_imports
-        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        assert keyset in handler.extra_imports
         assert handler.response_model == "UserPage"
 
 
