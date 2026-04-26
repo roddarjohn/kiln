@@ -7,7 +7,9 @@ from pydantic import ValidationError
 
 from foundry.engine import BuildContext
 from foundry.outputs import StaticFile
-from foundry.scope import PROJECT, ScopeTree
+from foundry.render import RenderCtx
+from foundry.render import registry as shared_registry
+from foundry.scope import PROJECT, ScopeTree, discover_scopes
 from foundry.store import BuildStore
 from kiln.config.schema import (
     App,
@@ -19,6 +21,7 @@ from kiln.config.schema import (
     TelemetryConfig,
 )
 from kiln.operations.telemetry import TelemetryScaffold
+from kiln.operations.types import RouteHandler
 
 # ---------------------------------------------------------------------------
 # Schema validation
@@ -358,3 +361,219 @@ class TestAuthScaffoldTelemetryFlag:
         )
         router = next(o for o in outputs if o.path == "auth/router.py")
         assert router.context["has_telemetry"] is False
+
+
+# ---------------------------------------------------------------------------
+# Per-handler @traced_handler / @traced_action injection via the
+# central handler renderer.  Goes through the real render registry so
+# the resource/operation scope walking and import collection paths
+# all run end to end.
+# ---------------------------------------------------------------------------
+
+
+_APP_ID = "project.apps.0"
+_RESOURCE_ID = f"{_APP_ID}.resources.0"
+_OP_ID = f"{_RESOURCE_ID}.operations.0"
+
+
+def _handler_render_ctx(
+    *,
+    telemetry: TelemetryConfig | None,
+    resource: ResourceConfig | None = None,
+) -> RenderCtx:
+    """Build a RenderCtx wired up to the real project/app/resource tree.
+
+    Mirrors the ``_rctx`` helper in ``test_renderers.py`` but exposes
+    the telemetry / resource overrides this test module needs.
+    """
+    resource = resource or ResourceConfig(model="myapp.models.Post")
+    cfg = ProjectConfig(
+        databases=[DatabaseConfig(key="primary", default=True)],
+        telemetry=telemetry,
+        apps=[
+            App(
+                config=AppConfig(module="myapp", resources=[resource]),
+                prefix="",
+            )
+        ],
+    )
+    store = BuildStore(scope_tree=discover_scopes(ProjectConfig))
+    store.register_instance("project", cfg)
+    store.register_instance(_APP_ID, object(), parent="project")
+    store.register_instance(_RESOURCE_ID, resource, parent=_APP_ID)
+    store.register_instance(_OP_ID, object(), parent=_RESOURCE_ID)
+    return RenderCtx(
+        env=None,
+        config=cfg,
+        package_prefix="_generated",
+        language="python",
+        store=store,
+        instance_id=_OP_ID,
+    )
+
+
+def _crud_handler() -> RouteHandler:
+    return RouteHandler(
+        method="GET",
+        path="/{id}",
+        function_name="get_post",
+        op_name="get",
+    )
+
+
+def _action_handler() -> RouteHandler:
+    return RouteHandler(
+        method="POST",
+        path="/{id}/publish",
+        function_name="publish_post",
+        op_name="publish",
+        body_template="fastapi/ops/action.py.j2",
+    )
+
+
+def _decorators(handler: RouteHandler) -> list[str]:
+    return list(handler.decorators)
+
+
+def _all_imports(fragments) -> str:
+    from foundry.imports import ImportCollector
+    from foundry.render import SnippetFragment
+
+    merged = ImportCollector()
+    for f in fragments:
+        if isinstance(f, SnippetFragment) and f.imports is not None:
+            merged.update(f.imports)
+    return merged.format("python")
+
+
+class TestHandlerTracingDecorator:
+    def test_no_decorator_when_telemetry_off(self):
+        handler = _crud_handler()
+        shared_registry.render(handler, _handler_render_ctx(telemetry=None))
+        assert _decorators(handler) == []
+
+    def test_traced_handler_added_for_crud(self):
+        handler = _crud_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(telemetry=TelemetryConfig(service_name="svc")),
+        )
+        decs = _decorators(handler)
+        assert len(decs) == 1
+        assert decs[0].startswith("@traced_handler(")
+        assert '"post.get"' in decs[0]
+        assert 'resource="post"' in decs[0]
+        assert 'op="get"' in decs[0]
+        assert "record_exceptions=True" in decs[0]
+
+    def test_traced_action_used_for_action_body_template(self):
+        handler = _action_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(telemetry=TelemetryConfig(service_name="svc")),
+        )
+        decs = _decorators(handler)
+        assert len(decs) == 1
+        assert decs[0].startswith("@traced_action(")
+        assert 'action="publish"' in decs[0]
+        assert "op=" not in decs[0]
+
+    def test_record_exceptions_threaded_through(self):
+        handler = _crud_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(
+                telemetry=TelemetryConfig(
+                    service_name="svc",
+                    record_exceptions=False,
+                ),
+            ),
+        )
+        assert "record_exceptions=False" in _decorators(handler)[0]
+
+    def test_resource_trace_false_skips_decorator(self):
+        handler = _crud_handler()
+        resource = ResourceConfig(model="myapp.models.Post", trace=False)
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(
+                telemetry=TelemetryConfig(service_name="svc"),
+                resource=resource,
+            ),
+        )
+        assert _decorators(handler) == []
+
+    def test_span_per_handler_off_skips_decorator(self):
+        handler = _crud_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(
+                telemetry=TelemetryConfig(
+                    service_name="svc",
+                    span_per_handler=False,
+                ),
+            ),
+        )
+        assert _decorators(handler) == []
+
+    def test_span_per_action_off_skips_action_decorator(self):
+        handler = _action_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(
+                telemetry=TelemetryConfig(
+                    service_name="svc",
+                    span_per_action=False,
+                ),
+            ),
+        )
+        assert _decorators(handler) == []
+
+    def test_span_per_handler_off_does_not_disable_actions(self):
+        # Action handlers are gated by span_per_action, not
+        # span_per_handler -- the two flags are independent.
+        handler = _action_handler()
+        shared_registry.render(
+            handler,
+            _handler_render_ctx(
+                telemetry=TelemetryConfig(
+                    service_name="svc",
+                    span_per_handler=False,
+                    span_per_action=True,
+                ),
+            ),
+        )
+        assert _decorators(handler)[0].startswith("@traced_action(")
+
+    def test_decorator_import_added(self):
+        handler = _crud_handler()
+        fragments = list(
+            shared_registry.render(
+                handler,
+                _handler_render_ctx(
+                    telemetry=TelemetryConfig(service_name="svc"),
+                ),
+            )
+        )
+        block = _all_imports(fragments)
+        assert (
+            "from _generated.telemetry.decorators import traced_handler"
+            in block
+        )
+
+    def test_decorator_import_uses_empty_prefix(self):
+        # When package_prefix is empty the decorator import drops the
+        # leading dotted segment.
+        handler = _crud_handler()
+        ctx = _handler_render_ctx(telemetry=TelemetryConfig(service_name="s"))
+        ctx = RenderCtx(
+            env=ctx.env,
+            config=ctx.config,
+            package_prefix="",
+            language=ctx.language,
+            store=ctx.store,
+            instance_id=ctx.instance_id,
+        )
+        fragments = list(shared_registry.render(handler, ctx))
+        block = _all_imports(fragments)
+        assert "from telemetry.decorators import traced_handler" in block

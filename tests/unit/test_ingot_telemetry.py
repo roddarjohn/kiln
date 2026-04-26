@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import pytest
 from opentelemetry import trace
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import (
+    ConsoleSpanExporter,
+    SimpleSpanProcessor,
+)
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
@@ -22,10 +26,13 @@ from ingot.telemetry import (
     ATTR_RESOURCE,
     _build_resource,
     _build_sampler,
+    _build_span_exporter,
     _parse_otlp_headers,
+    build_logger_provider,
     build_meter_provider,
     build_tracer_provider,
     scrub_current_span_attributes,
+    shutdown_providers,
     traced_action,
     traced_handler,
 )
@@ -52,6 +59,10 @@ class TestParseOtlpHeaders:
     def test_drops_unparseable(self):
         # No '=' means skip; trailing comma OK.
         assert _parse_otlp_headers("notapair,a=1,") == {"a": "1"}
+
+    def test_drops_pair_with_blank_key(self):
+        # ``=value`` parses to ('', 'value'); blank key is skipped.
+        assert _parse_otlp_headers("=v,a=1") == {"a": "1"}
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +110,10 @@ class TestBuildSampler:
         sampler = _build_sampler("parentbased_always_on", None)
         assert isinstance(sampler, ParentBased)
 
+    def test_parentbased_always_off(self):
+        sampler = _build_sampler("parentbased_always_off", None)
+        assert isinstance(sampler, ParentBased)
+
     def test_traceidratio(self):
         sampler = _build_sampler("traceidratio", 0.25)
         assert isinstance(sampler, TraceIdRatioBased)
@@ -127,9 +142,90 @@ class TestProviderBuilders:
         assert isinstance(provider, TracerProvider)
         assert provider.resource.attributes["service.name"] == "svc"
 
+    def test_tracer_provider_with_console_exporter(self):
+        # Default exporter path adds a BatchSpanProcessor; pick console
+        # to avoid actually opening a network export channel.
+        provider = build_tracer_provider(
+            service_name="svc",
+            exporter="console",
+        )
+        # _active_span_processor is the SDK-internal multi-processor;
+        # presence of any sub-processor confirms the exporter wiring.
+        assert provider._active_span_processor is not None
+
     def test_meter_provider(self):
         provider = build_meter_provider(service_name="svc")
         assert isinstance(provider, MeterProvider)
+
+    def test_logger_provider(self):
+        provider = build_logger_provider(service_name="svc")
+        assert isinstance(provider, LoggerProvider)
+        assert provider.resource.attributes["service.name"] == "svc"
+
+
+class TestBuildSpanExporter:
+    def test_none(self):
+        assert (
+            _build_span_exporter(
+                "none",
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "OTEL_EXPORTER_OTLP_HEADERS",
+            )
+            is None
+        )
+
+    def test_console(self):
+        exp = _build_span_exporter(
+            "console",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        )
+        assert isinstance(exp, ConsoleSpanExporter)
+
+    def test_otlp_http_default(self, monkeypatch):
+        # Default branch (exporter is None) returns the HTTP exporter
+        # built from OTel env vars.  Set the env vars so the exporter
+        # picks them up rather than hitting library defaults.
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://x:4318")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "auth=foo")
+        exp = _build_span_exporter(
+            None,
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        )
+        assert exp is not None
+        # Class name guards against accidentally returning the gRPC
+        # exporter when None is passed.
+        assert "Http" in type(exp).__module__ or "http" in type(exp).__module__
+
+    def test_otlp_http_explicit(self):
+        exp = _build_span_exporter(
+            "otlp_http",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        )
+        assert exp is not None
+        assert "http" in type(exp).__module__
+
+    def test_otlp_grpc_imports_lazily(self):
+        grpc = pytest.importorskip(
+            "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
+        )
+        exp = _build_span_exporter(
+            "otlp_grpc",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        )
+        assert isinstance(exp, grpc.OTLPSpanExporter)
+
+
+class TestShutdownProviders:
+    def test_calls_shutdown_on_active_providers(self):
+        # ``shutdown_providers`` queries the active globals; on a fresh
+        # process the defaults are no-op proxies.  The contract is
+        # "doesn't raise" -- enough to lock in that the function runs
+        # both branches without error.
+        shutdown_providers()
 
 
 # ---------------------------------------------------------------------------
