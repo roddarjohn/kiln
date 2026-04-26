@@ -97,5 +97,8 @@ kiln.operations
 .. automodule:: ingot.pagination
    :members:
 
+.. automodule:: ingot.queue
+   :members:
+
 .. automodule:: ingot.utils
    :members:
