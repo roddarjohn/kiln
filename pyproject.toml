@@ -49,6 +49,7 @@ opentelemetry = [
 #
 #     pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
 opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.29.0"]
+files = ["boto3>=1.34"]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -108,6 +109,9 @@ dev = [
   "opentelemetry-exporter-otlp-proto-grpc==1.29.0",
   "opentelemetry-instrumentation-fastapi==0.50b0",
   "opentelemetry-instrumentation-sqlalchemy==0.50b0",
+  # Ingot's files extra ships boto3 as optional; CI installs it
+  # here so the full test suite can run without an explicit --extra.
+  "boto3>=1.34",
 ]
 playground = [
   "fastapi>=0.115",

@@ -1,15 +1,27 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
+{%- set model_kwarg %}{% if model_class_param_name %}, {{ model_class_param_name }}={{ model_name }}{% endif %}{% endset %}
+{%- set body_kwarg %}{% if has_request_body %}, body=body{% endif %}{% endset %}
 {% if is_object_action %}
     {{ model_param_name }} = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
-    result = await {{ fn_name }}({{ model_param_name }}, db=db{% if has_request_body %}, body=body{% endif %})
+{% if returns_none %}
+    await {{ fn_name }}({{ model_param_name }}, db=db{{ model_kwarg }}{{ body_kwarg }})
 {% else %}
-    result = await {{ fn_name }}(db=db{% if has_request_body %}, body=body{% endif %})
+    result = await {{ fn_name }}({{ model_param_name }}, db=db{{ model_kwarg }}{{ body_kwarg }})
+{% endif %}
+{% else %}
+{% if returns_none %}
+    await {{ fn_name }}(db=db{{ model_kwarg }}{{ body_kwarg }})
+{% else %}
+    result = await {{ fn_name }}(db=db{{ model_kwarg }}{{ body_kwarg }})
+{% endif %}
 {% endif %}
     await db.commit()
+{% if not returns_none %}
     return result
+{% endif %}
 {% endblock %}

@@ -16,6 +16,12 @@
 pip install kiln-generator  # or: uv add kiln-generator
 ```
 
+Optional extras:
+
+```bash
+pip install 'kiln-generator[files]'  # adds boto3 for S3 uploads
+```
+
 ## Quick start
 
 kiln registers itself as a target for the generic ``foundry`` CLI

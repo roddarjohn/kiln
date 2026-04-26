@@ -905,6 +905,101 @@ def test_handler_with_body_template_propagates_context(registry):
     assert snippet.context["request_class"] == "PostPublishRequest"
 
 
+def _render_action_template(**body_ctx):
+    """Render fastapi/ops/action.py.j2 with a minimal handler context.
+
+    Action template extends handler_default.py.j2, so the call needs
+    both layers of context vars in one flat kwargs blob.
+    """
+    return render_template(
+        jinja_env,
+        "fastapi/ops/action.py.j2",
+        decorators=[],
+        method="post",
+        path="/{id}/archive",
+        response_model=None,
+        status_suffix=None,
+        status_code=204 if body_ctx.get("returns_none") else None,
+        function_name="archive_action",
+        params=[{"name": "id", "annotation": "UUID", "default": None}],
+        return_type="None" if body_ctx.get("returns_none") else "PostResource",
+        doc="Archive a Post.",
+        body_lines=[],
+        model_name="Post",
+        pk_name="id",
+        **body_ctx,
+    )
+
+
+def test_action_template_returns_none_emits_204_and_no_return():
+    """``returns_none``: no ``result =`` assignment, no ``return result``."""
+    rendered = _render_action_template(
+        is_object_action=True,
+        fn_name="archive",
+        model_param_name="post",
+        model_class_param_name=None,
+        has_request_body=False,
+        returns_none=True,
+    )
+    assert "status_code=204" in rendered
+    assert "result =" not in rendered
+    assert "return result" not in rendered
+    assert "await archive(post, db=db)" in rendered
+    assert "await db.commit()" in rendered
+    # Result must be valid Python (catches template indentation bugs).
+    import ast
+
+    ast.parse(rendered)
+
+
+def test_action_template_returns_body_keeps_return_result():
+    """Default path (BaseModel return) still assigns and returns."""
+    rendered = _render_action_template(
+        is_object_action=True,
+        fn_name="publish",
+        model_param_name="post",
+        model_class_param_name=None,
+        has_request_body=False,
+        returns_none=False,
+    )
+    assert "result = await publish(post, db=db)" in rendered
+    assert "return result" in rendered
+    import ast
+
+    ast.parse(rendered)
+
+
+def test_action_template_passes_model_class_kwarg():
+    """Collection action with ``model_cls: type[X]`` gets the resource model."""
+    rendered = _render_action_template(
+        is_object_action=False,
+        fn_name="request_upload",
+        model_param_name=None,
+        model_class_param_name="model_cls",
+        has_request_body=True,
+        returns_none=False,
+    )
+    expected = "result = await request_upload(db=db, model_cls=Post, body=body)"
+    assert expected in rendered
+    import ast
+
+    ast.parse(rendered)
+
+
+def test_action_template_omits_model_class_kwarg_when_unset():
+    """Without a ``type[X]`` param, no ``model_cls=`` kwarg appears."""
+    rendered = _render_action_template(
+        is_object_action=False,
+        fn_name="bulk_import",
+        model_param_name=None,
+        model_class_param_name=None,
+        has_request_body=True,
+        returns_none=False,
+    )
+    assert "model_cls=" not in rendered
+    assert "result = await bulk_import(db=db, body=body)" in rendered
+
+
 def test_response_schema_name_list_envelope():
     handler = RouteHandler(
         method="GET",

@@ -84,3 +84,50 @@ async def action_two_bodies(
 ) -> StubResponse:
     """Action with two BaseModel params — should fail."""
     return StubResponse(ok=True)
+
+
+class StubMixin:
+    """Stand-in for a mixin class shared across resources."""
+
+
+class StubModelWithMixin(StubMixin):
+    """Concrete model that extends the mixin."""
+
+
+async def object_action_supertype(
+    obj: StubMixin,
+    db: AsyncSession,
+) -> StubResponse:
+    """Object action whose model param is a supertype of the model."""
+    return StubResponse(ok=True)
+
+
+async def object_action_object_typed(
+    obj: object,
+    db: AsyncSession,
+) -> StubResponse:
+    """Object action whose first param is typed ``object``."""
+    return StubResponse(ok=True)
+
+
+async def object_action_returns_none(
+    obj: StubModel,
+    db: AsyncSession,
+) -> None:
+    """Object action with no body -- 204 No Content."""
+
+
+async def collection_action_returns_none(
+    db: AsyncSession,
+) -> None:
+    """Collection action with no body -- 204 No Content."""
+
+
+async def collection_action_with_model_class(
+    *,
+    model_cls: type[StubMixin],
+    db: AsyncSession,
+    body: StubRequest,
+) -> StubResponse:
+    """Collection action that wants the resource's mapped class."""
+    return StubResponse(ok=True)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from unittest.mock import patch
 
 from pydantic import BaseModel
@@ -1174,7 +1173,10 @@ class TestList:
         assert handler.response_model == "list[UserListItem]"
         assert handler.body_context["pagination_mode"] is None
         assert ("sqlalchemy", "select") in handler.extra_imports
-        assert not any(mod == "ingot" for mod, _ in handler.extra_imports)
+        assert not any(
+            mod == "ingot" or mod.startswith("ingot.")
+            for mod, _ in handler.extra_imports
+        )
 
     def test_test_case(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1272,7 +1274,7 @@ class TestFilter:
         handler = _find_handler(list_ctx.store, path="/search")
         assert search_req.body_context["has_filter"] is True
         assert handler.body_context["has_filter"] is True
-        assert ("ingot", "apply_filters") in handler.extra_imports
+        assert ("ingot.filters", "apply_filters") in handler.extra_imports
 
     def test_empty_fields_defaults_to_list_fields(self):
         """FilterConfig() with no fields list uses all list fields."""
@@ -1341,7 +1343,7 @@ class TestOrder:
         assert handler.body_context["has_sort"] is True
         assert handler.body_context["default_sort_field"] == "name"
         assert handler.body_context["default_sort_dir"] == "desc"
-        assert ("ingot", "apply_ordering") in handler.extra_imports
+        assert ("ingot.ordering", "apply_ordering") in handler.extra_imports
 
 
 class TestPaginate:
@@ -1368,7 +1370,8 @@ class TestPaginate:
         assert handler.return_type == "UserPage"
         assert handler.body_context["pagination_mode"] == "keyset"
         assert handler.body_context["cursor_field"] == "id"
-        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
+        assert keyset in handler.extra_imports
 
     def test_offset_uses_offset_helper(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1381,8 +1384,10 @@ class TestPaginate:
         )
         handler = _find_handler(list_ctx.store, path="/search")
         assert handler.body_context["pagination_mode"] == "offset"
-        assert ("ingot", "apply_offset_pagination") in handler.extra_imports
-        assert ("ingot", "apply_keyset_pagination") not in handler.extra_imports
+        offset = ("ingot.pagination", "apply_offset_pagination")
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
+        assert offset in handler.extra_imports
+        assert keyset not in handler.extra_imports
 
     def test_flips_list_test_case_is_list_response(self):
         resource = ResourceConfig(model="app.models.User")
@@ -1431,9 +1436,10 @@ class TestListExtensionsCompose:
         assert handler.body_context["has_filter"] is True
         assert handler.body_context["has_sort"] is True
         assert handler.body_context["pagination_mode"] == "keyset"
-        assert ("ingot", "apply_filters") in handler.extra_imports
-        assert ("ingot", "apply_ordering") in handler.extra_imports
-        assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
+        keyset = ("ingot.pagination", "apply_keyset_pagination")
+        assert ("ingot.filters", "apply_filters") in handler.extra_imports
+        assert ("ingot.ordering", "apply_ordering") in handler.extra_imports
+        assert keyset in handler.extra_imports
         assert handler.response_model == "UserPage"
 
 
@@ -1593,16 +1599,18 @@ class TestAction:
 
     def test_action_object_level(self):
         """Object-level action includes pk in path."""
+        from kiln.operations._introspect import IntrospectedAction
+
         resource = ResourceConfig(model="blog.models.Post")
 
-        @dataclass
-        class _Info:
-            is_object_action: bool = True
-            response_class: str | None = "PostResult"
-            response_module: str = "blog.actions"
-            request_class: str | None = "PostRequest"
-            request_module: str | None = "blog.actions"
-            model_param_name: str | None = "post"
+        info = IntrospectedAction(
+            model_param_name="post",
+            model_class_param_name=None,
+            request_class="PostRequest",
+            request_module="blog.actions",
+            response_class="PostResult",
+            response_module="blog.actions",
+        )
 
         op_config = OperationConfig(
             name="publish",
@@ -1617,7 +1625,7 @@ class TestAction:
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
-            return_value=_Info(),
+            return_value=info,
         ):
             result = list(Action().build(ctx, opts))
 
@@ -1627,23 +1635,27 @@ class TestAction:
         assert handler.response_model == "PostResult"
         assert handler.request_schema_module == "blog.actions"
         assert handler.response_schema_module == "blog.actions"
+        assert handler.status_code is None
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found == 404
+        assert test.status_success == 200
         assert test.action_name == "publish"
 
     def test_action_collection_level(self):
         """Collection-level action has no pk in path."""
+        from kiln.operations._introspect import IntrospectedAction
+
         resource = ResourceConfig(model="blog.models.Post")
 
-        @dataclass
-        class _Info:
-            is_object_action: bool = False
-            response_class: str | None = None
-            response_module: str = "blog.actions"
-            request_class: str | None = None
-            request_module: str | None = None
-            model_param_name: str | None = None
+        info = IntrospectedAction(
+            model_param_name=None,
+            model_class_param_name=None,
+            request_class=None,
+            request_module=None,
+            response_class="BulkResult",
+            response_module="blog.actions",
+        )
 
         op_config = OperationConfig(
             name="bulk_import",
@@ -1658,7 +1670,7 @@ class TestAction:
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
-            return_value=_Info(),
+            return_value=info,
         ):
             result = list(Action().build(ctx, opts))
 
@@ -1667,3 +1679,154 @@ class TestAction:
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found is None
+
+    def test_action_returns_none_emits_204(self):
+        """``-> None`` action: 204 status, no response model, no return."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            model_class_param_name=None,
+            request_class=None,
+            request_module=None,
+            response_class=None,
+            response_module=None,
+        )
+
+        op_config = OperationConfig(
+            name="archive",
+            type="action",
+            fn="blog.actions.archive",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.archive")
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 204
+        assert handler.response_model is None
+        assert handler.return_type == "None"
+        assert handler.body_context["returns_none"] is True
+
+        test = next(r for r in result if isinstance(r, TestCase))
+        assert test.status_success == 204
+
+    def test_action_status_code_override(self):
+        """Caller-supplied ``status_code`` wins over the framework default."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            model_class_param_name=None,
+            request_class=None,
+            request_module=None,
+            response_class="PostResource",
+            response_module="blog.actions",
+        )
+
+        op_config = OperationConfig(
+            name="publish",
+            type="action",
+            fn="blog.actions.publish",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.publish", status_code=202)
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 202
+
+        test = next(r for r in result if isinstance(r, TestCase))
+        assert test.status_success == 202
+
+    def test_action_model_class_param_propagates_to_body_context(self):
+        """``type[X]`` param name flows to the template so it can pass it."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name=None,
+            model_class_param_name="model_cls",
+            request_class="UploadRequest",
+            request_module="ingot.files",
+            response_class="UploadResponse",
+            response_module="ingot.files",
+        )
+
+        op_config = OperationConfig(
+            name="upload",
+            type="action",
+            fn="ingot.files.request_upload",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="ingot.files.request_upload")
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["model_class_param_name"] == "model_cls"
+        # Collection action: no PK in path.
+        assert handler.path == "/upload"
+
+    def test_action_status_code_overrides_default_204(self):
+        """Override beats the ``-> None`` 204 default too."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            model_class_param_name=None,
+            request_class=None,
+            request_module=None,
+            response_class=None,
+            response_module=None,
+        )
+
+        op_config = OperationConfig(
+            name="reset",
+            type="action",
+            fn="blog.actions.reset",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.reset", status_code=205)
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 205
