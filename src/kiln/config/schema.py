@@ -204,9 +204,16 @@ class TelemetryConfig(BaseModel):
     service_version: str | None = None
     """Optional ``service.version`` resource attribute."""
 
-    environment: str | None = None
-    """Optional ``deployment.environment.name`` resource attribute,
-    e.g. ``"prod"`` / ``"staging"`` / ``"dev"``."""
+    environment_env: str = "ENVIRONMENT"
+    """Environment variable name read at startup for the
+    ``deployment.environment.name`` resource attribute, e.g.
+    ``"prod"`` / ``"staging"`` / ``"dev"``.  Set to a name your
+    deployment already exports (default: ``ENVIRONMENT``); leave
+    the variable unset at runtime and the attribute is omitted.
+
+    Generated artifacts must be portable across deployments, so
+    the *value* is intentionally not config-time -- only the
+    variable name is."""
 
     traces: bool = True
     """Emit trace spans."""
@@ -227,6 +234,11 @@ class TelemetryConfig(BaseModel):
     """Wire HTTPXClientInstrumentor.  Off by default -- generated
     apps don't make outbound HTTP themselves; turn on when consumer
     code does."""
+    instrument_requests: bool = False
+    """Wire RequestsInstrumentor for the ``requests`` library.  Off
+    by default for the same reason as :attr:`instrument_httpx` -- the
+    consumer opts in when they have ``requests``-based outbound calls
+    they want to trace."""
     instrument_logging: bool = False
     """Inject trace/span ids into stdlib log records via
     LoggingInstrumentor.  Off by default to avoid mutating logging

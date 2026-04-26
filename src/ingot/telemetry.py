@@ -69,6 +69,20 @@ the absent attribute so a missing-attribute alert doesn't mask a
 real outage."""
 
 
+def _resolve_env(env_var: str | None) -> str | None:
+    """Read *env_var* from the process environment.
+
+    Returns ``None`` for ``None`` or unset / empty values so callers
+    can use ``is not None`` to decide whether to attach an attribute.
+    Empty strings are treated as unset because ``ENVIRONMENT=`` in a
+    .env file is almost always a mistake, not a real value.
+    """
+    if env_var is None:
+        return None
+    value = os.environ.get(env_var)
+    return value or None
+
+
 # -------------------------------------------------------------------
 # Provider builders
 # -------------------------------------------------------------------
@@ -182,7 +196,7 @@ def build_tracer_provider(
     *,
     service_name: str,
     service_version: str | None = None,
-    environment: str | None = None,
+    environment_env: str | None = None,
     resource_attributes: Mapping[str, str] | None = None,
     sampler: str = "parentbased_always_on",
     sampler_ratio: float | None = None,
@@ -196,11 +210,17 @@ def build_tracer_provider(
     :func:`opentelemetry.trace.set_tracer_provider`.  Splitting
     construction from installation keeps the helper testable
     without touching the global tracer provider.
+
+    ``environment_env`` is the *name* of the environment variable
+    holding the deployment-environment value (e.g. ``"ENVIRONMENT"``),
+    not the value itself -- the same generated artifact deploys
+    across dev / staging / prod, so the value is resolved at startup.
+    ``None`` skips the lookup; an unset / empty variable does the same.
     """
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=environment,
+        environment=_resolve_env(environment_env),
         extra=resource_attributes or {},
     )
     provider = TracerProvider(
@@ -219,7 +239,7 @@ def build_meter_provider(
     *,
     service_name: str,
     service_version: str | None = None,
-    environment: str | None = None,
+    environment_env: str | None = None,
     resource_attributes: Mapping[str, str] | None = None,
 ) -> MeterProvider:
     """Build a ``MeterProvider`` reading exporter config from env.
@@ -232,7 +252,7 @@ def build_meter_provider(
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=environment,
+        environment=_resolve_env(environment_env),
         extra=resource_attributes or {},
     )
     reader = PeriodicExportingMetricReader(OTLPMetricExporter())
@@ -243,18 +263,22 @@ def build_logger_provider(
     *,
     service_name: str,
     service_version: str | None = None,
-    environment: str | None = None,
+    environment_env: str | None = None,
     resource_attributes: Mapping[str, str] | None = None,
 ) -> LoggerProvider:
     """Build a ``LoggerProvider`` configured via OTLP env vars.
 
     Off by default in :class:`~kiln.config.schema.TelemetryConfig`;
-    only used when the consumer opts in to log export.
+    only used when the consumer opts in to log export.  The provider
+    on its own is not enough -- the generated ``init_telemetry`` also
+    attaches a :class:`opentelemetry.sdk._logs.LoggingHandler` to the
+    stdlib root logger so ``logging.getLogger().info(...)`` calls
+    flow through OTLP.
     """
     resource = _build_resource(
         service_name=service_name,
         service_version=service_version,
-        environment=environment,
+        environment=_resolve_env(environment_env),
         extra=resource_attributes or {},
     )
     provider = LoggerProvider(resource=resource)
@@ -278,12 +302,19 @@ def traced_handler(
 ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     """Wrap an async route handler in an internal span.
 
+    Used for both CRUD ops and user-defined actions -- action names
+    (``publish``, ``archive``, ...) flow through the same ``op``
+    parameter as CRUD names (``get``, ``list``, ...) and end up on
+    the same :data:`ATTR_OP` attribute.  Distinguishing CRUD from
+    actions in dashboards is left to the value: kiln's CRUD names
+    are a fixed small set, anything else is user-defined.
+
     Args:
         span_name: Span name, conventionally ``f"{resource}.{op}"``.
         resource: Low-cardinality resource label (e.g. ``"article"``)
             attached as :data:`ATTR_RESOURCE`.
-        op: Low-cardinality op label (e.g. ``"get"``) attached as
-            :data:`ATTR_OP`.
+        op: Low-cardinality op label (e.g. ``"get"``, ``"publish"``)
+            attached as :data:`ATTR_OP`.
         record_exceptions: When ``True`` (default), exceptions raised
             from the handler set the span status to ERROR and call
             :meth:`Span.record_exception` before re-raising.
@@ -306,40 +337,6 @@ def traced_handler(
             ) as span:
                 span.set_attribute(ATTR_RESOURCE, resource)
                 span.set_attribute(ATTR_OP, op)
-                return await fn(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-def traced_action(
-    span_name: str,
-    *,
-    resource: str,
-    action: str,
-    record_exceptions: bool = True,
-) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
-    """Variant of :func:`traced_handler` for action operations.
-
-    Differs only in attribute naming: emits ``kiln.resource`` and
-    ``kiln.action`` instead of ``kiln.op`` so dashboards can filter
-    user-defined actions separately from CRUD ops.
-    """
-    tracer = trace.get_tracer("kiln.handler")
-
-    def decorator(
-        fn: Callable[..., Awaitable[Any]],
-    ) -> Callable[..., Awaitable[Any]]:
-        @functools.wraps(fn)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            with tracer.start_as_current_span(
-                span_name,
-                record_exception=record_exceptions,
-                set_status_on_exception=record_exceptions,
-            ) as span:
-                span.set_attribute(ATTR_RESOURCE, resource)
-                span.set_attribute("kiln.action", action)
                 return await fn(*args, **kwargs)
 
         return wrapper

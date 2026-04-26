@@ -32,6 +32,9 @@ No exporter is wired explicitly -- the OTel SDK reads the
 
 from __future__ import annotations
 
+{% if logs %}
+import logging
+{% endif %}
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -40,6 +43,7 @@ from opentelemetry import metrics as _metrics
 {% endif %}
 {% if logs %}
 from opentelemetry import _logs
+from opentelemetry.sdk._logs import LoggingHandler
 {% endif %}
 
 from ingot.telemetry import (
@@ -78,9 +82,7 @@ def init_telemetry(app: FastAPI | None = None) -> None:
 {% if service_version %}
         service_version="{{ service_version }}",
 {% endif %}
-{% if environment %}
-        environment="{{ environment }}",
-{% endif %}
+        environment_env="{{ environment_env }}",
         resource_attributes=_RESOURCE_ATTRIBUTES,
         sampler="{{ sampler }}",
 {% if sampler_ratio is not none %}
@@ -100,9 +102,7 @@ def init_telemetry(app: FastAPI | None = None) -> None:
 {% if service_version %}
         service_version="{{ service_version }}",
 {% endif %}
-{% if environment %}
-        environment="{{ environment }}",
-{% endif %}
+        environment_env="{{ environment_env }}",
         resource_attributes=_RESOURCE_ATTRIBUTES,
     )
     _metrics.set_meter_provider(meter_provider)
@@ -114,12 +114,21 @@ def init_telemetry(app: FastAPI | None = None) -> None:
 {% if service_version %}
         service_version="{{ service_version }}",
 {% endif %}
-{% if environment %}
-        environment="{{ environment }}",
-{% endif %}
+        environment_env="{{ environment_env }}",
         resource_attributes=_RESOURCE_ATTRIBUTES,
     )
     _logs.set_logger_provider(logger_provider)
+
+    # Bridge stdlib logging into the OTel logger provider so
+    # ``logging.getLogger().info(...)`` (and any framework that
+    # funnels through stdlib logging) ships records over OTLP.
+    # ``NOTSET`` defers level filtering to the loggers themselves;
+    # the user's ``logging.basicConfig(level=...)`` still wins.
+    _otel_log_handler = LoggingHandler(
+        level=logging.NOTSET,
+        logger_provider=logger_provider,
+    )
+    logging.getLogger().addHandler(_otel_log_handler)
 
 {% endif %}
 {% if instrument_fastapi %}
@@ -134,6 +143,11 @@ def init_telemetry(app: FastAPI | None = None) -> None:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
     HTTPXClientInstrumentor().instrument()
+{% endif %}
+{% if instrument_requests %}
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+    RequestsInstrumentor().instrument()
 {% endif %}
 {% if instrument_logging %}
     from opentelemetry.instrumentation.logging import LoggingInstrumentor

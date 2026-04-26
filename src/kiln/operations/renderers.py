@@ -324,22 +324,13 @@ def _apply_tracing_decorator(
     op_name = handler.op_name
     span_name = f"{info.model.lower}.{op_name}"
     record = "True" if telemetry.record_exceptions else "False"
-    if is_action:
-        imports.add_from("ingot.telemetry", "traced_action")
-        decorator = (
-            f'@traced_action("{span_name}", '
-            f'resource="{info.model.lower}", '
-            f'action="{op_name}", '
-            f"record_exceptions={record})"
-        )
-    else:
-        imports.add_from("ingot.telemetry", "traced_handler")
-        decorator = (
-            f'@traced_handler("{span_name}", '
-            f'resource="{info.model.lower}", '
-            f'op="{op_name}", '
-            f"record_exceptions={record})"
-        )
+    imports.add_from("ingot.telemetry", "traced_handler")
+    decorator = (
+        f'@traced_handler("{span_name}", '
+        f'resource="{info.model.lower}", '
+        f'op="{op_name}", '
+        f"record_exceptions={record})"
+    )
     handler.decorators = [decorator, *handler.decorators]
 
 

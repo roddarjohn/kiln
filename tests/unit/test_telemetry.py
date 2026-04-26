@@ -41,6 +41,7 @@ class TestTelemetryConfigDefaults:
         assert cfg.instrument_fastapi is True
         assert cfg.instrument_sqlalchemy is True
         assert cfg.instrument_httpx is False
+        assert cfg.instrument_requests is False
         assert cfg.instrument_logging is False
         assert cfg.span_per_handler is True
         assert cfg.span_per_action is True
@@ -52,6 +53,7 @@ class TestTelemetryConfigDefaults:
         assert cfg.exporter is None
         assert cfg.exporter_endpoint_env == "OTEL_EXPORTER_OTLP_ENDPOINT"
         assert cfg.exporter_headers_env == "OTEL_EXPORTER_OTLP_HEADERS"
+        assert cfg.environment_env == "ENVIRONMENT"
         assert cfg.resource_attributes == {}
 
 
@@ -173,7 +175,7 @@ class TestTelemetryScaffoldOutputs:
             telemetry=TelemetryConfig(
                 service_name="svc",
                 service_version="1.2.3",
-                environment="prod",
+                environment_env="DEPLOY_ENV",
                 sampler="traceidratio",
                 sampler_ratio=0.05,
                 resource_attributes={"team": "platform"},
@@ -188,7 +190,7 @@ class TestTelemetryScaffoldOutputs:
         ctx = outputs[0].context
         assert ctx["service_name"] == "svc"
         assert ctx["service_version"] == "1.2.3"
-        assert ctx["environment"] == "prod"
+        assert ctx["environment_env"] == "DEPLOY_ENV"
         assert ctx["sampler"] == "traceidratio"
         assert ctx["sampler_ratio"] == 0.05
         assert ctx["resource_attributes"] == {"team": "platform"}
@@ -354,7 +356,7 @@ class TestAuthScaffoldTelemetryFlag:
 
 
 # ---------------------------------------------------------------------------
-# Per-handler @traced_handler / @traced_action injection via the
+# Per-handler @traced_handler injection via the
 # central handler renderer.  Goes through the real render registry so
 # the resource/operation scope walking and import collection paths
 # all run end to end.
@@ -456,7 +458,10 @@ class TestHandlerTracingDecorator:
         assert 'op="get"' in decs[0]
         assert "record_exceptions=True" in decs[0]
 
-    def test_traced_action_used_for_action_body_template(self):
+    def test_traced_handler_emitted_for_action_body_template(self):
+        # Actions go through the same decorator as CRUD ops; only
+        # the ``op`` kwarg's value distinguishes them (user-defined
+        # name vs the fixed CRUD name set).
         handler = _action_handler()
         shared_registry.render(
             handler,
@@ -464,9 +469,9 @@ class TestHandlerTracingDecorator:
         )
         decs = _decorators(handler)
         assert len(decs) == 1
-        assert decs[0].startswith("@traced_action(")
-        assert 'action="publish"' in decs[0]
-        assert "op=" not in decs[0]
+        assert decs[0].startswith("@traced_handler(")
+        assert 'op="publish"' in decs[0]
+        assert "action=" not in decs[0]
 
     def test_record_exceptions_threaded_through(self):
         handler = _crud_handler()
@@ -521,7 +526,9 @@ class TestHandlerTracingDecorator:
 
     def test_span_per_handler_off_does_not_disable_actions(self):
         # Action handlers are gated by span_per_action, not
-        # span_per_handler -- the two flags are independent.
+        # span_per_handler -- the two flags are independent (the
+        # decorator emitted is the same in either case, but the
+        # gate that decides whether to emit it is different).
         handler = _action_handler()
         shared_registry.render(
             handler,
@@ -533,7 +540,7 @@ class TestHandlerTracingDecorator:
                 ),
             ),
         )
-        assert _decorators(handler)[0].startswith("@traced_action(")
+        assert _decorators(handler)[0].startswith("@traced_handler(")
 
     def test_decorator_import_added(self):
         handler = _crud_handler()
@@ -551,7 +558,8 @@ class TestHandlerTracingDecorator:
         # the kiln-shipped decorator.
         assert "from ingot.telemetry import traced_handler" in block
 
-    def test_action_decorator_import_added(self):
+    def test_action_uses_same_decorator_import(self):
+        # No traced_action symbol -- actions reuse traced_handler.
         handler = _action_handler()
         fragments = list(
             shared_registry.render(
@@ -562,4 +570,5 @@ class TestHandlerTracingDecorator:
             )
         )
         block = _all_imports(fragments)
-        assert "from ingot.telemetry import traced_action" in block
+        assert "from ingot.telemetry import traced_handler" in block
+        assert "traced_action" not in block

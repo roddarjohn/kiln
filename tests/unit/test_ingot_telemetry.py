@@ -28,12 +28,12 @@ from ingot.telemetry import (
     _build_sampler,
     _build_span_exporter,
     _parse_otlp_headers,
+    _resolve_env,
     build_logger_provider,
     build_meter_provider,
     build_tracer_provider,
     scrub_current_span_attributes,
     shutdown_providers,
-    traced_action,
     traced_handler,
 )
 
@@ -63,6 +63,61 @@ class TestParseOtlpHeaders:
     def test_drops_pair_with_blank_key(self):
         # ``=value`` parses to ('', 'value'); blank key is skipped.
         assert _parse_otlp_headers("=v,a=1") == {"a": "1"}
+
+
+# ---------------------------------------------------------------------------
+# Env var resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveEnv:
+    def test_none(self):
+        assert _resolve_env(None) is None
+
+    def test_unset(self, monkeypatch):
+        monkeypatch.delenv("MY_VAR", raising=False)
+        assert _resolve_env("MY_VAR") is None
+
+    def test_empty_string_treated_as_unset(self, monkeypatch):
+        # ``ENVIRONMENT=`` in a .env file is almost always a typo,
+        # not a real "this deployment has the empty-string env name."
+        monkeypatch.setenv("MY_VAR", "")
+        assert _resolve_env("MY_VAR") is None
+
+    def test_set(self, monkeypatch):
+        monkeypatch.setenv("MY_VAR", "prod")
+        assert _resolve_env("MY_VAR") == "prod"
+
+
+class TestBuildProviderResolvesEnvironmentEnv:
+    def test_environment_attached_when_set(self, monkeypatch):
+        monkeypatch.setenv("MY_DEPLOY_ENV", "staging")
+        provider = build_tracer_provider(
+            service_name="svc",
+            environment_env="MY_DEPLOY_ENV",
+            exporter="none",
+        )
+        assert (
+            provider.resource.attributes["deployment.environment.name"]
+            == "staging"
+        )
+
+    def test_environment_omitted_when_var_unset(self, monkeypatch):
+        monkeypatch.delenv("MY_DEPLOY_ENV", raising=False)
+        provider = build_tracer_provider(
+            service_name="svc",
+            environment_env="MY_DEPLOY_ENV",
+            exporter="none",
+        )
+        assert "deployment.environment.name" not in provider.resource.attributes
+
+    def test_environment_omitted_when_env_var_name_is_none(self):
+        provider = build_tracer_provider(
+            service_name="svc",
+            environment_env=None,
+            exporter="none",
+        )
+        assert "deployment.environment.name" not in provider.resource.attributes
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +284,7 @@ class TestShutdownProviders:
 
 
 # ---------------------------------------------------------------------------
-# traced_handler / traced_action
+# traced_handler
 # ---------------------------------------------------------------------------
 
 
@@ -302,24 +357,6 @@ class TestTracedHandler:
         spans = in_memory_tracer.get_finished_spans()
         assert spans[0].status.status_code.name != "ERROR"
         assert not any(e.name == "exception" for e in spans[0].events)
-
-
-class TestTracedAction:
-    async def test_action_attribute_distinct_from_op(self, in_memory_tracer):
-        @traced_action(
-            "article.publish",
-            resource="article",
-            action="publish",
-        )
-        async def action() -> str:
-            return "ok"
-
-        await action()
-        spans = in_memory_tracer.get_finished_spans()
-        attrs = spans[0].attributes
-        assert attrs[ATTR_RESOURCE] == "article"
-        assert attrs["kiln.action"] == "publish"
-        assert ATTR_OP not in attrs
 
 
 class TestScrubCurrentSpanAttributes:

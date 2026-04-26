@@ -3,7 +3,6 @@
 //   local telemetry = import 'kiln/telemetry/telemetry.libsonnet';
 //   {
 //     telemetry: telemetry.otel('blog-api', {
-//       environment: 'prod',
 //       sampler: 'parentbased_traceidratio',
 //       sampler_ratio: 0.1,
 //       resource_attributes: { team: 'platform' },
@@ -15,13 +14,18 @@
 // per-handler spans on, request/response body capture off (PII
 // risk), and `parentbased_always_on` sampling for friendly dev
 // defaults.  Production users typically switch to a ratio sampler.
+//
+// Deployment environment (dev/staging/prod) is *not* a code-gen
+// argument: the same artifact ships across environments, so the
+// value is read from the env var named by `environment_env` at
+// startup (default: `ENVIRONMENT`).  Override the variable name
+// here if your deployment already exports a different one.
 {
   otel(service_name, opts={}):: {
     service_name: service_name,
     [if std.objectHas(opts, "service_version") then "service_version"]:
       opts.service_version,
-    [if std.objectHas(opts, "environment") then "environment"]:
-      opts.environment,
+    environment_env: std.get(opts, "environment_env", "ENVIRONMENT"),
 
     traces: std.get(opts, "traces", true),
     metrics: std.get(opts, "metrics", true),
@@ -30,6 +34,7 @@
     instrument_fastapi: std.get(opts, "instrument_fastapi", true),
     instrument_sqlalchemy: std.get(opts, "instrument_sqlalchemy", true),
     instrument_httpx: std.get(opts, "instrument_httpx", false),
+    instrument_requests: std.get(opts, "instrument_requests", false),
     instrument_logging: std.get(opts, "instrument_logging", false),
 
     span_per_handler: std.get(opts, "span_per_handler", true),
