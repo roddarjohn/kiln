@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -146,8 +146,11 @@ def _build_sampler(*, name: SamplerName, ratio: float | None) -> Sampler:
     if name == "parentbased_traceidratio":
         assert ratio is not None  # noqa: S101 -- guaranteed by config validator
         return ParentBased(TraceIdRatioBased(ratio))
-    msg = f"Unknown sampler {name!r}"
-    raise ValueError(msg)
+    # Exhaustiveness check: ``SamplerName`` is a closed Literal, so
+    # adding a value to it without updating this dispatch becomes a
+    # type error here.  At runtime this also raises ``AssertionError``
+    # if a non-literal string sneaks in via untyped callers.
+    assert_never(name)
 
 
 def _build_span_exporter(

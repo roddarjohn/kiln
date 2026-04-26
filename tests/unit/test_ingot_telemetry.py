@@ -80,23 +80,46 @@ class TestBuildResource:
         r = _build_resource(
             service_name="svc",
             service_version=None,
-            environment=None,
+            environment_env=None,
             extra={},
         )
         assert r.attributes["service.name"] == "svc"
         assert "service.version" not in r.attributes
         assert "deployment.environment.name" not in r.attributes
 
-    def test_optional_fields(self):
+    def test_optional_fields(self, monkeypatch):
+        monkeypatch.setenv("DEPLOY_ENV", "prod")
         r = _build_resource(
             service_name="svc",
             service_version="1.0.0",
-            environment="prod",
+            environment_env="DEPLOY_ENV",
             extra={"team": "platform"},
         )
         assert r.attributes["service.version"] == "1.0.0"
         assert r.attributes["deployment.environment.name"] == "prod"
         assert r.attributes["team"] == "platform"
+
+    def test_environment_env_unset_skips_attribute(self, monkeypatch):
+        monkeypatch.delenv("DEPLOY_ENV", raising=False)
+        r = _build_resource(
+            service_name="svc",
+            service_version=None,
+            environment_env="DEPLOY_ENV",
+            extra={},
+        )
+        assert "deployment.environment.name" not in r.attributes
+
+    def test_environment_env_empty_string_skipped(self, monkeypatch):
+        # Empty value treated as unset -- ``DEPLOY_ENV=`` in a .env
+        # file is almost always a typo, not a real value.
+        monkeypatch.setenv("DEPLOY_ENV", "")
+        r = _build_resource(
+            service_name="svc",
+            service_version=None,
+            environment_env="DEPLOY_ENV",
+            extra={},
+        )
+        assert "deployment.environment.name" not in r.attributes
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +151,12 @@ class TestBuildSampler:
         assert isinstance(sampler, ParentBased)
 
     def test_unknown_raises(self):
-        with pytest.raises(ValueError, match="Unknown sampler"):
-            _build_sampler(name="garbage", ratio=None)
+        # ``SamplerName`` is a Literal so static callers can't reach
+        # this branch -- but untyped callers (e.g. a config that
+        # bypassed Pydantic validation) can; verify the runtime
+        # ``assert_never`` still fires.
+        with pytest.raises(AssertionError):
+            _build_sampler(name="garbage", ratio=None)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
