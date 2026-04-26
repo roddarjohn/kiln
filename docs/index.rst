@@ -25,6 +25,7 @@ FastAPI generator built on top of it.
    architecture
    extending
    telemetry
+   pgqueuer
 
 .. toctree::
    :maxdepth: 2
