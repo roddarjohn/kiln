@@ -1269,7 +1269,7 @@ class TestFilter:
         handler = _find_handler(list_ctx.store, path="/search")
         assert search_req.body_context["has_filter"] is True
         assert handler.body_context["has_filter"] is True
-        assert ("ingot", "apply_filters") in handler.extra_imports
+        assert ("ingot.filters", "apply_filters") in handler.extra_imports
 
     def test_empty_fields_defaults_to_list_fields(self):
         """FilterConfig() with no fields list uses all list fields."""
@@ -1338,7 +1338,7 @@ class TestOrder:
         assert handler.body_context["has_sort"] is True
         assert handler.body_context["default_sort_field"] == "name"
         assert handler.body_context["default_sort_dir"] == "desc"
-        assert ("ingot", "apply_ordering") in handler.extra_imports
+        assert ("ingot.ordering", "apply_ordering") in handler.extra_imports
 
 
 class TestPaginate:
@@ -1428,8 +1428,8 @@ class TestListExtensionsCompose:
         assert handler.body_context["has_filter"] is True
         assert handler.body_context["has_sort"] is True
         assert handler.body_context["pagination_mode"] == "keyset"
-        assert ("ingot", "apply_filters") in handler.extra_imports
-        assert ("ingot", "apply_ordering") in handler.extra_imports
+        assert ("ingot.filters", "apply_filters") in handler.extra_imports
+        assert ("ingot.ordering", "apply_ordering") in handler.extra_imports
         assert ("ingot", "apply_keyset_pagination") in handler.extra_imports
         assert handler.response_model == "UserPage"
 
