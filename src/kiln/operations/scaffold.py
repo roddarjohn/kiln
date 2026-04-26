@@ -125,7 +125,7 @@ class AuthScaffold:
         auth = ctx.instance.auth
         assert auth is not None  # noqa: S101 -- guaranteed by when()
 
-        has_telemetry = ctx.instance.telemetry is not None
+        has_telemetry = bool(ctx.instance.telemetry)
 
         yield StaticFile(
             path="auth/__init__.py",

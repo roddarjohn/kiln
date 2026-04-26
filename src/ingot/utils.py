@@ -102,14 +102,14 @@ def run_once(fn: Callable[..., None]) -> Callable[..., None]:
     can't accidentally rely on a "first call's return" pattern,
     which would leak the gate to the public API surface.
     """
-    sentinel = object()
-    state: list[object] = [sentinel]
+    called = False
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> None:
-        if state[0] is not sentinel:
+        nonlocal called
+        if called:
             return
-        state[0] = None
+        called = True
         fn(*args, **kwargs)
 
     return wrapper
