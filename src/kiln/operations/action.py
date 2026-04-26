@@ -35,6 +35,14 @@ class Action:
         """Options for action operations."""
 
         fn: str
+        status_code: int | None = None
+        """Override the response status code.
+
+        When unset, the action defaults to 204 for ``-> None``
+        functions and the FastAPI default (200) for everything else.
+        Set to e.g. ``201`` for create-style actions or ``202`` for
+        async-accepted endpoints.
+        """
 
     def build(
         self,
@@ -83,12 +91,19 @@ class Action:
                 RouteParam(name="body", annotation=info.request_class),
             )
 
-        # ``-> None`` action: emit 204 No Content with no response
-        # model and skip the ``return result`` line in the template.
-        # Lets reusable actions (e.g. ``ingot.documents.delete_document``)
-        # be true side-effect endpoints without inventing a fake
-        # ``OkResponse`` body just to satisfy the framework.
-        status_code = 204 if info.returns_none else None
+        # ``-> None`` action: emit 204 No Content (FastAPI default
+        # for empty bodies) with no response model and skip the
+        # ``return result`` line in the template.  Lets reusable
+        # actions (e.g. ``ingot.documents.delete_document``) be true
+        # side-effect endpoints without inventing a fake response
+        # body just to satisfy the framework.  Caller-supplied
+        # ``options.status_code`` always wins.
+        default_status = 204 if info.returns_none else None
+        status_code = (
+            options.status_code
+            if options.status_code is not None
+            else default_status
+        )
         return_type = "None" if info.returns_none else info.response_class
 
         yield RouteHandler(
@@ -119,7 +134,7 @@ class Action:
             op_name="action",
             method="post",
             path=path,
-            status_success=204 if info.returns_none else 200,
+            status_success=status_code or 200,
             status_not_found=404 if info.is_object_action else None,
             has_request_body=info.request_class is not None,
             request_schema=info.request_class,

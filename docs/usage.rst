@@ -170,6 +170,10 @@ Each entry in a resource's ``operations`` list is either:
   foundry generates a ``POST /{id}/publish`` handler that calls
   ``blog.actions.publish``.
 
+  Pass ``status_code: 202`` (or any integer) to override the
+  response status.  The default is 204 for ``-> None`` functions
+  and 200 otherwise.
+
 Nested (related-model) fields
 -----------------------------
 
@@ -391,8 +395,8 @@ and the introspector matches them via the supertype check.
 The config
 ^^^^^^^^^^
 
-Use the ``resource.documents(actions_module)`` preset to bundle all
-four actions onto the resource:
+Use the ``resource.documents(actions_module)`` preset to bundle the
+get + four upload-flow actions onto the resource:
 
 .. code-block:: jsonnet
 
@@ -402,26 +406,43 @@ four actions onto the resource:
      model: "myapp.models.Attachment",
      pk: "id",
      pk_type: "uuid",
-     operations: [
-       { name: "get", fields: [
-           { name: "id", type: "uuid" },
-           { name: "original_filename", type: "str" },
-           { name: "content_type", type: "str" },
-       ] },
-     ] + resource.documents("myapp.attachments.actions"),
+     operations: resource.documents("myapp.attachments.actions"),
    }
 
 Routes generated (relative to the resource prefix):
 
+* ``GET  /{id}`` -- get (DocumentMixin columns by default)
 * ``POST /upload`` -- request_upload (mints presigned PUT URL)
-* ``POST /{id}/complete`` -- complete_upload
+* ``POST /{id}/complete`` -- complete_upload (204 No Content)
 * ``POST /{id}/download`` -- download (returns presigned GET URL)
 * ``POST /{id}/delete-document`` -- delete_document (cascades S3 +
-  row delete; returns 204 No Content)
+  row delete; 204 No Content)
 
 The download endpoint is ``POST`` rather than ``GET`` because the
 underlying ``action`` operation only supports POST today; the
 response carries the GET URL the client follows.
+
+Customizing the get fields:
+
+.. code-block:: jsonnet
+
+   resource.documents(
+     "myapp.attachments.actions",
+     fields=[
+       { name: "id", type: "uuid" },
+       { name: "original_filename", type: "str" },
+       { name: "content_type", type: "str" },
+     ],
+   )
+
+Pass ``include_get=false`` to skip the get entirely (e.g. when you
+want to attach your own ``get`` op with extra non-mixin fields):
+
+.. code-block:: jsonnet
+
+   operations: [
+     { name: "get", fields: [...own fields including custom columns...] },
+   ] + resource.documents("...", include_get=false)
 
 S3 configuration
 ^^^^^^^^^^^^^^^^

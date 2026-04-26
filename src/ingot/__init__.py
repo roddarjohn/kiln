@@ -21,7 +21,6 @@ from ingot.auth import (
 from ingot.documents import (
     DEFAULT_PRESIGN_TTL,
     DocumentMixin,
-    DocumentResponse,
     DownloadResponse,
     S3Storage,
     UploadRequest,
@@ -40,7 +39,6 @@ from ingot.responses import assert_rowcount, get_object_from_query_or_404
 __all__ = [
     "DEFAULT_PRESIGN_TTL",
     "DocumentMixin",
-    "DocumentResponse",
     "DownloadResponse",
     "FilterOp",
     "S3Storage",

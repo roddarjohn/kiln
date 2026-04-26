@@ -1708,3 +1708,74 @@ class TestAction:
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_success == 204
+
+    def test_action_status_code_override(self):
+        """Caller-supplied ``status_code`` wins over the framework default."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            request_class=None,
+            request_module=None,
+            response_class="PostResource",
+            response_module="blog.actions",
+        )
+
+        op_config = OperationConfig(
+            name="publish",
+            type="action",
+            fn="blog.actions.publish",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.publish", status_code=202)
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 202
+
+        test = next(r for r in result if isinstance(r, TestCase))
+        assert test.status_success == 202
+
+    def test_action_status_code_overrides_default_204(self):
+        """Override beats the ``-> None`` 204 default too."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            request_class=None,
+            request_module=None,
+            response_class=None,
+            response_module=None,
+        )
+
+        op_config = OperationConfig(
+            name="reset",
+            type="action",
+            fn="blog.actions.reset",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.reset", status_code=205)
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 205

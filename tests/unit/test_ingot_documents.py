@@ -238,13 +238,21 @@ def fake_storage(monkeypatch):
 def fake_db():
     """Minimal AsyncSession stand-in for action functions."""
     db = MagicMock()
-    db.add = MagicMock()
-    db.flush = AsyncMock()
-    db.delete = AsyncMock()
+    db.execute = AsyncMock()
     return db
 
 
-async def test_request_upload_creates_pending_row(fake_db, fake_storage):
+def _executed_stmt(fake_db: MagicMock) -> object:
+    """Return the single statement object passed to db.execute()."""
+    fake_db.execute.assert_awaited_once()
+    (stmt,) = fake_db.execute.await_args.args
+    return stmt
+
+
+async def test_request_upload_inserts_pending_row(fake_db, fake_storage):
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.sql.dml import Insert
+
     fake_storage.presigned_put_url.return_value = "https://s3/put"
     request_upload = make_request_upload(_Doc)
 
@@ -255,41 +263,42 @@ async def test_request_upload_creates_pending_row(fake_db, fake_storage):
     )
     response = await request_upload(db=fake_db, body=body)
 
-    fake_db.add.assert_called_once()
-    fake_db.flush.assert_awaited_once()
-    (added,) = fake_db.add.call_args.args
-    assert isinstance(added, _Doc)
-    assert added.id == response.id
-    assert added.original_filename == "report.pdf"
-    assert added.content_type == "application/pdf"
-    assert added.size_bytes == 1234
-    assert added.uploaded_at is None  # row starts pending
+    stmt = _executed_stmt(fake_db)
+    assert isinstance(stmt, Insert)
+    assert stmt.table.name == "_test_docs"
+    params = stmt.compile(dialect=sqlite.dialect()).params
+    assert params["id"] == response.id
+    assert params["original_filename"] == "report.pdf"
+    assert params["content_type"] == "application/pdf"
+    assert params["size_bytes"] == 1234
     # Key includes the document id so colliding filenames don't share keys.
-    assert added.s3_key.startswith(f"{response.id.hex}/")
-    assert added.s3_key.endswith("/report.pdf")
+    assert params["s3_key"].startswith(f"{response.id.hex}/")
+    assert params["s3_key"].endswith("/report.pdf")
     assert response.upload_url == "https://s3/put"
     fake_storage.presigned_put_url.assert_called_once_with(
-        added.s3_key,
+        params["s3_key"],
         content_type="application/pdf",
     )
 
 
-async def test_complete_upload_sets_timestamp(fake_db):
-    # SQLAlchemy column defaults only fire on flush, so populate the
-    # not-null fields by hand here.
-    doc = _Doc(
-        s3_key="k",
-        id=uuid.uuid4(),
-        created_at=datetime.datetime.now(tz=datetime.UTC),
-    )
-    doc.uploaded_at = None
+async def test_complete_upload_issues_update(fake_db):
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.sql.dml import Update
 
-    response = await complete_upload(doc, db=fake_db)
+    doc = _Doc(s3_key="k", id=uuid.uuid4())
 
-    assert isinstance(doc.uploaded_at, datetime.datetime)
-    assert doc.uploaded_at.tzinfo is not None
-    assert response.uploaded_at == doc.uploaded_at
-    assert response.id == doc.id
+    result = await complete_upload(doc, db=fake_db)
+
+    assert result is None  # 204 No Content
+    stmt = _executed_stmt(fake_db)
+    assert isinstance(stmt, Update)
+    assert stmt.table.name == "_test_docs"
+    params = stmt.compile(dialect=sqlite.dialect()).params
+    assert isinstance(params["uploaded_at"], datetime.datetime)
+    assert params["uploaded_at"].tzinfo is not None
+    assert params["id_1"] == doc.id  # WHERE id = :id_1
+    # The Python-side instance is NOT mutated.
+    assert doc.uploaded_at is None
 
 
 async def test_download_returns_presigned_url(fake_db, fake_storage):
@@ -314,17 +323,33 @@ async def test_download_404s_when_pending(fake_db, fake_storage):
 
 
 async def test_delete_document_removes_object_then_row(fake_db, fake_storage):
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.sql.dml import Delete
+
     doc = _Doc(s3_key="k", id=uuid.uuid4())
 
     result = await delete_document(doc, db=fake_db)
 
-    # Returns None so the action op emits 204 No Content.
-    assert result is None
+    assert result is None  # 204 No Content
     fake_storage.delete.assert_called_once_with("k")
-    fake_db.delete.assert_awaited_once_with(doc)
-    # S3 deletion happens before the row delete -- a crash between
-    # the two leaves a recoverable orphan row, not a leaked object.
-    storage_call = fake_storage.delete.call_args_list[0]
-    db_call = fake_db.delete.await_args_list[0]
-    assert storage_call is not None
-    assert db_call is not None
+
+    stmt = _executed_stmt(fake_db)
+    assert isinstance(stmt, Delete)
+    assert stmt.table.name == "_test_docs"
+    params = stmt.compile(dialect=sqlite.dialect()).params
+    assert params["id_1"] == doc.id
+
+
+async def test_delete_document_s3_first_then_row(fake_storage):
+    """S3 delete must precede the SQL delete -- crash leaves an
+    orphan row (recoverable), not a leaked S3 object."""
+    call_order: list[str] = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=lambda *_: call_order.append("db"))
+    fake_storage.delete.side_effect = lambda *_: call_order.append("s3")
+
+    doc = _Doc(s3_key="k", id=uuid.uuid4())
+    await delete_document(doc, db=db)
+
+    assert call_order == ["s3", "db"]
