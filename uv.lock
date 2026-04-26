@@ -579,7 +579,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "jsonnet" },
-    { name = "pgqueuer" },
+    { name = "pgqueuer", extra = ["asyncpg"] },
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -623,7 +623,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.0" },
     { name = "jsonnet", specifier = ">=0.21.0" },
-    { name = "pgqueuer", specifier = ">=0.26.3" },
+    { name = "pgqueuer", extras = ["asyncpg"], specifier = ">=0.26.3" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
@@ -880,6 +880,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/07/95/3e668623fd9f3f32fe2e2c64f65113c359b98484a263078b8b9cef1f891e/pgqueuer-0.26.3.tar.gz", hash = "sha256:3552dd9522b7e046699d56e6c824de60369ea8814fa5cda49ff297d618549971", size = 402303, upload-time = "2026-04-02T20:49:08.124Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/36/3c/29a38d95c16baa7f9ec4449694ab714d6a9943a1754e364cb16968643d82/pgqueuer-0.26.3-py3-none-any.whl", hash = "sha256:7bed2bc65a28b3723cbbd9ce362721522ca3091e25b730057cf52fd8c9483253", size = 99340, upload-time = "2026-04-02T20:49:06.632Z" },
+]
+
+[package.optional-dependencies]
+asyncpg = [
+    { name = "asyncpg" },
 ]
 
 [[package]]
