@@ -173,8 +173,6 @@ def build_tracer_provider(
     sampler: str = "parentbased_always_on",
     sampler_ratio: float | None = None,
     exporter: str | None = None,
-    exporter_endpoint_env: str = "OTEL_EXPORTER_OTLP_ENDPOINT",
-    exporter_headers_env: str = "OTEL_EXPORTER_OTLP_HEADERS",
 ) -> TracerProvider:
     """Build and return a configured ``TracerProvider``.
 
@@ -188,6 +186,10 @@ def build_tracer_provider(
     not the value itself -- the same generated artifact deploys
     across dev / staging / prod, so the value is resolved at startup.
     ``None`` skips the lookup; an unset / empty variable does the same.
+
+    The OTLP endpoint and headers are read by the SDK from the
+    standard ``OTEL_EXPORTER_OTLP_*`` environment variables -- there
+    is no kiln-side override for the variable names.
     """
     resource = _build_resource(
         service_name=service_name,
@@ -197,11 +199,9 @@ def build_tracer_provider(
     )
     provider = TracerProvider(
         resource=resource,
-        sampler=_build_sampler(sampler, sampler_ratio),
+        sampler=_build_sampler(name=sampler, ratio=sampler_ratio),
     )
-    span_exporter = _build_span_exporter(
-        exporter, exporter_endpoint_env, exporter_headers_env
-    )
+    span_exporter = _build_span_exporter(exporter=exporter)
     if span_exporter is not None:
         provider.add_span_processor(BatchSpanProcessor(span_exporter))
     return provider
