@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import io
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -193,31 +192,6 @@ def test_delete_calls_delete_object():
     client.delete_object.assert_called_once_with(Bucket="bkt", Key="k")
 
 
-def test_upload_fileobj_passes_through_content_type():
-    storage, client = _storage_with_mock_client()
-    fileobj = io.BytesIO(b"hello")
-
-    storage.upload_fileobj(fileobj, "k", content_type="text/plain")
-
-    client.upload_fileobj.assert_called_once_with(
-        fileobj,
-        "bkt",
-        "k",
-        ExtraArgs={"ContentType": "text/plain"},
-    )
-
-
-def test_upload_fileobj_without_content_type_passes_none():
-    storage, client = _storage_with_mock_client()
-    fileobj = io.BytesIO(b"hello")
-
-    storage.upload_fileobj(fileobj, "k")
-
-    client.upload_fileobj.assert_called_once_with(
-        fileobj, "bkt", "k", ExtraArgs=None
-    )
-
-
 # --- default_storage -------------------------------------------------------
 
 
@@ -286,17 +260,16 @@ async def test_request_upload_creates_pending_row(fake_db, fake_storage):
     (added,) = fake_db.add.call_args.args
     assert isinstance(added, _Doc)
     assert added.id == response.id
-    assert added.s3_key == response.key
     assert added.original_filename == "report.pdf"
     assert added.content_type == "application/pdf"
     assert added.size_bytes == 1234
     assert added.uploaded_at is None  # row starts pending
     # Key includes the document id so colliding filenames don't share keys.
-    assert response.id.hex in response.key
-    assert response.key.endswith("/report.pdf")
+    assert added.s3_key.startswith(f"{response.id.hex}/")
+    assert added.s3_key.endswith("/report.pdf")
     assert response.upload_url == "https://s3/put"
     fake_storage.presigned_put_url.assert_called_once_with(
-        response.key,
+        added.s3_key,
         content_type="application/pdf",
     )
 
@@ -343,9 +316,10 @@ async def test_download_404s_when_pending(fake_db, fake_storage):
 async def test_delete_document_removes_object_then_row(fake_db, fake_storage):
     doc = _Doc(s3_key="k", id=uuid.uuid4())
 
-    response = await delete_document(doc, db=fake_db)
+    result = await delete_document(doc, db=fake_db)
 
-    assert response.ok is True
+    # Returns None so the action op emits 204 No Content.
+    assert result is None
     fake_storage.delete.assert_called_once_with("k")
     fake_db.delete.assert_awaited_once_with(doc)
     # S3 deletion happens before the row delete -- a crash between

@@ -108,3 +108,16 @@ async def object_action_object_typed(
 ) -> StubResponse:
     """Object action whose first param is typed ``object``."""
     return StubResponse(ok=True)
+
+
+async def object_action_returns_none(
+    obj: StubModel,
+    db: AsyncSession,
+) -> None:
+    """Object action with no body -- 204 No Content."""
+
+
+async def collection_action_returns_none(
+    db: AsyncSession,
+) -> None:
+    """Collection action with no body -- 204 No Content."""

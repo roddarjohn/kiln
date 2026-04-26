@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from unittest.mock import patch
 
 from pydantic import BaseModel
@@ -1591,16 +1590,17 @@ class TestAction:
 
     def test_action_object_level(self):
         """Object-level action includes pk in path."""
+        from kiln.operations._introspect import IntrospectedAction
+
         resource = ResourceConfig(model="blog.models.Post")
 
-        @dataclass
-        class _Info:
-            is_object_action: bool = True
-            response_class: str | None = "PostResult"
-            response_module: str = "blog.actions"
-            request_class: str | None = "PostRequest"
-            request_module: str | None = "blog.actions"
-            model_param_name: str | None = "post"
+        info = IntrospectedAction(
+            model_param_name="post",
+            request_class="PostRequest",
+            request_module="blog.actions",
+            response_class="PostResult",
+            response_module="blog.actions",
+        )
 
         op_config = OperationConfig(
             name="publish",
@@ -1615,7 +1615,7 @@ class TestAction:
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
-            return_value=_Info(),
+            return_value=info,
         ):
             result = list(Action().build(ctx, opts))
 
@@ -1625,23 +1625,26 @@ class TestAction:
         assert handler.response_model == "PostResult"
         assert handler.request_schema_module == "blog.actions"
         assert handler.response_schema_module == "blog.actions"
+        assert handler.status_code is None
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found == 404
+        assert test.status_success == 200
         assert test.action_name == "publish"
 
     def test_action_collection_level(self):
         """Collection-level action has no pk in path."""
+        from kiln.operations._introspect import IntrospectedAction
+
         resource = ResourceConfig(model="blog.models.Post")
 
-        @dataclass
-        class _Info:
-            is_object_action: bool = False
-            response_class: str | None = None
-            response_module: str = "blog.actions"
-            request_class: str | None = None
-            request_module: str | None = None
-            model_param_name: str | None = None
+        info = IntrospectedAction(
+            model_param_name=None,
+            request_class=None,
+            request_module=None,
+            response_class="BulkResult",
+            response_module="blog.actions",
+        )
 
         op_config = OperationConfig(
             name="bulk_import",
@@ -1656,7 +1659,7 @@ class TestAction:
 
         with patch(
             "kiln.operations.action.introspect_action_fn",
-            return_value=_Info(),
+            return_value=info,
         ):
             result = list(Action().build(ctx, opts))
 
@@ -1665,3 +1668,43 @@ class TestAction:
 
         test = next(r for r in result if isinstance(r, TestCase))
         assert test.status_not_found is None
+
+    def test_action_returns_none_emits_204(self):
+        """``-> None`` action: 204 status, no response model, no return."""
+        from kiln.operations._introspect import IntrospectedAction
+
+        resource = ResourceConfig(model="blog.models.Post")
+
+        info = IntrospectedAction(
+            model_param_name="post",
+            request_class=None,
+            request_module=None,
+            response_class=None,
+            response_module=None,
+        )
+
+        op_config = OperationConfig(
+            name="archive",
+            type="action",
+            fn="blog.actions.archive",
+        )
+        ctx = _operation_ctx(resource, op_config)
+
+        from kiln.operations.action import Action
+
+        opts = Action.Options(fn="blog.actions.archive")
+
+        with patch(
+            "kiln.operations.action.introspect_action_fn",
+            return_value=info,
+        ):
+            result = list(Action().build(ctx, opts))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.status_code == 204
+        assert handler.response_model is None
+        assert handler.return_type == "None"
+        assert handler.body_context["returns_none"] is True
+
+        test = next(r for r in result if isinstance(r, TestCase))
+        assert test.status_success == 204

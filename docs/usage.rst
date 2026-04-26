@@ -341,7 +341,7 @@ The flow:
    pending state.  Subsequent ``POST /attachments/{id}/download``
    calls return short-lived presigned GET URLs.
 4. ``POST /attachments/{id}/delete-document`` cascades: deletes the
-   S3 object, then the row.
+   S3 object, then the row.  Returns 204 No Content.
 
 The model
 ^^^^^^^^^
@@ -417,7 +417,7 @@ Routes generated (relative to the resource prefix):
 * ``POST /{id}/complete`` -- complete_upload
 * ``POST /{id}/download`` -- download (returns presigned GET URL)
 * ``POST /{id}/delete-document`` -- delete_document (cascades S3 +
-  row delete)
+  row delete; returns 204 No Content)
 
 The download endpoint is ``POST`` rather than ``GET`` because the
 underlying ``action`` operation only supports POST today; the

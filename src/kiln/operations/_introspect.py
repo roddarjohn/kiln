@@ -33,16 +33,19 @@ class IntrospectedAction:
         request_class: Name of the Pydantic request-body class, if
             any.
         request_module: Module containing ``request_class``.
-        response_class: Name of the Pydantic response class.
-        response_module: Module containing ``response_class``.
+        response_class: Name of the Pydantic response class, or
+            ``None`` when the function returns ``-> None`` (the
+            generated route emits 204 No Content with no body).
+        response_module: Module containing ``response_class``, or
+            ``None`` when the function returns ``-> None``.
 
     """
 
     model_param_name: str | None
     request_class: str | None
     request_module: str | None
-    response_class: str
-    response_module: str
+    response_class: str | None
+    response_module: str | None
 
     @property
     def is_object_action(self) -> bool:
@@ -53,6 +56,15 @@ class IntrospectedAction:
         and operate on the whole table.
         """
         return bool(self.model_param_name)
+
+    @property
+    def returns_none(self) -> bool:
+        """``True`` when the function is annotated ``-> None``.
+
+        The generated route emits 204 No Content with no body in
+        this case; the action template skips ``return result``.
+        """
+        return self.response_class is None
 
 
 def introspect_action_fn(
@@ -199,30 +211,35 @@ def _is_pydantic_model(hint: object) -> bool:
 def _validate_return_type(
     hints: dict[str, type],
     fn_dotted: str,
-) -> tuple[str, str]:
+) -> tuple[str | None, str | None]:
     """Extract and validate the return type annotation.
 
     Returns:
-        ``(class_name, module_path)`` tuple.
+        ``(class_name, module_path)`` tuple, or ``(None, None)``
+        when the function is annotated ``-> None`` -- the action op
+        treats that as "no body, 204 No Content".
 
     Raises:
-        TypeError: If the return annotation is missing or is not a
-            ``BaseModel`` subclass.
+        TypeError: If the return annotation is missing or is neither
+            a ``BaseModel`` subclass nor ``None``.
 
     """
     return_hint = hints.get("return")
     if return_hint is None:
         msg = (
             f"Action '{fn_dotted}' has no return type annotation. "
-            f"A BaseModel return type is required."
+            f"Annotate the return as a BaseModel subclass or 'None'."
         )
         raise TypeError(msg)
+
+    # ``-> None`` resolves to the NoneType class via get_type_hints.
+    if return_hint is type(None):
+        return None, None
 
     if not _is_pydantic_model(return_hint):
         msg = (
             f"Action '{fn_dotted}' return type '{return_hint}' is "
-            f"not a BaseModel subclass. A BaseModel return type is "
-            f"required."
+            f"not a BaseModel subclass or 'None'."
         )
         raise TypeError(msg)
 

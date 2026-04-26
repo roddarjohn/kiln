@@ -13,11 +13,11 @@ in S3-compatible storage.  This module ships three pieces:
   working.
 
 * :class:`S3Storage` -- a small wrapper around ``boto3`` that
-  exposes the operations a presigned-upload flow actually needs:
-  mint a presigned PUT URL, mint a presigned GET URL, delete an
-  object.  The constructor takes explicit config so it's testable;
-  :func:`default_storage` builds one from ``KILN_S3_*`` env vars
-  for the common case.
+  exposes the three operations a presigned-upload flow actually
+  needs: mint a presigned PUT URL, mint a presigned GET URL, delete
+  an object.  The constructor takes explicit config so it's
+  testable; :func:`default_storage` builds one from ``KILN_S3_*``
+  env vars for the common case.
 
 * Action functions -- :func:`make_request_upload`,
   :func:`complete_upload`, :func:`download`, and
@@ -41,7 +41,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Protocol, cast, dataclass_transform
+from typing import TYPE_CHECKING, Any, cast, dataclass_transform
 
 import boto3
 from fastapi import HTTPException, status
@@ -51,7 +51,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from typing import BinaryIO
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,16 +62,6 @@ Long enough for a browser to PUT a multi-megabyte file over a slow
 connection; short enough that a leaked URL stops working before it
 shows up in logs anyone reads.
 """
-
-
-def _utcnow() -> datetime.datetime:
-    """Return the current UTC time as a timezone-aware datetime.
-
-    Wrapped so :class:`DocumentMixin`'s column default points at a
-    callable that tests can monkey-patch, rather than capturing
-    ``datetime.now`` at import time.
-    """
-    return datetime.datetime.now(tz=datetime.UTC)
 
 
 # ``@dataclass_transform`` tells type checkers to treat the
@@ -140,7 +129,7 @@ class DocumentMixin:
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
-        default=_utcnow,
+        default=lambda: datetime.datetime.now(tz=datetime.UTC),
     )
     """When the metadata row was created (PUT URL issued)."""
 
@@ -152,51 +141,9 @@ class DocumentMixin:
     metadata exists but the blob may or may not be in S3."""
 
 
-class Storage(Protocol):
-    """Storage backend interface.
-
-    :class:`S3Storage` is the only implementation shipped, but the
-    Protocol exists so tests and alternative backends (in-memory,
-    filesystem, GCS) plug in without subclassing.
-    """
-
-    def presigned_put_url(
-        self,
-        key: str,
-        *,
-        expires_in: int = DEFAULT_PRESIGN_TTL,
-        content_type: str | None = None,
-    ) -> str:
-        """Return a URL the client can PUT to upload an object."""
-        ...
-
-    def presigned_get_url(
-        self,
-        key: str,
-        *,
-        expires_in: int = DEFAULT_PRESIGN_TTL,
-    ) -> str:
-        """Return a URL the client can GET to download an object."""
-        ...
-
-    def delete(self, key: str) -> None:
-        """Remove the object at *key*.  Idempotent."""
-        ...
-
-    def upload_fileobj(
-        self,
-        fileobj: BinaryIO,
-        key: str,
-        *,
-        content_type: str | None = None,
-    ) -> None:
-        """Stream *fileobj* directly to *key* (server-mediated upload)."""
-        ...
-
-
 @dataclass
 class S3Storage:
-    """``boto3``-backed implementation of :class:`Storage`.
+    """``boto3``-backed S3 client wrapper.
 
     The constructor takes explicit config so tests can build an
     instance pointed at a stub or a localstack endpoint without
@@ -273,30 +220,6 @@ class S3Storage:
         """
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
-    def upload_fileobj(
-        self,
-        fileobj: BinaryIO,
-        key: str,
-        *,
-        content_type: str | None = None,
-    ) -> None:
-        """Stream *fileobj* through the app server to S3.
-
-        Use this only when the client can't be trusted with a
-        presigned URL (e.g. server-side imports, generated reports).
-        Production user uploads should go through
-        :meth:`presigned_put_url` so bytes never touch the app box.
-        """
-        extra: dict[str, Any] = {}
-        if content_type is not None:
-            extra["ContentType"] = content_type
-        self.client.upload_fileobj(
-            fileobj,
-            self.bucket,
-            key,
-            ExtraArgs=extra or None,
-        )
-
 
 def default_storage() -> S3Storage:
     """Build an :class:`S3Storage` from ``KILN_S3_*`` env vars.
@@ -349,7 +272,6 @@ class UploadResponse(BaseModel):
     """
 
     id: uuid.UUID
-    key: str
     upload_url: str
 
 
@@ -371,12 +293,6 @@ class DocumentResponse(BaseModel):
     original_filename: str | None
     created_at: datetime.datetime
     uploaded_at: datetime.datetime | None
-
-
-class DeleteResponse(BaseModel):
-    """Ack body for the delete action."""
-
-    ok: bool = True
 
 
 # --- Action functions -----------------------------------------------------
@@ -440,7 +356,6 @@ def make_request_upload(
         )
         return UploadResponse(
             id=document_id,
-            key=key,
             upload_url=upload_url,
         )
 
@@ -458,7 +373,7 @@ async def complete_upload(
     session after.  Idempotent -- calling twice just refreshes the
     timestamp, which is rare enough not to be worth a guard.
     """
-    document.uploaded_at = _utcnow()
+    document.uploaded_at = datetime.datetime.now(tz=datetime.UTC)
     return DocumentResponse.model_validate(document)
 
 
@@ -488,8 +403,11 @@ async def delete_document(
     document: DocumentMixin,
     *,
     db: AsyncSession,
-) -> DeleteResponse:
+) -> None:
     """Cascade-delete *document*: remove the S3 object then the row.
+
+    Returns ``None`` so the action op emits 204 No Content -- the
+    client doesn't need a body to know the row is gone.
 
     S3 first because :meth:`S3Storage.delete` is idempotent -- a
     crash between the two steps leaves an orphan row, which the
@@ -499,4 +417,3 @@ async def delete_document(
     storage = default_storage()
     storage.delete(document.s3_key)
     await db.delete(document)
-    return DeleteResponse()

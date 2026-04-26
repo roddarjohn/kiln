@@ -117,3 +117,24 @@ def test_introspect_object_typed_param_is_not_model():
     )
     assert info.is_object_action is False
     assert info.model_param_name is None
+
+
+def test_introspect_object_action_returning_none():
+    info = introspect_action_fn(
+        f"{_STUB}.object_action_returns_none",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is True
+    assert info.returns_none is True
+    assert info.response_class is None
+    assert info.response_module is None
+
+
+def test_introspect_collection_action_returning_none():
+    info = introspect_action_fn(
+        f"{_STUB}.collection_action_returns_none",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is False
+    assert info.returns_none is True
+    assert info.response_class is None

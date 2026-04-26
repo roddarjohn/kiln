@@ -83,6 +83,14 @@ class Action:
                 RouteParam(name="body", annotation=info.request_class),
             )
 
+        # ``-> None`` action: emit 204 No Content with no response
+        # model and skip the ``return result`` line in the template.
+        # Lets reusable actions (e.g. ``ingot.documents.delete_document``)
+        # be true side-effect endpoints without inventing a fake
+        # ``OkResponse`` body just to satisfy the framework.
+        status_code = 204 if info.returns_none else None
+        return_type = "None" if info.returns_none else info.response_class
+
         yield RouteHandler(
             method="POST",
             path=path,
@@ -91,7 +99,8 @@ class Action:
             params=params,
             response_model=info.response_class,
             response_schema_module=info.response_module,
-            return_type=info.response_class,
+            return_type=return_type,
+            status_code=status_code,
             doc=f"Execute {action_name.raw} action.",
             request_schema=info.request_class,
             request_schema_module=info.request_module,
@@ -101,6 +110,7 @@ class Action:
                 "fn_name": fn_name,
                 "model_param_name": info.model_param_name,
                 "has_request_body": info.request_class is not None,
+                "returns_none": info.returns_none,
             },
             extra_imports=extra_imports,
         )
@@ -109,7 +119,7 @@ class Action:
             op_name="action",
             method="post",
             path=path,
-            status_success=200,
+            status_success=204 if info.returns_none else 200,
             status_not_found=404 if info.is_object_action else None,
             has_request_body=info.request_class is not None,
             request_schema=info.request_class,

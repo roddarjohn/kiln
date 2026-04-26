@@ -6,10 +6,20 @@
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
+{% if returns_none %}
+    await {{ fn_name }}({{ model_param_name }}, db=db{% if has_request_body %}, body=body{% endif %})
+{% else %}
     result = await {{ fn_name }}({{ model_param_name }}, db=db{% if has_request_body %}, body=body{% endif %})
+{% endif %}
+{% else %}
+{% if returns_none %}
+    await {{ fn_name }}(db=db{% if has_request_body %}, body=body{% endif %})
 {% else %}
     result = await {{ fn_name }}(db=db{% if has_request_body %}, body=body{% endif %})
 {% endif %}
+{% endif %}
     await db.commit()
+{% if not returns_none %}
     return result
+{% endif %}
 {% endblock %}

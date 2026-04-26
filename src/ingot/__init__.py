@@ -20,12 +20,10 @@ from ingot.auth import (
 )
 from ingot.documents import (
     DEFAULT_PRESIGN_TTL,
-    DeleteResponse,
     DocumentMixin,
     DocumentResponse,
     DownloadResponse,
     S3Storage,
-    Storage,
     UploadRequest,
     UploadResponse,
     complete_upload,
@@ -41,14 +39,12 @@ from ingot.responses import assert_rowcount, get_object_from_query_or_404
 
 __all__ = [
     "DEFAULT_PRESIGN_TTL",
-    "DeleteResponse",
     "DocumentMixin",
     "DocumentResponse",
     "DownloadResponse",
     "FilterOp",
     "S3Storage",
     "SortDirection",
-    "Storage",
     "UploadRequest",
     "UploadResponse",
     "apply_filters",
