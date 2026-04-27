@@ -6,8 +6,6 @@ of a list op.  Emits the ``{Model}SortField`` enum and
 the parent list's search handler.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation

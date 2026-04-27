@@ -162,30 +162,18 @@ ignore = [
   "CPY",
 ]
 
-[tool.ruff.lint.isort]
-# sphinx-autodoc-typehints 3.10.x doesn't fully support PEP 749
-# lazy annotations -- it touches ``__annotations__`` directly,
-# which evaluates and raises ``NameError`` on TYPE_CHECKING-guarded
-# names, breaking ``-W`` docs builds.  Until upstream catches up,
-# every src module must keep ``from __future__ import annotations``
-# so annotations stay as strings and the docs renderer is happy.
-required-imports = ["from __future__ import annotations"]
-
 [tool.ruff.lint.per-file-ignores]
 "src/ingot/**" = [
   "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
   "PLR0913", # pagination helpers genuinely take many parameters
 ]
-# ``ingot.auth`` deliberately keeps annotations evaluated (no
-# ``__future__`` future-import) so closure-local ``Depends(...)``
-# refs in the inner ``get_session`` survive pydantic's OpenAPI
-# schema build.  See the module docstring at src/ingot/auth.py for
-# the full rationale.  Drop the future-import requirement here, and
-# allow the ``collections.abc`` runtime import that PEP 749 alone
-# would otherwise let TC003 push back into ``TYPE_CHECKING``.
+# ``ingot.auth`` keeps ``collections.abc`` at runtime (not under
+# ``TYPE_CHECKING``) so pydantic's ``TypeAdapter`` can resolve
+# ``Awaitable``/``Callable``/``Sequence`` from the closure-local
+# ``get_session`` inner function at request time.  See the module
+# docstring at src/ingot/auth.py for the full rationale.
 "src/ingot/auth.py" = [
-  "I002",  # future-import deliberately omitted (see docstring)
-  "TC003", # collections.abc must stay at runtime for sphinx
+  "TC003", # collections.abc must stay at runtime for pydantic
 ]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py
@@ -199,7 +187,6 @@ required-imports = ["from __future__ import annotations"]
   "PLR0911", # multiple returns fine in type-dispatch helpers
   "E402",    # sys.path tweaks must precede imports in some scripts
   "D103",    # top-level main() helpers don't need docstrings
-  "I002",    # scripts aren't autodoc'd, future-import not required
 ]
 "tests/**" = [
   "S101",    # assert is fine in tests
@@ -211,7 +198,6 @@ required-imports = ["from __future__ import annotations"]
   "SLF001",  # testing private methods is fine in tests
   "S603",    # subprocess calls use trusted, hardcoded commands
   "S607",    # partial paths (uv, ruff) are intentional
-  "I002",    # tests aren't autodoc'd, future-import not required
 ]
 
 [tool.coverage.run]

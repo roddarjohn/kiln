@@ -5,8 +5,6 @@ Provides :class:`Name` for deriving conventional identifiers
 for splitting and constructing Python dotted import paths.
 """
 
-from __future__ import annotations
-
 
 class Name:
     """Derives conventional identifiers from a base string.

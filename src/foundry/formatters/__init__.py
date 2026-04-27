@@ -6,5 +6,3 @@ public formatters are wired up via the
 foundry's ``pyproject.toml``; they can be imported directly for
 tests or to override in application code.
 """
-
-from __future__ import annotations

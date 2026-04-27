@@ -9,8 +9,6 @@ emitted object, so modifiers amend fields on the bundle rather
 than searching the store by name or shape.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
