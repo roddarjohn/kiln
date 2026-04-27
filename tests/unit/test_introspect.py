@@ -1,7 +1,5 @@
 """Tests for kiln.operations._introspect."""
 
-from __future__ import annotations
-
 import pytest
 
 from kiln.operations._introspect import introspect_action_fn
@@ -159,3 +157,27 @@ def test_introspect_no_model_class_param_when_supertype_mismatch():
         f"{_STUB}.StubModel",  # plain StubModel, not StubModelWithMixin
     )
     assert info.model_class_param_name is None
+
+
+def test_introspect_typecheck_param_is_skipped():
+    """A param annotated with a TYPE_CHECKING-only name (typical for infra
+    types like AsyncSession) is treated as non-classifiable and skipped."""
+    info = introspect_action_fn(
+        f"{_STUB}.action_with_typecheck_param",
+        f"{_STUB}.StubModel",
+    )
+    assert info.is_object_action is True
+    assert info.model_param_name == "obj"
+    assert info.request_class is None
+    assert info.response_class == "StubResponse"
+
+
+def test_introspect_typecheck_return_raises_targeted():
+    """Return type must resolve -- the introspector needs to know whether
+    it's a BaseModel subclass or None.  Unresolvable returns raise with a
+    diagnostic naming the offending name and pointing at the import site."""
+    with pytest.raises(ValueError, match=r"parameter 'return'.*TYPE_CHECKING"):
+        introspect_action_fn(
+            f"{_STUB}.action_with_typecheck_return",
+            f"{_STUB}.StubModel",
+        )

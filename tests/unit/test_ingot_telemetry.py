@@ -1,7 +1,5 @@
 """Tests for the ingot.telemetry runtime helpers."""
 
-from __future__ import annotations
-
 import pytest
 from opentelemetry import trace
 from opentelemetry.sdk._logs import LoggerProvider

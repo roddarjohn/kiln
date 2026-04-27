@@ -1,7 +1,5 @@
 """Tests for the telemetry config, scaffold op, and template wiring."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 

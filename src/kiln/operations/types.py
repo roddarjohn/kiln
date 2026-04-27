@@ -20,8 +20,6 @@ coupled to the dataclasses above — a read op always pairs its
 conversion is the same everywhere.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, cast
 

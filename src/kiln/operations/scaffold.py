@@ -17,8 +17,6 @@ runtime helpers in :mod:`ingot.queue` (``get_queue``,
 ``open_worker_driver``).
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation

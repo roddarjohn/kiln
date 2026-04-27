@@ -5,8 +5,6 @@ session and asyncpg connection are mocked.  Integration tests
 exercise the helpers against a real database.
 """
 
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

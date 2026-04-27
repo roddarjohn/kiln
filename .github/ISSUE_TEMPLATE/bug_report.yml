@@ -36,6 +36,6 @@ body:
         - Python version (e.g. `python --version`)
       placeholder: |
         - kiln: 0.1.0
-        - Python: 3.12.7
+        - Python: 3.14.0
     validations:
       required: true

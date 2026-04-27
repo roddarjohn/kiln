@@ -1,7 +1,5 @@
 """Tests for ingot.pagination."""
 
-from __future__ import annotations
-
 from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.orm import declarative_base
 

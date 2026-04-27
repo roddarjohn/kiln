@@ -1,7 +1,5 @@
 """Tests for ingot.files."""
 
-from __future__ import annotations
-
 import datetime
 import uuid
 from unittest.mock import AsyncMock, MagicMock

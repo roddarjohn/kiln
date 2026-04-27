@@ -1,7 +1,7 @@
 """Tests for kiln config loading and schema validation."""
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +16,9 @@ from kiln.config.schema import (
     ProjectConfig,
     ResourceConfig,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Schema tests

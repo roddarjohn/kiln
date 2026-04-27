@@ -1,7 +1,5 @@
 """Get operation: GET /{pk} -- retrieve a single resource."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name

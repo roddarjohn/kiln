@@ -8,8 +8,8 @@ on the whole table), and the return type drives the response
 schema.
 """
 
-from __future__ import annotations
-
+import annotationlib
+import contextlib
 import importlib
 import inspect
 import typing
@@ -99,7 +99,13 @@ def introspect_action_fn(
     fn = _import_callable(fn_dotted)
     model_cls = _import_callable(model_class_path)
     hints = _resolve_hints(fn, fn_dotted)
-    sig = inspect.signature(fn)
+    # FORWARDREF format keeps inspect.signature from evaluating
+    # annotations -- _resolve_hints already did that.  Without this,
+    # any unresolvable annotation would raise NameError here, before
+    # the introspector got a chance to give a targeted diagnostic.
+    sig = inspect.signature(
+        fn, annotation_format=annotationlib.Format.FORWARDREF
+    )
 
     model_param_name: str | None = None
     model_class_param_name: str | None = None
@@ -109,7 +115,16 @@ def introspect_action_fn(
     for param_name in sig.parameters:
         hint = hints.get(param_name)
 
-        if hint is None or _is_async_session(hint):
+        if hint is None:
+            continue
+
+        # Unresolved ``ForwardRef`` -- typically a TYPE_CHECKING-guarded
+        # infra import (``AsyncSession``, ``Logger``, etc).  We can't
+        # classify it, so we treat it as a non-classifiable param and
+        # skip.  The realistic risk -- a consumer guarding their own
+        # model class or request body BaseModel -- is self-correcting:
+        # generated code would be obviously wrong on first run.
+        if isinstance(hint, annotationlib.ForwardRef):
             continue
 
         if _matches_model(hint, model_cls):
@@ -172,15 +187,54 @@ def _import_callable(dotted: str) -> Callable[..., object]:
 
 def _resolve_hints(
     fn: object,
-    fn_dotted: str,
-) -> dict[str, type]:
-    """Resolve type hints for a callable, wrapping failures."""
-    try:
-        return typing.get_type_hints(fn)
+    fn_dotted: str,  # noqa: ARG001
+) -> dict[str, object]:
+    """Resolve type hints, leaving unresolvable names as ``ForwardRef``.
 
-    except Exception as exc:
-        msg = f"Cannot resolve type annotations for '{fn_dotted}': {exc}"
-        raise ValueError(msg) from exc
+    Uses :func:`annotationlib.get_annotations` with ``Format.FORWARDREF``
+    so a single unresolvable annotation (typically a SQLAlchemy or
+    other heavy import the consumer guarded with ``TYPE_CHECKING``)
+    doesn't kill the whole resolution.  The classifier handles the
+    common skippable case (``AsyncSession``) by name and raises a
+    targeted error for any other unresolved name -- which is the
+    diagnostic the consumer needs to fix their import.
+
+    The string-bridge (``isinstance(ann, str)``) covers consumers
+    that still use ``from __future__ import annotations``: under
+    that import, all annotations come back as raw strings even from
+    ``Format.FORWARDREF``, so we wrap them in :class:`ForwardRef`
+    ourselves and then go through the same evaluate path.
+    """
+    raw = annotationlib.get_annotations(
+        fn,
+        format=annotationlib.Format.FORWARDREF,
+    )
+    fn_globals = getattr(fn, "__globals__", None)
+    resolved: dict[str, object] = {}
+    for name, ann in raw.items():
+        value: object = ann
+        if isinstance(value, str):
+            value = annotationlib.ForwardRef(value, owner=fn)
+        if isinstance(value, annotationlib.ForwardRef):
+            with contextlib.suppress(NameError):
+                value = value.evaluate(globals=fn_globals)
+        resolved[name] = value
+    return resolved
+
+
+def _raise_unresolved(
+    fn_dotted: str,
+    param_name: str,
+    hint: annotationlib.ForwardRef,
+) -> typing.NoReturn:
+    """Raise a targeted error for an unresolved parameter annotation."""
+    msg = (
+        f"Action '{fn_dotted}' parameter '{param_name}' has an "
+        f"unresolved annotation '{hint.__forward_arg__}'. If this "
+        f"name is imported under ``if TYPE_CHECKING:``, move the "
+        f"import to module top-level so the introspector can see it."
+    )
+    raise ValueError(msg)
 
 
 def _matches_model_class_param(hint: object, model_cls: object) -> bool:
@@ -230,23 +284,13 @@ def _matches_model(hint: object, model_cls: object) -> bool:
     )
 
 
-def _is_async_session(hint: object) -> bool:
-    """Return ``True`` when *hint* is SQLAlchemy's ``AsyncSession``.
-
-    Compared by class name to avoid importing SQLAlchemy from this
-    module; consumer code may have its own ``AsyncSession`` alias
-    that we still want to skip.
-    """
-    return isinstance(hint, type) and hint.__name__ == "AsyncSession"
-
-
-def _is_pydantic_model(hint: object) -> bool:
+def _is_pydantic_model(hint: object) -> typing.TypeIs[type[BaseModel]]:
     """Return ``True`` when *hint* is a ``BaseModel`` subclass."""
     return isinstance(hint, type) and issubclass(hint, BaseModel)
 
 
 def _validate_return_type(
-    hints: dict[str, type],
+    hints: dict[str, object],
     fn_dotted: str,
 ) -> tuple[str | None, str | None]:
     """Extract and validate the return type annotation.
@@ -259,19 +303,24 @@ def _validate_return_type(
     Raises:
         TypeError: If the return annotation is missing or is neither
             a ``BaseModel`` subclass nor ``None``.
+        ValueError: If the return annotation is an unresolvable name
+            (e.g. a ``TYPE_CHECKING``-guarded import).
 
     """
-    return_hint = hints.get("return")
-    if return_hint is None:
+    if "return" not in hints:
         msg = (
             f"Action '{fn_dotted}' has no return type annotation. "
             f"Annotate the return as a BaseModel subclass or 'None'."
         )
         raise TypeError(msg)
 
-    # ``-> None`` resolves to the NoneType class via get_type_hints.
-    if return_hint is type(None):
+    return_hint = hints["return"]
+
+    if return_hint is None:
         return None, None
+
+    if isinstance(return_hint, annotationlib.ForwardRef):
+        _raise_unresolved(fn_dotted, "return", return_hint)
 
     if not _is_pydantic_model(return_hint):
         msg = (

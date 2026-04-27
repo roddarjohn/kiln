@@ -1,7 +1,5 @@
 """Tests for kiln.operations — scaffold, routing, crud, action."""
 
-from __future__ import annotations
-
 from unittest.mock import patch
 
 from pydantic import BaseModel
