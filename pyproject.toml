@@ -167,14 +167,6 @@ ignore = [
   "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
   "PLR0913", # pagination helpers genuinely take many parameters
 ]
-# ``ingot.auth`` keeps ``collections.abc`` at runtime (not under
-# ``TYPE_CHECKING``) so pydantic's ``TypeAdapter`` can resolve
-# ``Awaitable``/``Callable``/``Sequence`` from the closure-local
-# ``get_session`` inner function at request time.  See the module
-# docstring at src/ingot/auth.py for the full rationale.
-"src/ingot/auth.py" = [
-  "TC003", # collections.abc must stay at runtime for pydantic
-]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py
   "T201",    # print is fine in scripts

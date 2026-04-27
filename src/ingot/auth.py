@@ -27,7 +27,11 @@ The signing secret lives in an env var (caller-named, typically
 
 import datetime
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import (  # noqa: TC003 -- runtime, see NOTE above
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from typing import Annotated, Any, Literal, Protocol
 
 import jwt
