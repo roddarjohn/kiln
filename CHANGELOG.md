@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.0...kiln-v0.8.1) (2026-04-27)
+
+
+### Bug fixes
+
+* fixing docs deploy + typechecking ([#48](https://github.com/roddarjohn/kiln/issues/48)) ([88af3d1](https://github.com/roddarjohn/kiln/commit/88af3d1e4193dacabf00c450c140c566b31b4912))
+
 ## [0.8.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.4...kiln-v0.8.0) (2026-04-27)
 
 
