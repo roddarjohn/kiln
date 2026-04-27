@@ -1,4 +1,4 @@
-"""Check blank lines around control structures.
+"""Check (and optionally fix) blank lines around control structures.
 
 Enforces a project rule that every ``if``, ``for``, ``async for``,
 ``while``, ``try``, ``with``, ``async with``, and ``match``
@@ -11,19 +11,23 @@ comment, not between the comment and the statement.
 
 Run via::
 
-    uv run python scripts/check_control_blank_lines.py [path ...]
+    uv run python scripts/check_control_blank_lines.py
+    uv run python scripts/check_control_blank_lines.py --fix
+    uv run python scripts/check_control_blank_lines.py src/foundry
 
-Defaults to ``src`` and ``tests`` if no paths are given.  Exits 1
-when any violation is found.
+Defaults to ``src`` and ``tests`` if no paths are given.  Without
+``--fix`` exits 1 when any violation is found; with ``--fix``
+exits 0 after writing the inserts back to disk.
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
-import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Annotated
+
+import typer
 
 CONTROL_TYPES: tuple[type[ast.stmt], ...] = (
     ast.If,
@@ -42,7 +46,7 @@ def _control_name(node: ast.stmt) -> str:
 
 
 def _iter_bodies(node: ast.AST) -> Iterator[list[ast.stmt]]:
-    """Yield each list-of-statements attached to *node*."""
+    """Yield each list-of-statements attached to ``node``."""
     for attr in ("body", "orelse", "finalbody"):
         value = getattr(node, attr, None)
 
@@ -62,16 +66,17 @@ def _iter_bodies(node: ast.AST) -> Iterator[list[ast.stmt]]:
             yield case.body
 
 
-def _line_above_is_blank(lines: list[str], lineno: int) -> bool:
-    """Whether the line above ``lineno`` is blank.
-
-    Skips contiguous comment-only lines so that a comment attached
-    to the control structure does not block the rule.
-    """
-    idx = lineno - 2
+def _walk_up_past_comments(lines: list[str], start_idx: int) -> int:
+    """Return the first non-comment index at or above ``start_idx``."""
+    idx = start_idx
 
     while idx >= 0 and lines[idx].lstrip().startswith("#"):
         idx -= 1
+    return idx
+
+
+def _line_above_is_blank(lines: list[str], lineno: int) -> bool:
+    idx = _walk_up_past_comments(lines, lineno - 2)
 
     if idx < 0:
         return True
@@ -86,9 +91,22 @@ def _line_below_is_blank(lines: list[str], end_lineno: int) -> bool:
     return lines[idx].strip() == ""
 
 
-def _check_body(
-    body: list[ast.stmt], lines: list[str], path: Path
-) -> Iterator[str]:
+def _insert_idx_before(lines: list[str], lineno: int) -> int:
+    """Return the line index where a blank should be inserted.
+
+    If comments precede the control statement, the blank goes
+    above the topmost comment so the comment block stays attached
+    to the statement it documents.
+    """
+    return _walk_up_past_comments(lines, lineno - 2) + 1
+
+
+def _scan_body(
+    body: list[ast.stmt],
+    lines: list[str],
+    path: Path,
+) -> Iterator[tuple[str, int]]:
+    """Yield ``(message, insert_index)`` per violation in ``body``."""
     last = len(body) - 1
 
     for i, stmt in enumerate(body):
@@ -96,7 +114,8 @@ def _check_body(
             if i > 0 and not _line_above_is_blank(lines, stmt.lineno):
                 yield (
                     f"{path}:{stmt.lineno}: missing blank line before "
-                    f"`{_control_name(stmt)}`"
+                    f"`{_control_name(stmt)}`",
+                    _insert_idx_before(lines, stmt.lineno),
                 )
 
             if (
@@ -106,50 +125,89 @@ def _check_body(
             ):
                 yield (
                     f"{path}:{stmt.end_lineno}: missing blank line after "
-                    f"`{_control_name(stmt)}`"
+                    f"`{_control_name(stmt)}`",
+                    stmt.end_lineno,
                 )
 
         for sub_body in _iter_bodies(stmt):
-            yield from _check_body(sub_body, lines, path)
+            yield from _scan_body(sub_body, lines, path)
 
 
-def check_file(path: Path) -> list[str]:
-    """Return blank-line violations for ``path``."""
+def _process(path: Path, *, fix: bool) -> tuple[list[str], bool]:
+    """Scan ``path``; if ``fix``, rewrite it.  Return (messages, changed)."""
     src = path.read_text()
 
     try:
         tree = ast.parse(src, filename=str(path))
     except SyntaxError as exc:
-        return [f"{path}: failed to parse: {exc}"]
+        return [f"{path}: failed to parse: {exc}"], False
 
     lines = src.splitlines()
-    return list(_check_body(tree.body, lines, path))
+    messages: list[str] = []
+    insertions: set[int] = set()
+
+    for message, idx in _scan_body(tree.body, lines, path):
+        messages.append(message)
+        insertions.add(idx)
+
+    if not (fix and insertions):
+        return messages, False
+
+    # Reverse order so earlier indices stay valid as we insert.
+    for idx in sorted(insertions, reverse=True):
+        lines.insert(idx, "")
+    new_src = "\n".join(lines)
+
+    if src.endswith("\n"):
+        new_src += "\n"
+    path.write_text(new_src)
+    return messages, True
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        default=[Path("src"), Path("tests")],
-    )
-    args = parser.parse_args()
+def main(
+    paths: Annotated[
+        list[Path] | None,
+        typer.Argument(
+            help="Paths to scan.  Defaults to src/ and tests/.",
+        ),
+    ] = None,
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix",
+            help="Insert missing blank lines in place.",
+        ),
+    ] = False,
+) -> None:
+    """Check blank lines around control structures."""
+    roots = paths or [Path("src"), Path("tests")]
 
-    violations: list[str] = []
+    all_messages: list[str] = []
+    files_changed = 0
 
-    for root in args.paths:
+    for root in roots:
         for path in sorted(root.rglob("*.py")):
-            violations.extend(check_file(path))
+            messages, changed = _process(path, fix=fix)
+            all_messages.extend(messages)
 
-    for v in violations:
-        print(v)
+            if changed:
+                files_changed += 1
 
-    if violations:
-        print(f"\n{len(violations)} violation(s)", file=sys.stderr)
-        return 1
-    return 0
+    for message in all_messages:
+        typer.echo(message)
+
+    if fix:
+        typer.echo(
+            f"\nFixed {files_changed} file(s); "
+            f"{len(all_messages)} violation(s) addressed.",
+            err=True,
+        )
+        return
+
+    if all_messages:
+        typer.echo(f"\n{len(all_messages)} violation(s)", err=True)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    typer.run(main)
