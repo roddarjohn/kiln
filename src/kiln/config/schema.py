@@ -1,5 +1,7 @@
 """Pydantic models for kiln configuration."""
 
+from __future__ import annotations
+
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

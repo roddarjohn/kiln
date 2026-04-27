@@ -7,6 +7,8 @@ the parent list's ``SearchRequest`` and search handler so the
 generated route calls ``ingot.apply_filters``.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation

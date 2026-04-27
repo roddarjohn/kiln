@@ -22,6 +22,8 @@ driver.  Other drivers (psycopg, etc.) would need a parallel
 shim and are not supported today.
 """
 
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 

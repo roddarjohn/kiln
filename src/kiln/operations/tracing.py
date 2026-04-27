@@ -15,6 +15,8 @@ discriminator between CRUD and action handlers is the canonical
 the body-template path.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from foundry.naming import Name
