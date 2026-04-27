@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.4...kiln-v0.8.0) (2026-04-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* bumping python3.14 ([#42](https://github.com/roddarjohn/kiln/issues/42))
+
+### Features
+
+* bumping python3.14 ([#42](https://github.com/roddarjohn/kiln/issues/42)) ([03a40ea](https://github.com/roddarjohn/kiln/commit/03a40eaf61415f1b4c739bc0edf225be948ad5fd))
+
+
+### Bug fixes
+
+* **deps:** update opentelemetry-python monorepo to v1.41.1 ([#44](https://github.com/roddarjohn/kiln/issues/44)) ([be46ace](https://github.com/roddarjohn/kiln/commit/be46ace2d5afc842e0f59cd5b0bcfb2f8ae36597))
+
 ## [0.7.4](https://github.com/roddarjohn/kiln/compare/kiln-v0.7.3...kiln-v0.7.4) (2026-04-26)
 
 
