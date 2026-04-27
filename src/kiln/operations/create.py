@@ -1,7 +1,5 @@
 """Create operation: POST / -- create a new resource."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name

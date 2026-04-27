@@ -1,3 +1,6 @@
+import inspect
+import re
+import textwrap
 import tomllib
 from pathlib import Path
 
@@ -120,6 +123,51 @@ suppress_warnings = [
 
 templates_path = ["_templates"]
 
+#: Match a top-level ``if TYPE_CHECKING:`` block and capture its
+#: indented body.  The lookahead ``(?=\n\S)`` stops at the first
+#: non-indented following line, mirroring sphinx-autodoc-typehints'
+#: own guarded-import scanner.
+_TYPE_GUARD_RE = re.compile(
+    r"\nif (?:typing\.)?TYPE_CHECKING:[^\n]*([\s\S]*?)(?=\n\S)"
+)
+_GUARD_RESOLVED: set[str] = set()
+
+
+def _preresolve_type_guards(  # noqa: PLR0913
+    _app, _what, _name, obj, _options, _signature, _return_annotation
+):
+    """Exec ``if TYPE_CHECKING:`` blocks into the obj's module globals.
+
+    sphinx-autodoc-typehints' ``process_signature`` calls
+    ``inspect.signature`` (line 73 of its ``__init__``), which
+    evaluates annotations eagerly and NameErrors on
+    ``TYPE_CHECKING``-guarded names.  PEP 749 doesn't rescue us:
+    ``inspect.signature`` doesn't use the ``Format.FORWARDREF``
+    path.
+
+    We connect with priority 100 so this runs before the lib's
+    default-priority (500) handler -- by the time it walks
+    annotations the guarded names are real attributes on the
+    module.
+
+    The lib has its own ``_resolver._resolve_type_guarded_imports``
+    that does the same thing, but it only runs from
+    ``process_docstring``, which fires *after* ``process_signature``.
+    """
+    module = inspect.getmodule(obj)
+    if module is None or module.__name__ in _GUARD_RESOLVED:
+        return
+    _GUARD_RESOLVED.add(module.__name__)
+    try:
+        src = inspect.getsource(module)
+    except (TypeError, OSError):
+        return
+    for body in _TYPE_GUARD_RE.findall(src):
+        try:
+            exec(textwrap.dedent(body), module.__dict__)  # noqa: S102
+        except Exception:  # noqa: BLE001, S110
+            pass
+
 
 def setup(app):  # noqa: D103, ANN001, ANN201
     """Register a no-op ``:paramref:`` role.
@@ -150,3 +198,4 @@ def setup(app):  # noqa: D103, ANN001, ANN201
         return [nodes.literal(text, text)], []
 
     roles.register_local_role("paramref", paramref)
+    app.connect("autodoc-process-signature", _preresolve_type_guards, priority=100)

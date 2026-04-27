@@ -1,7 +1,5 @@
 """ORDER BY application from typed Pydantic sort clauses."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:

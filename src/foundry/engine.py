@@ -15,8 +15,6 @@ The engine does *not* render output to files -- that belongs
 to framework-specific assemblers in the ``kiln`` package.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, cast
 

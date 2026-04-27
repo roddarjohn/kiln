@@ -14,8 +14,6 @@ string out) and :func:`make_import_callback` (the bare callback,
 exposed for callers that want to build their own evaluator).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 

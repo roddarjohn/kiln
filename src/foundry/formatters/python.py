@@ -15,8 +15,6 @@ foundry's ``pyproject.toml``.  Override by declaring your own
 entry point with the same language name.
 """
 
-from __future__ import annotations
-
 import sys
 from typing import TYPE_CHECKING
 

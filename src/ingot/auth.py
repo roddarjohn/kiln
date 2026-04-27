@@ -11,22 +11,27 @@ The signing secret lives in an env var (caller-named, typically
 ``JWT_SECRET``) so generated source never embeds a key.
 """
 
-# NOTE: this module deliberately does NOT use
-# ``from __future__ import annotations``.  ``session_auth`` and the
-# transport ``extract_dep`` helpers below build inner functions
-# annotated with ``Annotated[..., Depends(<closure-local>)]``.  Under
-# PEP 563 those annotations stringify to references that
-# ``typing.get_type_hints`` cannot resolve (closure locals aren't in
-# the function's ``__globals__``), which makes pydantic's
-# ``TypeAdapter`` 500 when FastAPI builds the OpenAPI schema.
-# Keeping annotations evaluated (PEP 749 lazy in 3.14) preserves the
-# closure scope.  ``collections.abc`` is therefore imported at
-# runtime rather than under ``TYPE_CHECKING`` so sphinx-autodoc-
-# typehints doesn't NameError when it walks ``__annotations__``.
+# NOTE: ``session_auth`` and the transport ``extract_dep`` helpers
+# below build inner functions annotated with
+# ``Annotated[..., Depends(<closure-local>)]``.  pydantic's
+# ``TypeAdapter`` calls ``typing.get_type_hints`` against those
+# inner functions when FastAPI builds the OpenAPI schema; closure
+# locals aren't in ``__globals__``, so any stringified annotation
+# (PEP 563) fails to resolve and 500s the schema build.  PEP 749's
+# default deferred-but-lazy evaluation in 3.14 keeps annotations as
+# real objects, preserving the closure scope -- but only as long as
+# nothing forces them back to strings.  ``collections.abc`` must
+# therefore be imported at runtime (not under ``TYPE_CHECKING``) so
+# the same closure-local resolution can find ``Awaitable``,
+# ``Callable``, and ``Sequence`` at request time.
 
 import datetime
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import (  # noqa: TC003 -- runtime, see NOTE above
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from typing import Annotated, Any, Literal, Protocol
 
 import jwt

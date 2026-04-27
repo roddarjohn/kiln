@@ -6,8 +6,6 @@ effective ``require_auth`` and flips
 :attr:`~kiln.operations.types.TestCase.requires_auth` to match.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from foundry.naming import prefix_import

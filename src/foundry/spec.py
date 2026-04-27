@@ -1,7 +1,5 @@
 """Generated-file output type."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

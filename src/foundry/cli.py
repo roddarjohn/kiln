@@ -7,8 +7,6 @@ loads the config, runs the generic pipeline against the target's
 registry/assembler/env, and writes files to disk.
 """
 
-from __future__ import annotations
-
 import shutil
 import sys
 from pathlib import Path
