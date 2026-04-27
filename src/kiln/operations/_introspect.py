@@ -8,8 +8,6 @@ on the whole table), and the return type drives the response
 schema.
 """
 
-from __future__ import annotations
-
 import annotationlib
 import contextlib
 import importlib

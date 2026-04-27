@@ -7,8 +7,6 @@ calls renderers after the build phase and then groups fragments
 by output path to produce final files.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
