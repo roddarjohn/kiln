@@ -151,6 +151,7 @@ class _BearerTransport(_Transport):
         if self._oauth is None:  # pragma: no cover -- session_auth pre-guards
             msg = "token_url is required for bearer extraction"
             raise ValueError(msg)
+
         oauth = self._oauth
 
         async def _extract(
@@ -195,9 +196,11 @@ class _CookieTransport(_Transport):
     @classmethod
     def from_config(cls, **kwargs: Any) -> _CookieTransport:
         name = kwargs.get("cookie_name")
+
         if name is None:
             msg = "cookie_name is required when 'cookie' is in sources"
             raise ValueError(msg)
+
         return cls(
             name,
             secure=kwargs.get("cookie_secure", True),
@@ -271,12 +274,15 @@ def _build_transports(
     without one (they don't call :meth:`extract_dep`).
     """
     unknown = [src for src in sources if src not in _TRANSPORTS]
+
     if unknown:
         msg = f"unknown source(s): {sorted(set(unknown))}"
         raise ValueError(msg)
+
     if not sources:
         msg = f"sources must contain at least one of {sorted(_TRANSPORTS)}"
         raise ValueError(msg)
+
     return {src: _TRANSPORTS[src].from_config(**config) for src in sources}
 
 
@@ -310,6 +316,7 @@ def decode_jwt(
     """
     try:
         return jwt.decode(token, os.environ[secret_env], algorithms=[algorithm])
+
     except (jwt.InvalidTokenError, KeyError) as exc:
         raise _unauthorized() from exc
 
@@ -339,6 +346,7 @@ def session_auth[SessionT: BaseModel](
     transports = _build_transports(
         sources, token_url=token_url, cookie_name=cookie_name
     )
+
     if "bearer" in sources and token_url is None:
         msg = "token_url is required when 'bearer' is in sources"
         raise ValueError(msg)
@@ -355,10 +363,13 @@ def session_auth[SessionT: BaseModel](
     async def resolve(token: str | None) -> SessionT:
         if token is None:
             raise _unauthorized()
+
         claims = decode_jwt(token, secret_env=secret_env, algorithm=algorithm)
         session = schema.model_validate(claims)
+
         if store is not None and await store.is_revoked(session):
             raise _revoked()
+
         return session
 
     async def get_session(
@@ -411,10 +422,13 @@ def issue_session(
     )
 
     body: LoginResponse | OkResponse = OkResponse()
+
     for transport in transports.values():
         emitted = transport.emit(response, token, ttl)
+
         if emitted is not None:
             body = emitted
+
     return body
 
 
@@ -438,6 +452,8 @@ def clear_session(
         cookie_secure=cookie_secure,
         cookie_samesite=cookie_samesite,
     )
+
     for transport in transports.values():
         transport.clear(response)
+
     return OkResponse()

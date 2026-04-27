@@ -35,3 +35,12 @@ repos:
     hooks:
       - id: jsonnet-format
         args: [--indent, "2", --string-style, "d", --in-place]
+
+  - repo: local
+    hooks:
+      - id: check-control-blank-lines
+        name: Blank lines around control structures
+        entry: uv run python scripts/check_control_blank_lines.py --fix
+        language: system
+        types: [python]
+        pass_filenames: true

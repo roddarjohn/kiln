@@ -139,6 +139,7 @@ class OperationRegistry:
 
         """
         buckets: dict[str, list[OperationEntry]] = {}
+
         for entry in self.entries:
             buckets.setdefault(entry.meta.scope, []).append(entry)
 

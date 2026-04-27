@@ -77,6 +77,7 @@ def test_operation_decorator_preserves_custom_options():
 
 def test_operation_meta_frozen():
     meta = OperationMeta(name="get", scope="resource")
+
     with pytest.raises(AttributeError):
         meta.name = "list"
 

@@ -107,8 +107,10 @@ def run_once(fn: Callable[..., None]) -> Callable[..., None]:
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> None:
         nonlocal called
+
         if called:
             return
+
         called = True
         fn(*args, **kwargs)
 

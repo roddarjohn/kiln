@@ -83,7 +83,6 @@ class Scope:
 
     def __post_init__(self) -> None:
         """Enforce that only the root ``"project"`` scope is parentless."""
-
         if self.parent is None and self.name != "project":
             msg = (
                 f"Scope {self.name!r} has no parent; only the root "
@@ -157,6 +156,7 @@ class ScopeTree(tuple[Scope, ...]):
                     if scope.parent is current
                     and scope.config_key == config_key
                 )
+
             except StopIteration as exc:
                 msg = (
                     f"Instance id {instance_id!r} references config_key "
@@ -218,7 +218,6 @@ def _discover(
       scoped lists nested inside wrappers surface with a compound
       ``resolve_path`` but without creating extra scope levels.
     """
-
     for name, info in cls.model_fields.items():
         marker = next(
             (

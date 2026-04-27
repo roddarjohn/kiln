@@ -137,6 +137,7 @@ class AuthConfig(BaseModel):
         if len(set(self.sources)) != len(self.sources):
             msg = f"sources must not contain duplicates: {self.sources}"
             raise ValueError(msg)
+
         return self
 
     @model_validator(mode="after")
@@ -290,12 +291,14 @@ class TelemetryConfig(BaseModel):
     @model_validator(mode="after")
     def _ratio_required_for_ratio_samplers(self) -> TelemetryConfig:
         ratio_samplers = ("traceidratio", "parentbased_traceidratio")
+
         if self.sampler in ratio_samplers and self.sampler_ratio is None:
             msg = (
                 f"sampler={self.sampler!r} requires sampler_ratio "
                 f"to be set in [0.0, 1.0]"
             )
             raise ValueError(msg)
+
         if (
             self.sampler not in ratio_samplers
             and self.sampler_ratio is not None
@@ -305,18 +308,21 @@ class TelemetryConfig(BaseModel):
                 f"(got sampler={self.sampler!r})"
             )
             raise ValueError(msg)
+
         return self
 
     @model_validator(mode="after")
     def _ratio_in_unit_interval(self) -> TelemetryConfig:
         if self.sampler_ratio is None:
             return self
+
         if not 0.0 <= self.sampler_ratio <= 1.0:
             msg = (
                 f"sampler_ratio must be in [0.0, 1.0], got "
                 f"{self.sampler_ratio!r}"
             )
             raise ValueError(msg)
+
         return self
 
 
@@ -395,9 +401,11 @@ class FieldSpec(BaseModel):
                     f"`model` and `fields`."
                 )
                 raise ValueError(msg)
+
             if not self.fields:
                 msg = f"Field {self.name!r}: nested `fields` must be non-empty."
                 raise ValueError(msg)
+
         else:
             if self.model is not None or self.fields is not None:
                 msg = (
@@ -405,18 +413,21 @@ class FieldSpec(BaseModel):
                     f'only allowed when `type: "nested"`.'
                 )
                 raise ValueError(msg)
+
             if self.many:
                 msg = (
                     f"Field {self.name!r}: `many` is only meaningful "
                     f'when `type: "nested"`.'
                 )
                 raise ValueError(msg)
+
             if self.load != _DEFAULT_LOAD:
                 msg = (
                     f"Field {self.name!r}: `load` is only meaningful "
                     f'when `type: "nested"`.'
                 )
                 raise ValueError(msg)
+
         return self
 
     @property

@@ -133,6 +133,7 @@ def _get_formatter(language: str) -> Callable[[ImportCollector], str]:
     picked up on retry.
     """
     available = list(importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP))
+
     for entry_point in available:
         if entry_point.name == language:
             return entry_point.load()

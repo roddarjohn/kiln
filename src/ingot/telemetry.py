@@ -115,10 +115,13 @@ def _build_resource(
     typo, not a real value).
     """
     attrs: dict[str, str] = {"service.name": service_name}
+
     if service_version:
         attrs["service.version"] = service_version
+
     if environment_env and (env_value := os.environ.get(environment_env)):
         attrs["deployment.environment.name"] = env_value
+
     attrs.update(extra)
     return Resource.create(attrs)
 
@@ -132,18 +135,24 @@ def _build_sampler(*, name: SamplerName, ratio: float | None) -> Sampler:
     """
     if name == "always_on":
         return ALWAYS_ON
+
     if name == "always_off":
         return ALWAYS_OFF
+
     if name == "parentbased_always_on":
         return ParentBased(ALWAYS_ON)
+
     if name == "parentbased_always_off":
         return ParentBased(ALWAYS_OFF)
+
     if name == "traceidratio":
         assert ratio is not None  # noqa: S101 -- guaranteed by config validator
         return TraceIdRatioBased(ratio)
+
     if name == "parentbased_traceidratio":
         assert ratio is not None  # noqa: S101 -- guaranteed by config validator
         return ParentBased(TraceIdRatioBased(ratio))
+
     assert_never(name)
 
 
@@ -167,14 +176,17 @@ def _build_span_exporter(
     """
     if exporter == "none":
         return None
+
     if exporter == "console":
         return ConsoleSpanExporter()
+
     if exporter == "otlp_grpc":
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]  # noqa: PLC0415
             OTLPSpanExporter as GrpcSpanExporter,
         )
 
         return GrpcSpanExporter()
+
     # Default and ``otlp_http``: HTTP/protobuf transport.
     return HttpSpanExporter()
 
@@ -217,8 +229,10 @@ def build_tracer_provider(
         sampler=_build_sampler(name=sampler, ratio=sampler_ratio),
     )
     span_exporter = _build_span_exporter(exporter=exporter)
+
     if span_exporter is not None:
         provider.add_span_processor(BatchSpanProcessor(span_exporter))
+
     return provider
 
 
@@ -355,5 +369,6 @@ def scrub_current_span_attributes(*keys: str) -> None:
     sees the scrubbed value.
     """
     span = trace.get_current_span()
+
     for key in keys:
         span.set_attribute(key, _SCRUB_PLACEHOLDER)

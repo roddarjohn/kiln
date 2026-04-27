@@ -231,6 +231,7 @@ def _run_ops(
 
         operation_instance = op_cls()
         when_method = getattr(operation_instance, "when", None)
+
         if callable(when_method) and not when_method(ctx):
             continue
 
@@ -267,6 +268,7 @@ def _configs_for_scope(
 
     """
     attr_value: object = parent_config
+
     for attr in scope.resolve_path:
         attr_value = getattr(attr_value, attr)
 
@@ -295,11 +297,13 @@ def _resolve_options(op_cls: type, instance: object) -> BaseModel:
 
     """
     options_cls = getattr(op_cls, "Options", None)
+
     if options_cls is None:
         return EmptyOptions()
 
     if isinstance(instance, BaseModel):
         raw = getattr(instance, "options", None)
+
         if isinstance(raw, dict):
             return options_cls(**raw)
 

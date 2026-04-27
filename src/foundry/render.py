@@ -242,9 +242,11 @@ class RenderRegistry:
         """
         output_type = type(obj)
         fn = self._entries.get(output_type)
+
         if fn is None:
             msg = f"No renderer for {output_type.__name__}"
             raise LookupError(msg)
+
         return list(fn(obj, ctx))
 
 

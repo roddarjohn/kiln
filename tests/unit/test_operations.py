@@ -624,6 +624,7 @@ class TestCrudHelpers:
                 fields=[FieldSpec(name="id", type="uuid")],
             ),
         ]
+
         with pytest.raises(ValueError, match="only supported on read"):
             _field_dicts(fields)
 
@@ -1126,8 +1127,10 @@ def _drive_extension(
     store = parent_ctx.store
     list_id = parent_ctx.instance_id
     n = 0
+
     while f"{list_id}.modifiers.{n}" in store._instances:
         n += 1
+
     ext_id = f"{list_id}.modifiers.{n}"
 
     ext_config = ModifierConfig(type=type_name, **(extra_config or {}))
@@ -1542,6 +1545,7 @@ class TestUpdate:
         schemas = [r for r in result if isinstance(r, SchemaClass)]
         assert len(schemas) == 1
         assert schemas[0].name == "UserUpdateRequest"
+
         # All fields should be optional
         for f in schemas[0].fields:
             assert f.optional is True

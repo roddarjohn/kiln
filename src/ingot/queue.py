@@ -62,6 +62,7 @@ async def get_queue(session: AsyncSession) -> Queries:
     raw_connection = await session.connection()
     asyncpg_wrapper = await raw_connection.get_raw_connection()
     driver_connection = asyncpg_wrapper.driver_connection
+
     if driver_connection is None:
         msg = (
             "Session is not backed by a live driver connection — "
@@ -69,6 +70,7 @@ async def get_queue(session: AsyncSession) -> Queries:
             "session is checked out before calling get_queue()."
         )
         raise RuntimeError(msg)
+
     return Queries(AsyncpgDriver(driver_connection))
 
 
@@ -82,6 +84,7 @@ def _coerce_to_asyncpg_dsn(dsn: str) -> str:
     """
     if dsn.startswith(_SQLALCHEMY_ASYNCPG_PREFIX):
         return _PLAIN_POSTGRES_PREFIX + dsn[len(_SQLALCHEMY_ASYNCPG_PREFIX) :]
+
     return dsn
 
 
@@ -119,7 +122,9 @@ async def open_worker_driver(dsn: str) -> AsyncIterator[AsyncpgDriver]:
 
     """
     connection = await asyncpg.connect(_coerce_to_asyncpg_dsn(dsn))
+
     try:
         yield AsyncpgDriver(connection)
+
     finally:
         await connection.close()

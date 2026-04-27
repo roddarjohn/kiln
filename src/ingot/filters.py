@@ -100,10 +100,12 @@ def _build_filter_clause(
     """
     for attr, combiner in _COMBINERS.items():
         children = getattr(node, attr, None)
+
         if children is not None:
             return _combine(children, combiner, model)
 
     field_name = getattr(node, "field", None)
+
     if field_name is None:
         return None
 

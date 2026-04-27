@@ -62,6 +62,7 @@ class Router:
         # the app), so walk each resource and ask whether any of
         # its descendants produced a handler.
         mounted: list[ResourceConfig] = []
+
         for resource_id, resource_obj in ctx.store.children(
             ctx.instance_id,
             child_scope="resource",
@@ -117,6 +118,7 @@ class ProjectRouter:
 
         """
         config = ctx.instance
+
         if not config.apps:
             return
 

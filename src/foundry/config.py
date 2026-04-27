@@ -81,6 +81,7 @@ def _read_source(path: Path, stdlibs: Mapping[str, Path]) -> str:
     with *stdlibs* wired in; ``.json`` is returned verbatim.
     """
     suffix = path.suffix.lower()
+
     try:
         if suffix == ".jsonnet":
             return jsonnet.evaluate(path, stdlibs)

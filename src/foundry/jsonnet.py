@@ -72,10 +72,13 @@ def make_import_callback(
 
     def _callback(importing_dir: str, import_path: str) -> tuple[str, bytes]:
         prefix, _, rest = import_path.partition("/")
+
         if rest and prefix in stdlibs:
             target = stdlibs[prefix] / rest
+
         else:
             target = Path(importing_dir) / import_path
+
         return str(target), target.read_bytes()
 
     return _callback

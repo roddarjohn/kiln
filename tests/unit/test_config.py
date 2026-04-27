@@ -66,6 +66,7 @@ def test_auth_config_defaults():
 
 def test_auth_config_fields_required():
     fields = ("credentials_schema", "session_schema", "validate_fn")
+
     for missing in fields:
         kwargs = {
             "credentials_schema": "myapp.auth.LoginCredentials",
@@ -73,6 +74,7 @@ def test_auth_config_fields_required():
             "validate_fn": "myapp.auth.validate",
         }
         del kwargs[missing]
+
         with pytest.raises(ValueError, match=missing):
             AuthConfig(**kwargs)
 
@@ -125,12 +127,14 @@ def test_project_config_resolve_database_by_key():
 
 def test_project_config_resolve_database_no_default_raises():
     cfg = ProjectConfig(databases=[DatabaseConfig(key="primary")])
+
     with pytest.raises(ValueError, match="default=True"):
         cfg.resolve_database(None)
 
 
 def test_project_config_resolve_database_unknown_key_raises():
     cfg = ProjectConfig(databases=[DatabaseConfig(key="primary", default=True)])
+
     with pytest.raises(ValueError, match="No database with key"):
         cfg.resolve_database("missing")
 
@@ -392,6 +396,7 @@ def test_load_json(tmp_path: Path):
 def test_load_unsupported_extension(tmp_path: Path):
     bad = tmp_path / "kiln.yaml"
     bad.write_text("version: '1'")
+
     with pytest.raises(ConfigError, match="Unsupported"):
         _load(bad)
 

@@ -2,9 +2,9 @@
 setup:
     uvx pre-commit install
 
-# Run ruff linter and formatter check
+# Run ruff linter and formatter check, plus the blank-line checker
 lint:
-    uv run --group lint ruff check && uv run --group lint ruff format --check
+    uv run --group lint ruff check && uv run --group lint ruff format --check && uv run python scripts/check_control_blank_lines.py
 
 # Run zuban type checker (native mode, not mypy-compatible)
 type-check:

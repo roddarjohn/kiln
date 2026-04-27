@@ -230,6 +230,7 @@ def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
     rejected here rather than silently producing an invalid schema.
     """
     out: list[Field] = []
+
     for f in fields:
         if f.is_nested:
             msg = (
@@ -237,9 +238,11 @@ def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
                 f"on read operations (get, list)."
             )
             raise ValueError(msg)
+
         out.append(
             Field(name=f.name, py_type=PYTHON_TYPES[cast("FieldType", f.type)])
         )
+
     return out
 
 
@@ -343,6 +346,7 @@ def _expand_field_specs(
     fields: list[Field] = []
     out_schemas: list[SchemaClass] = []
     out_sers: list[SerializerFn] = []
+
     for fs in specs:
         if not fs.is_nested:
             fields.append(
@@ -430,9 +434,11 @@ def _build_load_chains(
     """
     chains: list[str] = []
     imports: list[tuple[str, str]] = []
+
     for fs in specs:
         if not fs.is_nested:
             continue
+
         fs_model = cast("str", fs.model)
         fs_fields = cast("list[FieldSpec]", fs.fields)
 
@@ -445,6 +451,7 @@ def _build_load_chains(
         related_pascal = Name(related_class).pascal
 
         has_nested_child = any(child.is_nested for child in fs_fields)
+
         if not has_nested_child:
             chains.append(head)
             continue

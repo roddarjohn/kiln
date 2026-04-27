@@ -47,8 +47,10 @@ def test_cli_main_renders_config_error(
         "sys.argv",
         ["foundry", "generate", "--config", str(bad), "--out", str(tmp_path)],
     )
+
     with pytest.raises(SystemExit) as excinfo:
         cli_main()
+
     assert excinfo.value.code == 1
     captured = capsys.readouterr()
     assert "Error loading config" in captured.err

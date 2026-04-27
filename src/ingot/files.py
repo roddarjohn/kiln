@@ -228,10 +228,13 @@ class S3Storage:
         connection pool across calls.
         """
         kwargs: dict[str, Any] = {"service_name": "s3"}
+
         if self.region is not None:
             kwargs["region_name"] = self.region
+
         if self.endpoint_url is not None:
             kwargs["endpoint_url"] = self.endpoint_url
+
         return self.client_factory(**kwargs)
 
     def presigned_put_url(
@@ -249,8 +252,10 @@ class S3Storage:
         was created for.
         """
         params: dict[str, Any] = {"Bucket": self.bucket, "Key": key}
+
         if content_type is not None:
             params["ContentType"] = content_type
+
         url = self.client.generate_presigned_url(
             "put_object",
             Params=params,
@@ -298,9 +303,11 @@ def default_storage() -> S3Storage:
 
     """
     bucket = os.environ.get("KILN_S3_BUCKET")
+
     if not bucket:
         msg = "KILN_S3_BUCKET environment variable is required"
         raise RuntimeError(msg)
+
     return S3Storage(
         bucket=bucket,
         region=os.environ.get("KILN_S3_REGION"),
@@ -427,6 +434,7 @@ async def download(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File upload not complete",
         )
+
     storage = default_storage()
     return DownloadResponse(
         download_url=storage.presigned_get_url(file.s3_key),
