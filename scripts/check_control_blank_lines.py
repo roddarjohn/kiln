@@ -186,7 +186,12 @@ def main(
     files_changed = 0
 
     for root in roots:
-        for path in sorted(root.rglob("*.py")):
+        if root.is_file():
+            files = [root] if root.suffix == ".py" else []
+        else:
+            files = sorted(root.rglob("*.py"))
+
+        for path in files:
             messages, changed = _process(path, fix=fix)
             all_messages.extend(messages)
 
