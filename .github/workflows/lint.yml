@@ -18,7 +18,8 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-3|${{ runner.os }}|py3.14|${{ hashFiles('.pre-commit-config.yaml') }}
-      - run: SKIP=ruff,ruff-format uvx pre-commit run --all-files
+      - run: SKIP=ruff,ruff-format,check-control-blank-lines uvx pre-commit run --all-files
       - run: uv run --group lint ruff check
       - run: uv run --group lint ruff format --check
       - run: uv run --group lint zuban check src/
+      - run: uv run python scripts/check_control_blank_lines.py
