@@ -1,25 +1,21 @@
 name: docs
 
 on:
-  release:
-    types: [published]
   push:
     branches: [main]
   pull_request:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   # Strict single-version build: trips on any sphinx warning.
   # Runs on every PR so doc warnings can't accumulate.  Cheap --
   # builds the current tree only, no version-shim, no deploy.
+  # The versioned multi-tag build + Pages deploy lives in
+  # release.yml, gated on release-please cutting a release, so
+  # the deploy ref is ``refs/heads/main`` (not the release tag)
+  # and stays inside the github-pages environment allowlist.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -29,39 +25,3 @@ jobs:
           python-version: "3.14"
       - uses: extractions/setup-just@v4
       - run: just docs-check
-
-  # Versioned multi-tag build for GitHub Pages.  Only fires on a
-  # published release (release-please cuts these on the merge of
-  # its release PR) -- main pushes that aren't releases don't
-  # trigger a rebuild, so the deploy stays tied to the changelog.
-  build:
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v8.1.0
-        with:
-          python-version: "3.14"
-      - uses: extractions/setup-just@v4
-      - name: Cache versioned tag builds
-        uses: actions/cache@v5
-        with:
-          path: docs/_build/html/v*
-          key: docs-tags-${{ hashFiles('.release-please-manifest.json') }}
-          restore-keys: docs-tags-
-      - run: just docs
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: docs/_build/html
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v5

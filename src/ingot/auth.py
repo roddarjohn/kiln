@@ -11,19 +11,28 @@ The signing secret lives in an env var (caller-named, typically
 ``JWT_SECRET``) so generated source never embeds a key.
 """
 
-from __future__ import annotations
+# NOTE: this module deliberately does NOT use
+# ``from __future__ import annotations``.  ``session_auth`` and the
+# transport ``extract_dep`` helpers below build inner functions
+# annotated with ``Annotated[..., Depends(<closure-local>)]``.  Under
+# PEP 563 those annotations stringify to references that
+# ``typing.get_type_hints`` cannot resolve (closure locals aren't in
+# the function's ``__globals__``), which makes pydantic's
+# ``TypeAdapter`` 500 when FastAPI builds the OpenAPI schema.
+# Keeping annotations evaluated (PEP 749 lazy in 3.14) preserves the
+# closure scope.  ``collections.abc`` is therefore imported at
+# runtime rather than under ``TYPE_CHECKING`` so sphinx-autodoc-
+# typehints doesn't NameError when it walks ``__annotations__``.
 
 import datetime
 import os
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Annotated, Any, Literal, Protocol
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
 
 DEFAULT_TOKEN_TTL = datetime.timedelta(minutes=30)
 """Default ``exp`` stamped on tokens when the caller doesn't set one."""
