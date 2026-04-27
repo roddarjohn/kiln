@@ -176,7 +176,7 @@ def test_cycle_detection_terminates():
 
     class Node(BaseModel):
         name: str = ""
-        kids: Annotated[list["Node"], Scoped(name="kid")] = Field(
+        kids: Annotated[list[Node], Scoped(name="kid")] = Field(
             default_factory=list,
         )
 

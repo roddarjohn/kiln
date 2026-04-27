@@ -6,9 +6,15 @@ These are imported at generation time by
 
 # ruff: noqa: ARG001
 
-from __future__ import annotations
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    # Reproduces the failure mode where a consumer guards a type
+    # annotation behind ``TYPE_CHECKING`` -- the introspector should
+    # surface this as a targeted ValueError naming the parameter.
+    from typing import Any as UnresolvableType
 
 
 class StubModel:
@@ -131,3 +137,21 @@ async def collection_action_with_model_class(
 ) -> StubResponse:
     """Collection action that wants the resource's mapped class."""
     return StubResponse(ok=True)
+
+
+async def action_with_typecheck_param(
+    obj: StubModel,
+    db: AsyncSession,
+    helper: UnresolvableType,
+) -> StubResponse:
+    """Action with a parameter whose annotation can't be resolved
+    at runtime (the import lives under ``if TYPE_CHECKING:``)."""
+    return StubResponse(ok=True)
+
+
+async def action_with_typecheck_return(
+    obj: StubModel,
+    db: AsyncSession,
+) -> UnresolvableType:
+    """Action whose return annotation can't be resolved at runtime."""
+    return None  # pragma: no cover

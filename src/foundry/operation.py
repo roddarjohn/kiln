@@ -13,8 +13,6 @@ can pass ``registry=<isolated>`` to :func:`operation` and
 :class:`~foundry.engine.Engine` to keep their ops separate.
 """
 
-from __future__ import annotations
-
 import importlib.metadata
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter

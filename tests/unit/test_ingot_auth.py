@@ -1,7 +1,5 @@
 """Tests for ingot.auth."""
 
-from __future__ import annotations
-
 import datetime
 from unittest.mock import MagicMock
 

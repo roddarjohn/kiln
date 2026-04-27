@@ -1,7 +1,5 @@
 """Filter-clause construction for typed Pydantic filter trees."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_

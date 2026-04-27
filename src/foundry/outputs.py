@@ -5,8 +5,6 @@ and lives here; Python / FastAPI / Pydantic output types live in
 :mod:`kiln.outputs` since a non-Python target wouldn't use them.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any
 

@@ -11,8 +11,6 @@ them: files with the same path merge via ``|``, snippets render
 wrapper is rendered once with every slot's items in order.
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 from functools import reduce
 from itertools import groupby

@@ -1,7 +1,7 @@
 """Tests for the foundry CLI entry point, backed by the kiln target."""
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from typer.testing import CliRunner
@@ -9,6 +9,9 @@ from typer.testing import CliRunner
 from foundry import GeneratedFile, write_files
 from foundry.cli import app, cli_main
 from foundry.errors import CLIError, ConfigError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 runner = CliRunner()
 

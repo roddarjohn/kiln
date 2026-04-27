@@ -25,8 +25,6 @@ wrapper (e.g. ``App.config.resources``) the path is the full
 attribute walk, e.g. ``("config", "resources")``.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
