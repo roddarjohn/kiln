@@ -32,9 +32,9 @@ dependencies = [
 # release pair -- bump core (1.x) and instrumentation (0.x.b)
 # packages in lockstep when upgrading.
 opentelemetry = [
-  "opentelemetry-api==1.29.0",
-  "opentelemetry-sdk==1.29.0",
-  "opentelemetry-exporter-otlp-proto-http==1.29.0",
+  "opentelemetry-api==1.41.1",
+  "opentelemetry-sdk==1.41.1",
+  "opentelemetry-exporter-otlp-proto-http==1.41.1",
   "opentelemetry-instrumentation-fastapi==0.50b0",
   "opentelemetry-instrumentation-sqlalchemy==0.50b0",
   "opentelemetry-instrumentation-requests==0.50b0",
@@ -48,7 +48,7 @@ opentelemetry = [
 # consumers staying on OTLP/HTTP.  Install both extras together::
 #
 #     pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
-opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.29.0"]
+opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.41.1"]
 files = ["boto3>=1.34"]
 
 [project.urls]
@@ -104,10 +104,10 @@ dev = [
   # ``opentelemetry-grpc`` extras so the dev test suite can import
   # ``ingot.telemetry`` and exercise the gRPC exporter path.  Keep
   # the pins in lockstep with the matching extras above.
-  "opentelemetry-api==1.29.0",
-  "opentelemetry-sdk==1.29.0",
-  "opentelemetry-exporter-otlp-proto-http==1.29.0",
-  "opentelemetry-exporter-otlp-proto-grpc==1.29.0",
+  "opentelemetry-api==1.41.1",
+  "opentelemetry-sdk==1.41.1",
+  "opentelemetry-exporter-otlp-proto-http==1.41.1",
+  "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
   "opentelemetry-instrumentation-fastapi==0.50b0",
   "opentelemetry-instrumentation-sqlalchemy==0.50b0",
   "opentelemetry-instrumentation-requests==0.50b0",
