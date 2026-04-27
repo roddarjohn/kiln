@@ -18,8 +18,6 @@ compose cleanly with the request span emitted by
 :class:`opentelemetry.instrumentation.fastapi.FastAPIInstrumentor`.
 """
 
-from __future__ import annotations
-
 import functools
 import os
 from typing import TYPE_CHECKING, Any, Literal, assert_never

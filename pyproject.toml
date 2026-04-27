@@ -5,13 +5,11 @@ description = "CLI for autogenerating files from templates"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Rodda John", email = "roddarjohn@protonmail.com" }]
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 keywords = ["cli", "templates", "code-generation", "scaffolding"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
@@ -194,10 +192,6 @@ ignore = [
   "S607",    # partial paths (uv, ruff) are intentional
 ]
 
-[tool.mypy]
-python_version = "3.12"
-files = ["src"]
-
 [tool.coverage.run]
 source = ["kiln", "foundry", "ingot"]
 branch = true
@@ -215,7 +209,7 @@ asyncio_mode = "auto"
 
 [tool.tox]
 requires = ["tox-uv>=1"]
-env_list = ["3.12", "3.13", "3.14"]
+env_list = ["3.14"]
 
 [tool.tox.env_run_base]
 dependency_groups = ["dev"]

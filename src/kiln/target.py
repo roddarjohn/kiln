@@ -9,8 +9,6 @@ operation modules (via foundry's entry-point discovery), which
 populate :data:`foundry.render.registry` as a side effect.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from foundry.target import Target

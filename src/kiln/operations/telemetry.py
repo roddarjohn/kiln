@@ -20,8 +20,6 @@ The op follows the same shape as
 zero references to OpenTelemetry anywhere in the generated tree.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation

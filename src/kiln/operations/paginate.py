@@ -7,8 +7,6 @@ to ``{Model}Page``, and stamps the pagination mode plus
 keyset/offset defaults onto the parent's search handler.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation
