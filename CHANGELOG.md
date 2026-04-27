@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.1...kiln-v0.8.2) (2026-04-27)
+
+
+### Features
+
+* fixing import mess ([#50](https://github.com/roddarjohn/kiln/issues/50)) ([5295ba3](https://github.com/roddarjohn/kiln/commit/5295ba362da53b66c717fa4447fa31998cdbfc1c))
+
 ## [0.8.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.0...kiln-v0.8.1) (2026-04-27)
 
 
