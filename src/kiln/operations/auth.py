@@ -62,6 +62,7 @@ class Auth:
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             if not op_auth.get(handler.op_name, False):
                 continue
+
             handler.extra_deps.append(
                 f"session: Annotated[{session_name}, Depends(get_session)],"
             )

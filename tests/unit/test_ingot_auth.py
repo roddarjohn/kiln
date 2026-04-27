@@ -68,6 +68,7 @@ class TestEncodeDecode:
     def test_decode_raises_401_on_garbage(self) -> None:
         with pytest.raises(HTTPException) as exc:
             decode_jwt("not-a-jwt", secret_env=ENV_VAR, algorithm=ALG)
+
         assert exc.value.status_code == 401
         assert exc.value.headers == {"WWW-Authenticate": "Bearer"}
 
@@ -76,8 +77,10 @@ class TestEncodeDecode:
     ) -> None:
         monkeypatch.delenv(ENV_VAR, raising=False)
         token = jwt.encode({"sub": "a"}, SECRET, algorithm=ALG)
+
         with pytest.raises(HTTPException) as exc:
             decode_jwt(token, secret_env=ENV_VAR, algorithm=ALG)
+
         assert exc.value.status_code == 401
 
 
@@ -144,14 +147,18 @@ class TestSessionAuthBearer:
 
     async def test_missing_bearer_is_401(self) -> None:
         dep = self._dep()
+
         with pytest.raises(HTTPException) as exc:
             await dep(bearer=None)
+
         assert exc.value.status_code == 401
 
     async def test_invalid_bearer_is_401(self) -> None:
         dep = self._dep()
+
         with pytest.raises(HTTPException) as exc:
             await dep(bearer="garbage")
+
         assert exc.value.status_code == 401
 
 
@@ -174,8 +181,10 @@ class TestSessionAuthCookie:
 
     async def test_missing_cookie_is_401(self) -> None:
         dep = self._dep()
+
         with pytest.raises(HTTPException) as exc:
             await dep(cookie=None)
+
         assert exc.value.status_code == 401
 
 
@@ -210,8 +219,10 @@ class TestSessionAuthBoth:
 
     async def test_all_empty_is_401(self) -> None:
         dep = self._dep()
+
         with pytest.raises(HTTPException) as exc:
             await dep(bearer=None, cookie=None)
+
         assert exc.value.status_code == 401
 
 
@@ -277,6 +288,7 @@ class TestIssueSession:
 
     def test_none_session_raises_401(self) -> None:
         response = MagicMock()
+
         with pytest.raises(HTTPException) as exc:
             issue_session(
                 response,
@@ -285,11 +297,13 @@ class TestIssueSession:
                 secret_env=ENV_VAR,
                 algorithm=ALG,
             )
+
         assert exc.value.status_code == 401
         response.set_cookie.assert_not_called()
 
     def test_cookie_without_name_rejected(self) -> None:
         response = MagicMock()
+
         with pytest.raises(ValueError, match="cookie_name"):
             issue_session(
                 response,
@@ -333,6 +347,7 @@ class TestClearSession:
 
     def test_cookie_without_name_rejected(self) -> None:
         response = MagicMock()
+
         with pytest.raises(ValueError, match="cookie_name"):
             clear_session(response, sources=["cookie"])
 
@@ -379,8 +394,10 @@ class TestSessionAuthStore:
             token_url="/auth/token",  # noqa: S106
             store=store,
         )
+
         with pytest.raises(HTTPException) as exc:
             await dep(bearer=_token())
+
         assert exc.value.status_code == 401
         assert exc.value.detail == "Session revoked"
         assert store.is_revoked_calls == 1
@@ -395,8 +412,10 @@ class TestSessionAuthStore:
             cookie_name="session",
             store=store,
         )
+
         with pytest.raises(HTTPException) as exc:
             await dep(cookie=_token())
+
         assert exc.value.status_code == 401
 
     async def test_both_sources_rejects_revoked(self) -> None:
@@ -410,6 +429,7 @@ class TestSessionAuthStore:
             cookie_name="session",
             store=store,
         )
+
         with pytest.raises(HTTPException):
             await dep(bearer=_token(), cookie=None)
 

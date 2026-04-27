@@ -22,6 +22,7 @@ def test_generated_file_is_frozen():
     f = GeneratedFile(path="foo.py", content="# hi")
     assert f.path == "foo.py"
     assert f.content == "# hi"
+
     with pytest.raises(AttributeError):
         f.path = "bar.py"
 

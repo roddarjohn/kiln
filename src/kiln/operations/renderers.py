@@ -89,6 +89,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
+
     if not route_prefix:
         route_prefix = f"/{model.lower}s"
 
@@ -144,6 +145,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
     if schema.body_template is not None:
         for module, name in schema.extra_imports:
             imports.add_from(module, name)
+
         yield SnippetFragment(
             path=path,
             slot="schema_classes",
@@ -155,12 +157,16 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
 
     for f in schema.fields:
         py_type = f.py_type
+
         if py_type == "uuid.UUID":
             imports.add("uuid")
+
         elif py_type == "datetime":
             imports.add_from("datetime", "datetime")
+
         elif py_type == "date":
             imports.add_from("datetime", "date")
+
         elif py_type == "dict[str, Any]":
             imports.add_from("typing", "Any")
 
@@ -238,14 +244,17 @@ def _handler_fragment(
     schema_mod = prefix_import(
         info.package_prefix, info.app, "schemas", info.model.lower
     )
+
     if handler.request_schema:
         request_mod = handler.request_schema_module or schema_mod
         imports.add_from(request_mod, handler.request_schema)
 
     response_schema = _response_schema_name(handler)
+
     if response_schema:
         response_mod = handler.response_schema_module or schema_mod
         imports.add_from(response_mod, response_schema)
+
     if handler.serializer_fn:
         serializer_mod = prefix_import(
             info.package_prefix, info.app, "serializers", info.model.lower
@@ -342,15 +351,19 @@ def _mock_row_lines(fields: list[Field], target: str) -> list[str]:
     ``list[Nested]``, so the route test still passes.
     """
     lines: list[str] = []
+
     for f in fields:
         if f.nested_serializer is not None and f.many:
             continue
+
         if f.nested_serializer is not None:
             lines.extend(
                 _mock_row_lines(f.nested_fields or [], f"{target}.{f.name}")
             )
             continue
+
         lines.append(f'{target}.{f.name} = _sample("{f.py_type}")')
+
     return lines
 
 
@@ -398,6 +411,7 @@ def _serializer_fragment(
     # function, so emitting from list_item too would duplicate the
     # mock-row assignments and assertions.
     is_resource_ser = ser.function_name == f"to_{info.model.lower}_resource"
+
     if info.generate_tests and is_resource_ser:
         test_path = f"tests/test_{info.app}_{info.model.lower}.py"
         ser_mod = prefix_import(
@@ -414,6 +428,7 @@ def _serializer_fragment(
             },
             imports=test_imports,
         )
+
         for f in ser.fields:
             # Nested fields don't roundtrip through the naive mock-row
             # serializer test (the test compares ORM attrs to schema
@@ -421,6 +436,7 @@ def _serializer_fragment(
             # and produce a different object).
             if f.nested_serializer is not None:
                 continue
+
             yield SnippetFragment(
                 path=test_path,
                 slot="serializer_fields",
@@ -431,6 +447,7 @@ def _serializer_fragment(
 @registry.renders(TestCase)
 def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
+
     if not info.generate_tests:
         return
 
@@ -450,6 +467,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     imports.add_from(route_module, "router")
     session_mod = prefix_import(info.package_prefix, info.session_module)
     imports.add_from(session_mod, info.get_db_fn)
+
     if info.has_auth:
         deps_module = prefix_import(info.package_prefix, "auth", "dependencies")
         imports.add_from(deps_module, "get_session")
@@ -545,8 +563,10 @@ def render_enum_class(enum: EnumClass) -> str:
     the slot value.
     """
     lines = [f"class {enum.name}({enum.base}):"]
+
     for member_name, member_value in enum.members:
         lines.append(f"    {member_name} = {member_value!r}")
+
     return "\n".join(lines)
 
 
@@ -568,8 +588,10 @@ def _status_suffix(code: int | None) -> str | None:
         404: "HTTP_404_NOT_FOUND",
         422: "HTTP_422_UNPROCESSABLE_ENTITY",
     }
+
     if code is None:
         return None
+
     return mapping.get(code)
 
 
@@ -581,10 +603,13 @@ def _response_schema_name(handler: RouteHandler) -> str | None:
     one object or a list of objects.
     """
     rm = handler.response_model
+
     if not rm:
         return None
+
     if rm.startswith("list[") and rm.endswith("]"):
         return rm[len("list[") : -1]
+
     return rm
 
 
@@ -595,7 +620,9 @@ def _add_pk_type_imports(
     """Add imports for PK primitive types (uuid, datetime, etc)."""
     if "uuid" in pk_py_type:
         imports.add("uuid")
+
     if "datetime" in pk_py_type:
         imports.add_from("datetime", "datetime")
+
     if "date" in pk_py_type and "datetime" not in pk_py_type:
         imports.add_from("datetime", "date")

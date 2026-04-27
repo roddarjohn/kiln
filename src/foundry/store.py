@@ -234,8 +234,10 @@ class BuildStore:
 
         """
         ancestor_id = self.ancestor_id_of(instance_id, scope_name)
+
         if ancestor_id is None:
             return None
+
         return self._instances.get(ancestor_id)
 
     def ancestor_id_of(
@@ -281,13 +283,16 @@ class BuildStore:
 
         """
         out: list[tuple[str, object]] = []
+
         for child_id in self._children.get(parent_id, []):
             if (
                 child_scope is not None
                 and self.scope_of(child_id).name != child_scope
             ):
                 continue
+
             out.append((child_id, self._instances[child_id]))
+
         return out
 
     def outputs_under[T](
@@ -328,8 +333,10 @@ class BuildStore:
         registered.
         """
         ancestor_id = self.ancestor_id_of(instance_id, scope_name)
+
         if ancestor_id is None:
             return []
+
         return self.outputs_under(ancestor_id, output_type)
 
     def output_under_ancestor[T](
@@ -350,6 +357,7 @@ class BuildStore:
         results = self.outputs_under_ancestor(
             instance_id, scope_name, output_type
         )
+
         if not results:
             type_name = getattr(output_type, "__name__", repr(output_type))
             msg = (
@@ -357,6 +365,7 @@ class BuildStore:
                 f"'{scope_name}' of '{instance_id}'."
             )
             raise LookupError(msg)
+
         return results[0]
 
     def entries(

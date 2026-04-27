@@ -41,6 +41,7 @@ class Name:
         """
         if "_" not in self.raw and self.raw[:1].isupper():
             return self.raw
+
         return "".join(part.capitalize() for part in self.raw.split("_"))
 
     @property
@@ -104,6 +105,7 @@ def split_dotted_class(dotted_path: str) -> tuple[str, str]:
             f"e.g. 'myapp.models.Article'."
         )
         raise ValueError(msg)
+
     module, _, class_name = dotted_path.rpartition(".")
     return module, class_name
 
@@ -122,4 +124,5 @@ def prefix_import(prefix: str, *parts: str) -> str:
     """
     if prefix:
         return ".".join([prefix, *parts])
+
     return ".".join(parts)

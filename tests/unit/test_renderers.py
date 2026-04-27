@@ -577,8 +577,10 @@ def test_testcase_fragment_with_tests(registry):
 def _unioned_imports(fragments):
     """Union every fragment's ImportCollector for block() assertions."""
     merged = ImportCollector()
+
     for frag in fragments:
         merged.update(frag.imports)
+
     return merged
 
 

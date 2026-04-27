@@ -51,8 +51,10 @@ def apply_ordering(
 
     for clause in sort_clauses:
         field_enum = getattr(clause, "field", None)
+
         if field_enum is None:
             continue
+
         direction: SortDirection = getattr(clause, "dir", "asc")
         col = getattr(model, field_enum.value)
         stmt = stmt.order_by(_sort_expr(col, direction))

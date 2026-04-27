@@ -147,6 +147,7 @@ class AuthScaffold:
 
         store_module: str | None = None
         store_name: str | None = None
+
         if auth.session_store is not None:
             store_module, store_name = auth.session_store.rsplit(".", 1)
 

@@ -72,8 +72,10 @@ def test_mixin_s3_key_is_unique_and_not_null():
 
 def test_mixin_optional_columns_are_nullable():
     cols = _columns(_File)
+
     for name in ("content_type", "size_bytes", "original_filename"):
         assert cols[name].nullable is True
+
     assert cols["uploaded_at"].nullable is True
 
 
@@ -367,6 +369,7 @@ async def test_download_404s_when_pending(fake_db, fake_storage):
 
     with pytest.raises(HTTPException) as exc:
         await download(doc, db=fake_db)
+
     assert exc.value.status_code == 404
     fake_storage.presigned_get_url.assert_not_called()
 

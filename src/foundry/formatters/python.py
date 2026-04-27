@@ -66,6 +66,7 @@ def _python_lines(collector: ImportCollector) -> list[str]:
     for module in sorted(from_imports):
         if module == "__future__":
             continue
+
         line = _format_from_import(
             module=module,
             names=sorted(from_imports[module]),
@@ -80,6 +81,7 @@ def _python_lines(collector: ImportCollector) -> list[str]:
     for index, group in enumerate(groups):
         if index > 0:
             result.append("")
+
         result.extend(group)
 
     return result

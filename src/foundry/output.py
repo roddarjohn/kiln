@@ -28,6 +28,7 @@ def write_files(
 
     """
     written = 0
+
     for f in files:
         target = out_dir / f.path
         target.parent.mkdir(parents=True, exist_ok=True)

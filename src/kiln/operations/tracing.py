@@ -63,6 +63,7 @@ class Tracing:
         telemetry = ctx.config.telemetry
         assert telemetry is not None  # noqa: S101 -- guaranteed by when()
         resource = ctx.instance
+
         if resource.trace is False:
             return ()
 
@@ -84,6 +85,7 @@ class Tracing:
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             if handler.op_name not in traced_ops:
                 continue
+
             handler.decorators.insert(
                 0,
                 f'@traced_handler("{label}.{handler.op_name}", '

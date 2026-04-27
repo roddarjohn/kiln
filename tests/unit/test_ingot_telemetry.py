@@ -279,6 +279,7 @@ class TestTracedHandler:
 
         with pytest.raises(RuntimeError, match="boom"):
             await handler()
+
         spans = in_memory_tracer.get_finished_spans()
         assert len(spans) == 1
         assert spans[0].status.status_code.name != "ERROR"
@@ -288,6 +289,7 @@ class TestTracedHandler:
 class TestScrubCurrentSpanAttributes:
     async def test_overwrites_named_keys(self, in_memory_tracer):
         tracer = trace.get_tracer("test")
+
         with tracer.start_as_current_span("login") as span:
             span.set_attribute("http.request.body", "secret")
             span.set_attribute("http.response.body", "token")
@@ -295,6 +297,7 @@ class TestScrubCurrentSpanAttributes:
                 "http.request.body",
                 "http.response.body",
             )
+
         spans = in_memory_tracer.get_finished_spans()
         attrs = spans[0].attributes
         assert attrs["http.request.body"] == "[scrubbed]"

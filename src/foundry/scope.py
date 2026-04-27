@@ -137,13 +137,16 @@ class ScopeTree(tuple[Scope, ...]):
 
         """
         segments = instance_id.split(".")
+
         if segments[0] != "project":
             msg = f"Instance id {instance_id!r} must start with 'project'"
             raise ValueError(msg)
 
         current = PROJECT
+
         for i in range(1, len(segments), 2):
             config_key = segments[i]
+
             try:
                 current = next(
                     scope
@@ -151,6 +154,7 @@ class ScopeTree(tuple[Scope, ...]):
                     if scope.parent is current
                     and scope.config_key == config_key
                 )
+
             except StopIteration as exc:
                 msg = (
                     f"Instance id {instance_id!r} references config_key "
@@ -158,6 +162,7 @@ class ScopeTree(tuple[Scope, ...]):
                     f"{current.name!r}"
                 )
                 raise ValueError(msg) from exc
+
         return current
 
 
@@ -262,9 +267,11 @@ def _extract_base_model_from_scoped(
     ``list[BaseModel]`` — the marker only makes sense there.
     """
     annotation = info.annotation
+
     if getattr(annotation, "__origin__", None) is list:
         args: tuple[type, ...] = getattr(annotation, "__args__", ())
         item = args[0] if args else None
+
         if isinstance(item, type) and issubclass(item, BaseModel):
             return item
 

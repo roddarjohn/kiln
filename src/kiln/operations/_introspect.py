@@ -163,6 +163,7 @@ def introspect_action_fn(
 def _import_callable(dotted: str) -> Callable[..., object]:
     """Import a named attribute from a dotted path."""
     module_path, _, attr = dotted.rpartition(".")
+
     if not module_path:
         msg = f"'{dotted}' is not a valid dotted path."
         raise ValueError(msg)
@@ -178,6 +179,7 @@ def _import_callable(dotted: str) -> Callable[..., object]:
         raise ValueError(msg) from exc
 
     attribute = getattr(module, attr, None)
+
     if attribute is None:
         msg = f"'{attr}' not found in module '{module_path}'."
         raise ValueError(msg)
@@ -211,14 +213,19 @@ def _resolve_hints(
     )
     fn_globals = getattr(fn, "__globals__", None)
     resolved: dict[str, object] = {}
+
     for name, ann in raw.items():
         value: object = ann
+
         if isinstance(value, str):
             value = annotationlib.ForwardRef(value, owner=fn)
+
         if isinstance(value, annotationlib.ForwardRef):
             with contextlib.suppress(NameError):
                 value = value.evaluate(globals=fn_globals)
+
         resolved[name] = value
+
     return resolved
 
 
@@ -253,11 +260,15 @@ def _matches_model_class_param(hint: object, model_cls: object) -> bool:
     under modern annotation evaluation.
     """
     origin = typing.get_origin(hint)
+
     if origin is not type:
         return False
+
     args = typing.get_args(hint)
+
     if len(args) != 1:
         return False
+
     return _matches_model(args[0], model_cls)
 
 

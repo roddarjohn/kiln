@@ -415,6 +415,7 @@ def _resource_ctx(
     store.register_instance("project.apps.0", cfg.apps[0], parent="project")
     resource_id = "project.apps.0.resources.0"
     store.register_instance(resource_id, resource, parent="project.apps.0")
+
     for idx, handler in enumerate(handlers):
         op_id = f"{resource_id}.operations.{idx}"
         op_cfg = next(
@@ -423,6 +424,7 @@ def _resource_ctx(
         )
         store.register_instance(op_id, op_cfg, parent=resource_id)
         store.add(op_id, "tracing-test", handler)
+
     return BuildContext(
         config=cfg,
         scope=_RESOURCE_SCOPE,
@@ -456,8 +458,10 @@ def _run_tracing(
         telemetry=telemetry, resource=resource, handlers=handlers
     )
     op = Tracing()
+
     if op.when(ctx):
         list(op.build(ctx, _options=Tracing.Options()))
+
     return handlers
 
 

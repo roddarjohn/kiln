@@ -173,6 +173,7 @@ def test_engine_unknown_scope_raises():
 
     engine = Engine(registry=registry)
     config = ProjectConfig()
+
     with pytest.raises(ValueError, match="nonexistent"):
         engine.build(config)
 

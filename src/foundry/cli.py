@@ -76,6 +76,7 @@ def _resolve_target(name: str | None) -> Target:
 
     """
     targets = discover_targets()
+
     if not targets:
         msg = (
             "No target is registered under the foundry.targets "
@@ -188,6 +189,7 @@ def generate_cmd(
     if dry_run:
         for f in files:
             typer.echo(str(out / f.path))
+
         typer.echo(f"Would generate {len(files)} file(s).")
         return
 
@@ -220,6 +222,7 @@ def targets_list_cmd() -> None:
     see at a glance which target to pass to ``--target``.
     """
     targets = discover_targets()
+
     if not targets:
         typer.echo("No targets installed.")
         return
