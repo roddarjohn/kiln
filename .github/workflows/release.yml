@@ -4,13 +4,21 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+# The github-pages environment's deployment allowlist permits
+# ``main`` but not release tags.  Running the docs deploy as
+# part of release.yml (which is triggered by ``push: main``)
+# keeps the deploy ref on ``refs/heads/main`` even though the
+# tag is created mid-run by release-please.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       pr_number: ${{ steps.release.outputs.pr }}
@@ -33,6 +41,8 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.pr_branch }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,3 +57,49 @@ jobs:
           git add uv.lock
           git diff --cached --quiet || git commit -m "chore: update uv.lock"
           git push
+
+  # Versioned multi-tag Sphinx build.  Only fires when
+  # release-please actually cut a release (the merge of its
+  # release PR), so the deploy stays tied to the changelog.
+  # release-please creates the tag via the GitHub API during
+  # its job, so ``fetch-tags: true`` is required for the
+  # checkout here to see it.
+  docs-build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+      - uses: extractions/setup-just@v4
+      - name: Cache versioned tag builds
+        uses: actions/cache@v5
+        with:
+          path: docs/_build/html/v*
+          key: docs-tags-${{ hashFiles('.release-please-manifest.json') }}
+          restore-keys: docs-tags-
+      - run: just docs
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/_build/html
+
+  docs-deploy:
+    needs: docs-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

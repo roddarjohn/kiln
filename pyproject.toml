@@ -176,6 +176,17 @@ required-imports = ["from __future__ import annotations"]
   "ANN401",  # Any is appropriate for reflection-based SQLAlchemy helpers
   "PLR0913", # pagination helpers genuinely take many parameters
 ]
+# ``ingot.auth`` deliberately keeps annotations evaluated (no
+# ``__future__`` future-import) so closure-local ``Depends(...)``
+# refs in the inner ``get_session`` survive pydantic's OpenAPI
+# schema build.  See the module docstring at src/ingot/auth.py for
+# the full rationale.  Drop the future-import requirement here, and
+# allow the ``collections.abc`` runtime import that PEP 749 alone
+# would otherwise let TC003 push back into ``TYPE_CHECKING``.
+"src/ingot/auth.py" = [
+  "I002",  # future-import deliberately omitted (see docstring)
+  "TC003", # collections.abc must stay at runtime for sphinx
+]
 "scripts/**" = [
   "INP001",  # scripts/ doesn't need __init__.py
   "T201",    # print is fine in scripts

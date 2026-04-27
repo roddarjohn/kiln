@@ -1,11 +1,12 @@
 """Tests for ingot.auth."""
 
 import datetime
+from typing import Annotated
 from unittest.mock import MagicMock
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from ingot.auth import (
@@ -426,6 +427,66 @@ class TestSessionAuthStore:
         session = await dep(bearer=_token())
         assert isinstance(session, Session)
         assert store.is_revoked_calls == 1
+
+
+# -------------------------------------------------------------------
+# session_auth + FastAPI OpenAPI schema build
+#
+# Regression guard: ``session_auth`` returns a closure whose
+# parameters are annotated ``Annotated[..., Depends(<closure-local>)]``.
+# Under PEP 563 string annotations the closure locals fall out of
+# scope, ``typing.get_type_hints`` raises NameError, and pydantic's
+# OpenAPI schema build 500s.  These tests would have caught
+# https://github.com/roddarjohn/kiln/pull/46.
+# -------------------------------------------------------------------
+
+
+def _app_with(dep) -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/me")
+    def me(session: Annotated[Session, Depends(dep)]) -> Session:
+        return session
+
+    return app
+
+
+class TestSessionAuthOpenApi:
+    """``app.openapi()`` must succeed for every supported source mix."""
+
+    def test_bearer_only(self) -> None:
+        dep = session_auth(
+            Session,
+            ["bearer"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+        )
+        schema = _app_with(dep).openapi()
+        assert "/me" in schema["paths"]
+
+    def test_cookie_only(self) -> None:
+        dep = session_auth(
+            Session,
+            ["cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            cookie_name="session",
+        )
+        schema = _app_with(dep).openapi()
+        assert "/me" in schema["paths"]
+
+    def test_both_sources(self) -> None:
+        dep = session_auth(
+            Session,
+            ["bearer", "cookie"],
+            secret_env=ENV_VAR,
+            algorithm=ALG,
+            token_url="/auth/token",  # noqa: S106
+            cookie_name="session",
+        )
+        schema = _app_with(dep).openapi()
+        assert "/me" in schema["paths"]
 
     async def test_no_store_skips_check(self) -> None:
         """With ``store=None`` the dep never attempts a lookup."""
