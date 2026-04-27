@@ -35,9 +35,9 @@ opentelemetry = [
   "opentelemetry-api==1.41.1",
   "opentelemetry-sdk==1.41.1",
   "opentelemetry-exporter-otlp-proto-http==1.41.1",
-  "opentelemetry-instrumentation-fastapi==0.50b0",
-  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
-  "opentelemetry-instrumentation-requests==0.50b0",
+  "opentelemetry-instrumentation-fastapi==0.62b1",
+  "opentelemetry-instrumentation-sqlalchemy==0.62b1",
+  "opentelemetry-instrumentation-requests==0.62b1",
 ]
 # ``kiln-generator[opentelemetry-grpc]`` is additive on top of the
 # ``opentelemetry`` extra: it adds the gRPC OTLP exporter that the
@@ -108,9 +108,9 @@ dev = [
   "opentelemetry-sdk==1.41.1",
   "opentelemetry-exporter-otlp-proto-http==1.41.1",
   "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
-  "opentelemetry-instrumentation-fastapi==0.50b0",
-  "opentelemetry-instrumentation-sqlalchemy==0.50b0",
-  "opentelemetry-instrumentation-requests==0.50b0",
+  "opentelemetry-instrumentation-fastapi==0.62b1",
+  "opentelemetry-instrumentation-sqlalchemy==0.62b1",
+  "opentelemetry-instrumentation-requests==0.62b1",
   # Ingot's files extra ships boto3 as optional; CI installs it
   # here so the full test suite can run without an explicit --extra.
   "boto3>=1.34",
