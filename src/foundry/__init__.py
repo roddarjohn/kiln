@@ -19,6 +19,8 @@ Target-agnostic primitives for building code generators:
 layers a concrete FastAPI / SQLAlchemy generator on top of it.
 """
 
+from __future__ import annotations
+
 from foundry.config import FoundryConfig, load_config
 from foundry.engine import BuildContext, Engine
 from foundry.env import create_jinja_env, render_template

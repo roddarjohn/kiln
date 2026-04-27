@@ -13,6 +13,8 @@ language convention.  Each target ships its own formatter in
 the package that owns the language.
 """
 
+from __future__ import annotations
+
 import functools
 import importlib.metadata
 from collections import defaultdict

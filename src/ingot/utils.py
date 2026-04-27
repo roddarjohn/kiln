@@ -9,6 +9,8 @@ that consumers learn one import path
 under a more specific submodule.
 """
 
+from __future__ import annotations
+
 import functools
 from typing import TYPE_CHECKING, Any
 

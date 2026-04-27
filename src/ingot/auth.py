@@ -11,6 +11,8 @@ The signing secret lives in an env var (caller-named, typically
 ``JWT_SECRET``) so generated source never embeds a key.
 """
 
+from __future__ import annotations
+
 import datetime
 import os
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol

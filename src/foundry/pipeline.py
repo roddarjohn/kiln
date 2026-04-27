@@ -7,6 +7,8 @@ using foundry's shared registry and generic assembler.  Reads
 the config and does not inspect any target-specific field.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 

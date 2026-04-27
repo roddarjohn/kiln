@@ -7,6 +7,8 @@ propagates with a traceback, because it signals a bug rather than
 bad user input.
 """
 
+from __future__ import annotations
+
 
 class CLIError(Exception):
     """Base class for errors the CLI should render cleanly.

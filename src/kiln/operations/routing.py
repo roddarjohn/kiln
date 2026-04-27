@@ -1,5 +1,7 @@
 """Router operations: per-app router and project router."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, cast
 
 from foundry.operation import operation

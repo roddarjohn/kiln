@@ -48,6 +48,8 @@ runtime dependency on AWS, so consumers who only want the metadata
 shape (e.g. for migrations) don't pay for the storage client.
 """
 
+from __future__ import annotations
+
 import datetime
 import os
 import uuid

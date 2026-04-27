@@ -19,6 +19,8 @@ hand-written handlers that aren't one of the registered
 subclasses.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 

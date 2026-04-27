@@ -1,5 +1,7 @@
 """Jinja2 environment creation and template rendering."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import jinja2

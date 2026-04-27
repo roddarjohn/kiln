@@ -1,5 +1,7 @@
 """Update operation: PATCH /{pk} -- partially update a resource."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, cast
 
 from foundry.naming import Name
