@@ -27,3 +27,5 @@ Everything here is pure Python -- the kiln CLI knows to emit
 imports pointing at these submodules instead of scaffolding a
 ``utils.py`` into the generated app.
 """
+
+from __future__ import annotations

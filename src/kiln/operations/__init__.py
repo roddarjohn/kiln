@@ -7,3 +7,5 @@ engine discovers and runs those ops; the assembler renders their
 output through the registered renderers in
 :mod:`kiln.operations.renderers`.
 """
+
+from __future__ import annotations

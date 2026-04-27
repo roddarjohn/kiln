@@ -11,15 +11,19 @@ The signing secret lives in an env var (caller-named, typically
 ``JWT_SECRET``) so generated source never embeds a key.
 """
 
+from __future__ import annotations
+
 import datetime
 import os
-from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Sequence
 
 DEFAULT_TOKEN_TTL = datetime.timedelta(minutes=30)
 """Default ``exp`` stamped on tokens when the caller doesn't set one."""
@@ -89,7 +93,7 @@ class _Transport:
     """
 
     @classmethod
-    def from_config(cls, **kwargs: Any) -> "_Transport":
+    def from_config(cls, **kwargs: Any) -> _Transport:
         """Build an instance from the loose config kwargs."""
         raise NotImplementedError
 
@@ -131,7 +135,7 @@ class _BearerTransport(_Transport):
         )
 
     @classmethod
-    def from_config(cls, **kwargs: Any) -> "_BearerTransport":
+    def from_config(cls, **kwargs: Any) -> _BearerTransport:
         return cls(kwargs.get("token_url"))
 
     def extract_dep(self) -> Callable[..., Awaitable[str | None]]:
@@ -180,7 +184,7 @@ class _CookieTransport(_Transport):
         self._samesite = samesite
 
     @classmethod
-    def from_config(cls, **kwargs: Any) -> "_CookieTransport":
+    def from_config(cls, **kwargs: Any) -> _CookieTransport:
         name = kwargs.get("cookie_name")
         if name is None:
             msg = "cookie_name is required when 'cookie' is in sources"
