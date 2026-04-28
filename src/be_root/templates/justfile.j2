@@ -46,6 +46,23 @@ alias f := fresh
 openapi:
     uv run python -c "import json, main; print(json.dumps(main.app.openapi(), indent=2))" > openapi.json
 
+{% if pgcraft %}
+# Generate a new alembic migration from current model state.
+# Pass MSG="..." for the slug.
+migrate MSG="auto":
+    uv run alembic revision --autogenerate -m "{% raw %}{{ MSG }}{% endraw %}"
+
+# Apply pending migrations.  Run on a fresh DB before `seed`.
+db-upgrade:
+    uv run alembic upgrade head
+
+alias dbu := db-upgrade
+
+# Roll back the most recent migration.
+db-downgrade:
+    uv run alembic downgrade -1
+
+{% endif %}
 {% if pgqueuer %}
 # Install the pgqueuer schema (one-shot, before first worker start).
 # DATABASE_URL must be a plain postgresql:// DSN (strip +asyncpg).

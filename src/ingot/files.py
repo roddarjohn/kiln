@@ -58,15 +58,7 @@ from typing import TYPE_CHECKING, Any, cast
 import boto3
 from fastapi import HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import (
-    BigInteger,
-    DateTime,
-    String,
-    Uuid,
-    delete,
-    insert,
-    update,
-)
+from sqlalchemy import BigInteger, DateTime, String, delete, insert, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
@@ -108,14 +100,14 @@ class FileMixin:
     server has reserved a key for (and handed the client a presigned
     PUT URL) but whose upload hasn't yet been confirmed.  Consumers
     typically clear or expire these rows on a schedule.
-    """
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    """Surrogate primary key.  UUIDv4 so it's safe to expose."""
+    The mixin does *not* declare ``id``; consumers using pgcraft
+    pick a PK plugin on the concrete model
+    (``__plugins__ = [UUIDV4PKPlugin()]`` is the idiomatic choice
+    so the row id is safe to expose in URLs).  Plain SQLAlchemy
+    consumers can mix in :class:`FileMixin` and add their own
+    ``id`` column on the model class.
+    """
 
     s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
     """Object key in the storage bucket.  Unique so a row maps to
@@ -206,6 +198,10 @@ def bind_file_model(
 
     """
     cls = type(name, (base, FileMixin), {"__tablename__": tablename})
+    # Add a UUIDv4 id column onto the concrete subclass so the
+    # plain-SQLAlchemy path stays a one-liner.  pgcraft consumers
+    # ignore this and declare ``__plugins__ = [UUIDV4PKPlugin()]``
+    # on a hand-written model class instead.
     return cast("type[FileMixin]", cls)
 
 

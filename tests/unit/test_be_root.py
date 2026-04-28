@@ -375,6 +375,80 @@ def test_editable_without_pgcraft_omits_pgcraft_source():
 # -------------------------------------------------------------------
 
 
+def test_pgcraft_off_omits_alembic_files():
+    files = _build_files(RootConfig())
+
+    assert "alembic.ini" not in files
+    assert "migrations/env.py" not in files
+    assert "migrations/script.py.mako" not in files
+
+
+def test_pgcraft_on_emits_alembic_scaffold():
+    files = _build_files(RootConfig(pgcraft=True, module="tracker"))
+
+    assert "alembic.ini" in files
+    assert "migrations/env.py" in files
+    assert "migrations/script.py.mako" in files
+    # versions/ is intentionally not scaffolded -- alembic creates it
+    # on the first ``alembic revision`` run.
+    assert "migrations/versions/.gitkeep" not in files
+
+
+def test_pgcraft_alembic_env_imports_consumer_module():
+    files = _build_files(RootConfig(pgcraft=True, module="tracker"))
+    env = files["migrations/env.py"]
+
+    assert "import tracker.models" in env
+    assert "tracker.models.__path__" in env
+    assert "from db.base import Base" in env
+    # The pgcraft hooks need to be installed before the model
+    # imports trigger pgcraft factories.
+    assert "pgcraft_alembic_hook()" in env
+
+
+def test_pgcraft_alembic_ini_points_at_migrations_dir():
+    files = _build_files(RootConfig(pgcraft=True))
+    ini = files["alembic.ini"]
+
+    assert "script_location = %(here)s/migrations" in ini
+    assert "[post_write_hooks]" in ini
+
+
+def test_pgcraft_on_adds_alembic_dep_to_pyproject():
+    files = _build_files(RootConfig(pgcraft=True))
+    pyproject = files["pyproject.toml"]
+
+    assert '"alembic>=' in pyproject
+
+
+def test_pgcraft_off_omits_alembic_dep_from_pyproject():
+    files = _build_files(RootConfig())
+    pyproject = files["pyproject.toml"]
+
+    assert '"alembic' not in pyproject
+
+
+def test_pgcraft_on_emits_migrate_recipes_in_justfile():
+    files = _build_files(RootConfig(pgcraft=True))
+    just = files["justfile"]
+
+    assert "migrate MSG=" in just
+    assert "alembic revision --autogenerate" in just
+    assert "db-upgrade:" in just
+    assert "alembic upgrade head" in just
+    # MSG variable must use raw braces so just sees `{{ MSG }}`.
+    assert '"{{ MSG }}"' in just
+
+
+def test_pgcraft_off_omits_migrate_recipes_from_justfile():
+    files = _build_files(RootConfig())
+    just = files["justfile"]
+
+    assert "migrate MSG" not in just
+    assert "db-upgrade:" not in just
+    assert "alembic" not in just
+
+
 def test_pgqueuer_off_omits_queue_recipes():
     just = _build_files(RootConfig())["justfile"]
 

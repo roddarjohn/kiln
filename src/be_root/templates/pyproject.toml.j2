@@ -36,6 +36,12 @@ dependencies = [
 {% endif %}
 {% if pgcraft %}
   "pgcraft",
+  # alembic + pgcraft's alembic hooks emit pgcraft views,
+  # INSTEAD OF triggers, and functions alongside the raw
+  # tables.  Without it, ``Base.metadata.create_all`` only
+  # produces the raw tables and the public views the runtime
+  # queries don't exist.
+  "alembic>=1.18",
 {% endif %}
 {% if kiln_extras %}
   "kiln-generator[{{ kiln_extras | join(',') }}]",
