@@ -85,6 +85,7 @@ class RootScaffold:
             "package_prefix": package_prefix,
             "opentelemetry": config.opentelemetry,
             "files": config.files,
+            "auth": config.auth,
             "psycopg": config.psycopg,
             "pgcraft": config.pgcraft,
             "pgqueuer": config.pgqueuer,
@@ -147,3 +148,11 @@ class RootScaffold:
             context={},
             if_exists="skip",
         )
+
+        if config.auth:
+            yield StaticFile(
+                path="auth.py",
+                template="auth.py.j2",
+                context={},
+                if_exists="skip",
+            )

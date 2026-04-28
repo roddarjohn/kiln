@@ -58,6 +58,7 @@ def test_root_config_option_flags_default_off():
 
     assert cfg.opentelemetry is False
     assert cfg.files is False
+    assert cfg.auth is False
     assert cfg.psycopg is False
     assert cfg.pgcraft is False
     assert cfg.pgqueuer is False

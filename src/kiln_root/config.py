@@ -35,15 +35,28 @@ class RootConfig(FoundryConfig):
             spec.
         opentelemetry: When ``True``, request the
             ``kiln-generator[opentelemetry]`` extra in
-            ``pyproject.toml`` and emit the
-            ``init_telemetry(app)`` call in ``main.py``.  Pair
-            with a ``telemetry: telemetry.otel(...)`` block in
-            ``config/project.jsonnet`` once kiln scaffolds the
-            telemetry module on the first ``just generate``.
+            ``pyproject.toml``, emit the ``init_telemetry(app)``
+            call in ``main.py``, *and* stamp a default
+            ``telemetry: telemetry.otel(name)`` block into
+            ``config/project.jsonnet`` so kiln actually
+            generates ``_generated/telemetry.py``.  All three
+            sides flip together -- a half-set telemetry pulls
+            an ``ImportError`` at startup.
         files: When ``True``, request the
             ``kiln-generator[files]`` extra (boto3 + the
             ``ingot.files`` runtime helpers) for projects that
             expose file-upload endpoints.
+        auth: When ``True``, scaffold a starter auth wiring:
+            an ``auth.py`` skeleton at the project root with
+            stub ``LoginCredentials`` / ``Session`` /
+            ``validate_login`` symbols (the user fills in
+            credential validation), and an ``auth: auth.jwt(...)``
+            block in ``config/project.jsonnet`` pointing at
+            those symbols.  ``pyjwt`` is in the default deps so
+            no extra is needed.  ``auth.py`` is
+            ``if_exists="skip"`` like every other kiln_root
+            output, so re-bootstrap won't reset the user's
+            real ``validate_login`` implementation.
         psycopg: When ``True``, add ``psycopg[binary]`` to the
             base dependency list.  Required by kiln's
             sync-engine login path: the generated
@@ -72,6 +85,7 @@ class RootConfig(FoundryConfig):
     )
     opentelemetry: bool = Field(default=False)
     files: bool = Field(default=False)
+    auth: bool = Field(default=False)
     psycopg: bool = Field(default=False)
     pgcraft: bool = Field(default=False)
     pgqueuer: bool = Field(default=False)
