@@ -685,17 +685,18 @@ def gate_wiring(
     )
 
 
-def utils_imports() -> list[tuple[str, str]]:
-    """Return import pairs for the ``ingot`` runtime helpers.
+FETCH_OR_404_IMPORT: tuple[str, str] = (
+    "ingot.utils",
+    "get_object_from_query_or_404",
+)
+"""Import pair for the load-or-404 helper.
 
-    The three CRUD ops that load-or-404 a row (get, update,
-    delete) all need ``get_object_from_query_or_404`` and
-    ``assert_rowcount``; this centralizes the pair.
-    """
-    return [
-        ("ingot.utils", "get_object_from_query_or_404"),
-        ("ingot.utils", "assert_rowcount"),
-    ]
+Get, update, delete, the action op (object-scope branch), and the
+permissions endpoint all share this one row-lookup helper -- they
+either dump the loaded row, gate on it, or both.  Centralized as
+a constant so each op site reads as ``[FETCH_OR_404_IMPORT, ...]``
+rather than repeating the literal tuple.
+"""
 
 
 # -------------------------------------------------------------------

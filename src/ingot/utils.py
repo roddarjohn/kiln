@@ -1,10 +1,10 @@
 """General-purpose runtime utilities used by generated apps.
 
 Two unrelated concerns share this module by convention --
-HTTP-status row-lookup guards used by every CRUD handler, and the
-``run_once`` decorator used by the generated telemetry init.
-Bundling them here keeps the public ``ingot`` surface flat enough
-that consumers learn one import path
+:func:`get_object_from_query_or_404` used by every read-or-mutate
+CRUD handler, and the :func:`run_once` decorator used by the
+generated telemetry init.  Bundling them here keeps the public
+``ingot`` surface flat enough that consumers learn one import path
 (``from ingot.utils import ...``) for everything that doesn't fit
 under a more specific submodule.
 """
@@ -55,29 +55,6 @@ async def get_object_from_query_or_404(
         )
 
     return row
-
-
-def assert_rowcount(
-    result: Any,
-    *,
-    expected: int = 1,
-    status_code: int = status.HTTP_404_NOT_FOUND,
-    detail: str = "Not found",
-) -> None:
-    """Raise HTTPException when *result* did not affect *expected* rows.
-
-    Args:
-        result: SQLAlchemy ``CursorResult`` from an ``execute()`` call.
-        expected: Number of rows that must have been affected.
-        status_code: HTTP status code for the raised exception.
-        detail: The error message for the response.
-
-    Raises:
-        HTTPException: When ``result.rowcount`` does not equal *expected*.
-
-    """
-    if result.rowcount != expected:
-        raise HTTPException(status_code=status_code, detail=detail)
 
 
 # -------------------------------------------------------------------

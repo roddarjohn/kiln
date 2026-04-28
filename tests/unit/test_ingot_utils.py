@@ -6,13 +6,12 @@ import pytest
 from fastapi import HTTPException
 
 from ingot.utils import (
-    assert_rowcount,
     get_object_from_query_or_404,
     run_once,
 )
 
 # ---------------------------------------------------------------------------
-# get_object_from_query_or_404 / assert_rowcount
+# get_object_from_query_or_404
 # ---------------------------------------------------------------------------
 
 
@@ -47,39 +46,6 @@ async def test_get_object_custom_detail():
         await get_object_from_query_or_404(db, stmt=object(), detail="no post")
 
     assert exc.value.detail == "no post"
-
-
-def test_assert_rowcount_passes_when_match():
-    result = MagicMock()
-    result.rowcount = 1
-    assert_rowcount(result)
-
-
-def test_assert_rowcount_raises_on_mismatch():
-    result = MagicMock()
-    result.rowcount = 0
-
-    with pytest.raises(HTTPException) as exc:
-        assert_rowcount(result)
-
-    assert exc.value.status_code == 404
-
-
-def test_assert_rowcount_custom_expected():
-    result = MagicMock()
-    result.rowcount = 3
-    assert_rowcount(result, expected=3)
-
-
-def test_assert_rowcount_custom_status_and_detail():
-    result = MagicMock()
-    result.rowcount = 0
-
-    with pytest.raises(HTTPException) as exc:
-        assert_rowcount(result, status_code=409, detail="conflict")
-
-    assert exc.value.status_code == 409
-    assert exc.value.detail == "conflict"
 
 
 # ---------------------------------------------------------------------------

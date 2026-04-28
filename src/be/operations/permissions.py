@@ -24,7 +24,7 @@ critical because FastAPI matches in declaration order, and
 from typing import TYPE_CHECKING
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name, prefix_import
 from foundry.operation import operation
@@ -119,7 +119,7 @@ class Permissions:
             extra_imports=[
                 *common_imports,
                 ("sqlalchemy", "select"),
-                *utils_imports(),
+                FETCH_OR_404_IMPORT,
                 (actions_module, object_const),
             ],
         )

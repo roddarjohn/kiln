@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import gate_wiring, utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT, gate_wiring
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name
 from foundry.operation import EmptyOptions, operation
@@ -74,7 +74,7 @@ class Delete:
             extra_imports=[
                 ("sqlalchemy", "select"),
                 ("sqlalchemy", "delete"),
-                *utils_imports(),
+                FETCH_OR_404_IMPORT,
                 *gate_imports,
             ],
         )

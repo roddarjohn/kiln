@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import gate_wiring, utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT, gate_wiring
 from be.operations.types import (
     Field,
     FieldsOptions,
@@ -96,7 +96,7 @@ class Update:
             extra_imports=[
                 ("sqlalchemy", "select"),
                 ("sqlalchemy", "update"),
-                *utils_imports(),
+                FETCH_OR_404_IMPORT,
                 *gate_imports,
             ],
         )
