@@ -65,26 +65,26 @@ foundry = "foundry.cli:cli_main"
 python = "foundry.formatters.python:format_python"
 
 [project.entry-points."foundry.targets"]
-kiln = "kiln.target:target"
+be = "be.target:target"
 be_root = "be_root.target:target"
 
-[project.entry-points."kiln.operations"]
-scaffold = "kiln.operations.scaffold:Scaffold"
-auth_scaffold = "kiln.operations.scaffold:AuthScaffold"
-telemetry_scaffold = "kiln.operations.telemetry:TelemetryScaffold"
-get = "kiln.operations.get:Get"
-list = "kiln.operations.list:List"
-filter = "kiln.operations.filter:Filter"
-order = "kiln.operations.order:Order"
-paginate = "kiln.operations.paginate:Paginate"
-create = "kiln.operations.create:Create"
-update = "kiln.operations.update:Update"
-delete = "kiln.operations.delete:Delete"
-action = "kiln.operations.action:Action"
-auth = "kiln.operations.auth:Auth"
-tracing = "kiln.operations.tracing:Tracing"
-router = "kiln.operations.routing:Router"
-project_router = "kiln.operations.routing:ProjectRouter"
+[project.entry-points."be.operations"]
+scaffold = "be.operations.scaffold:Scaffold"
+auth_scaffold = "be.operations.scaffold:AuthScaffold"
+telemetry_scaffold = "be.operations.telemetry:TelemetryScaffold"
+get = "be.operations.get:Get"
+list = "be.operations.list:List"
+filter = "be.operations.filter:Filter"
+order = "be.operations.order:Order"
+paginate = "be.operations.paginate:Paginate"
+create = "be.operations.create:Create"
+update = "be.operations.update:Update"
+delete = "be.operations.delete:Delete"
+action = "be.operations.action:Action"
+auth = "be.operations.auth:Auth"
+tracing = "be.operations.tracing:Tracing"
+router = "be.operations.routing:Router"
+project_router = "be.operations.routing:ProjectRouter"
 
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"
@@ -94,7 +94,7 @@ requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["kiln", "be_root", "foundry", "ingot"]
+module-name = ["be", "be_root", "foundry", "ingot"]
 
 
 [dependency-groups]
@@ -197,7 +197,7 @@ ignore = [
 ]
 
 [tool.coverage.run]
-source = ["kiln", "foundry", "ingot"]
+source = ["be", "foundry", "ingot"]
 branch = true
 
 [tool.coverage.report]
