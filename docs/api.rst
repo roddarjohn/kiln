@@ -121,6 +121,9 @@ be.operations
 .. automodule:: ingot
    :members:
 
+.. automodule:: ingot.actions
+   :members:
+
 .. automodule:: ingot.auth
    :members:
 
