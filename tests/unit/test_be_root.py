@@ -2,7 +2,7 @@
 
 Covers config defaults, the pyproject entry-point registration,
 the static files emitted by :class:`~be_root.operations.RootScaffold`,
-and registry isolation against the kiln target's ops.
+and registry isolation against the be target's ops.
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from be.target import target as kiln_target
+from be_root.config import RootConfig
+from be_root.operations import RootScaffold
+from be_root.target import target as root_target
 from foundry.config import load_config
 from foundry.operation import load_registry
 from foundry.pipeline import generate
 from foundry.target import discover_targets
-from kiln.target import target as kiln_target
-from be_root.config import RootConfig
-from be_root.operations import RootScaffold
-from be_root.target import target as root_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,10 +80,10 @@ def test_root_target_is_registered_via_entry_point():
 def test_root_target_declares_its_own_entry_point_group():
     # The two targets ship in the same package and overlap at the
     # ``project`` scope; foundry walks each target's
-    # ``operations_entry_point`` separately so kiln's
+    # ``operations_entry_point`` separately so be's
     # resource-scope ops never fire on a be_root config.
     assert root_target.operations_entry_point == "be_root.operations"
-    assert kiln_target.operations_entry_point == "kiln.operations"
+    assert kiln_target.operations_entry_point == "be.operations"
     assert (
         root_target.operations_entry_point != kiln_target.operations_entry_point
     )
@@ -158,7 +158,7 @@ def test_pyproject_carries_name_and_kiln_dep():
     assert 'description = "Demo."' in py
     assert "kiln-generator" in py
     # The exclude line must reference the same package prefix the
-    # justfile points kiln at, otherwise lint walks into generated
+    # justfile points be at, otherwise lint walks into generated
     # code on every commit.
     assert 'exclude = ["_generated"]' in py
 
@@ -179,9 +179,9 @@ def test_pyproject_always_includes_pyjwt_and_multipart():
 
 
 def test_pyproject_always_includes_per_file_ignores():
-    # The per-file ignores match kiln's idiomatic output --
+    # The per-file ignores match be's idiomatic output --
     # without them ruff trips on standard SQLAlchemy table_args
-    # patterns and on kiln action signatures.  Shipping them
+    # patterns and on be action signatures.  Shipping them
     # default-on saves every consumer the same triage.
     py = _build_files(RootConfig())["pyproject.toml"]
 
@@ -221,16 +221,15 @@ def test_opentelemetry_on_emits_extras_and_init():
 
 def test_opentelemetry_on_emits_telemetry_block_in_project_jsonnet():
     # ``init_telemetry(app)`` imports from ``_generated.telemetry``
-    # which kiln only builds when ``telemetry: ...`` is set in the
-    # kiln config.  Without this block the flag is a half-story
+    # which be only builds when ``telemetry: ...`` is set in the
+    # be config.  Without this block the flag is a half-story
     # that ImportErrors at startup.
     project = _build_files(
         RootConfig(name="demo-app", opentelemetry=True),
     )["config/project.jsonnet"]
 
     assert (
-        'local telemetry = import "kiln/telemetry/telemetry.libsonnet"'
-        in project
+        'local telemetry = import "be/telemetry/telemetry.libsonnet"' in project
     )
     assert 'telemetry: telemetry.otel("demo-app")' in project
 
@@ -241,7 +240,7 @@ def test_opentelemetry_off_omits_telemetry_block():
     project = _build_files(RootConfig())["config/project.jsonnet"]
 
     assert "telemetry.otel" not in project
-    assert "kiln/telemetry/telemetry.libsonnet" not in project
+    assert "be/telemetry/telemetry.libsonnet" not in project
 
 
 # -------------------------------------------------------------------
@@ -279,7 +278,7 @@ def test_auth_off_omits_auth_py_and_auth_block():
     assert "auth.py" not in files
     project = files["config/project.jsonnet"]
     assert "auth.jwt" not in project
-    assert "kiln/auth/jwt.libsonnet" not in project
+    assert "be/auth/jwt.libsonnet" not in project
 
 
 def test_auth_on_emits_auth_py_skeleton():
@@ -298,10 +297,10 @@ def test_auth_on_emits_auth_py_skeleton():
 def test_auth_on_emits_auth_block_in_project_jsonnet():
     # The auth block must point at ``auth.<symbol>`` (matching
     # the dotted paths the auth.py skeleton declares); otherwise
-    # kiln's introspector will fail to resolve the references.
+    # be's introspector will fail to resolve the references.
     project = _build_files(RootConfig(auth=True))["config/project.jsonnet"]
 
-    assert 'local auth = import "kiln/auth/jwt.libsonnet"' in project
+    assert 'local auth = import "be/auth/jwt.libsonnet"' in project
     assert 'credentials_schema: "auth.LoginCredentials"' in project
     assert 'session_schema: "auth.Session"' in project
     assert 'validate_fn: "auth.validate_login"' in project
@@ -567,7 +566,7 @@ def test_pipeline_handles_various_module_names(module_name: str):
 # -------------------------------------------------------------------
 
 
-def test_every_kiln_root_file_declares_skip():
+def test_every_be_root_file_declares_skip():
     # The whole point of marking outputs ``"skip"`` is so a
     # re-bootstrap doesn't blow away post-bootstrap edits.  If a
     # template ever forgets the flag, this test catches it.
@@ -650,8 +649,7 @@ def test_re_bootstrap_force_paths_targets_only_listed(tmp_path: Path):
     # pyproject got reset; main.py wasn't on the force list, so
     # the user's edit survives.
     assert (
-        "AUTOGENERATED by be_root"
-        in (tmp_path / "pyproject.toml").read_text()
+        "AUTOGENERATED by be_root" in (tmp_path / "pyproject.toml").read_text()
     )
     assert (tmp_path / "main.py").read_text() == "# user-main"
 
@@ -666,8 +664,7 @@ def test_re_bootstrap_force_paths_accepts_comma_list(tmp_path: Path):
     assert result.exit_code == 0
 
     assert (
-        "AUTOGENERATED by be_root"
-        in (tmp_path / "pyproject.toml").read_text()
+        "AUTOGENERATED by be_root" in (tmp_path / "pyproject.toml").read_text()
     )
     assert "AUTOGENERATED by be_root" in (tmp_path / "main.py").read_text()
     # .gitignore wasn't on the list -- still user's content.
@@ -689,7 +686,6 @@ def test_re_bootstrap_force_paths_repeated_flag(tmp_path: Path):
     assert result.exit_code == 0
 
     assert (
-        "AUTOGENERATED by be_root"
-        in (tmp_path / "pyproject.toml").read_text()
+        "AUTOGENERATED by be_root" in (tmp_path / "pyproject.toml").read_text()
     )
     assert "AUTOGENERATED by be_root" in (tmp_path / "main.py").read_text()

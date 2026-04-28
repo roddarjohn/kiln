@@ -8,16 +8,16 @@ the parent list's search handler.
 
 from typing import TYPE_CHECKING
 
-from foundry.operation import operation
 from be.config.schema import OrderConfig
 from be.operations.list import ListResult, resource_model
 from be.operations.types import EnumClass, SchemaClass
+from foundry.operation import operation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from foundry.engine import BuildContext
     from be.config.schema import ModifierConfig, ProjectConfig
+    from foundry.engine import BuildContext
 
 
 @operation(

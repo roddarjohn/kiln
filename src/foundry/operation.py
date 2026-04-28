@@ -10,8 +10,8 @@ into a fresh :class:`OperationRegistry`.
 
 There is no process-wide default registry.  Each
 :class:`~foundry.target.Target` declares the entry-point group
-its operations live under (e.g. ``"kiln.operations"`` for the
-kiln target, ``"be_root.operations"`` for be_root); the
+its operations live under (e.g. ``"be.operations"`` for the
+be target, ``"be_root.operations"`` for be_root); the
 pipeline builds an isolated registry per build, so two targets
 installed side-by-side can never see each other's ops.
 
@@ -167,7 +167,7 @@ def operation(  # noqa: PLR0913
     dispatch_on: str | None = None,
     registry: OperationRegistry | None = None,
 ) -> Any:  # noqa: ANN401
-    """Decorate a class as a kiln operation.
+    """Decorate a class as a be operation.
 
     The decorated class must define:
 
@@ -272,7 +272,7 @@ def load_registry(entry_point_group: str) -> OperationRegistry:
 
     Args:
         entry_point_group: Dotted entry-point group name, e.g.
-            ``"kiln.operations"`` or ``"be_root.operations"``.
+            ``"be.operations"`` or ``"be_root.operations"``.
 
     Returns:
         A populated :class:`OperationRegistry`.

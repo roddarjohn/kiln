@@ -25,7 +25,7 @@ def write_files(
     The :attr:`~foundry.spec.GeneratedFile.if_exists` policy
     decides what happens when the target already exists:
 
-    * ``"overwrite"`` (default for kiln output) -- replace
+    * ``"overwrite"`` (default for be output) -- replace
       unconditionally.
     * ``"skip"`` (be_root's bootstrap files) -- leave the
       existing file untouched.

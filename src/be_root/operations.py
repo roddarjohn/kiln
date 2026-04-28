@@ -19,20 +19,20 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from foundry.engine import BuildContext
     from be_root.config import RootConfig
+    from foundry.engine import BuildContext
 
 
 @operation("root_scaffold", scope="project")
 class RootScaffold:
-    """Emit the bootstrap files for a fresh kiln project.
+    """Emit the bootstrap files for a fresh be project.
 
     Each file is a :class:`~foundry.outputs.StaticFile` whose
     template lives under :mod:`be_root.templates`.  Templates
     interpolate :class:`~be_root.config.RootConfig` fields
     (``name``, ``module``, ``description``) and reference the
     target's ``package_prefix`` so the generated ``project.jsonnet``
-    points kiln at the same output directory the bootstrap's
+    points be at the same output directory the bootstrap's
     ``justfile`` does (``_generated`` by default).
     """
 
@@ -51,7 +51,7 @@ class RootScaffold:
         Yields:
             :class:`~foundry.outputs.StaticFile` objects covering
             the project-root files (``main.py``, ``pyproject.toml``,
-            ``justfile``, dotfiles), the kiln config skeleton under
+            ``justfile``, dotfiles), the be config skeleton under
             ``config/``, and an empty ``{module}/`` package.
 
         """

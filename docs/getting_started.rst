@@ -1,7 +1,7 @@
 Getting started
 ===============
 
-This guide walks through setting up a new project with kiln from scratch.
+This guide walks through setting up a new project with be from scratch.
 By the end you will have a working FastAPI application with generated
 routes, schemas, and (optionally) auth wired to SQLAlchemy models you
 define yourself.
@@ -25,7 +25,7 @@ produces:
   database) and, when auth is enabled, a ``get_current_user``
   dependency and optional login router.
 
-kiln does **not** generate your SQLAlchemy models.  You write those
+be does **not** generate your SQLAlchemy models.  You write those
 yourself and point the config at them by dotted import path.
 
 Prerequisites
@@ -49,24 +49,24 @@ Verify the CLI is available::
 
    foundry --help
 
-kiln registers itself as a target for the generic ``foundry`` CLI
+be registers itself as a target for the generic ``foundry`` CLI
 shipped in the same package, so ``foundry`` is the command you run.
 
 Project layout
 --------------
 
-By default kiln writes all generated code into ``_generated/``
+By default be writes all generated code into ``_generated/``
 (controlled by the ``package_prefix`` config field).  A typical
 single-app project looks like:
 
 .. code-block:: text
 
    myproject/
-   ├── app.jsonnet            # kiln config
+   ├── app.jsonnet            # be config
    ├── myapp/
    │   └── models.py          # your hand-written SQLAlchemy models
    ├── main.py                # your FastAPI entry point
-   └── _generated/            # written by kiln (never edit)
+   └── _generated/            # written by be (never edit)
        ├── auth/              # get_current_user dependency
        ├── db/                # async session factories
        └── myapp/
@@ -74,7 +74,7 @@ single-app project looks like:
            ├── schemas/       # Pydantic request/response models
            └── serializers/   # model-to-schema helpers
 
-Everything under ``_generated/`` is overwritten on every ``kiln
+Everything under ``_generated/`` is overwritten on every ``be
 generate`` run.  Source-control the config file and your models, not
 the generated output.
 
@@ -152,7 +152,7 @@ Create ``app.jsonnet`` at your project root:
 
 Key points:
 
-* ``model`` is the dotted import path to your SQLAlchemy class.  kiln
+* ``model`` is the dotted import path to your SQLAlchemy class.  be
   does not require a specific base class -- any SQLAlchemy
   ``DeclarativeBase`` subclass works.
 * ``operations`` lists the operations to run for this resource.  A
@@ -215,7 +215,7 @@ variable (``url_env`` on the database config -- default
    export DATABASE_URL="postgresql+asyncpg://user:pw@localhost/mydb"
 
 Create the database tables with whatever migration tool you use
-(Alembic is a common choice).  kiln does not manage schema migrations.
+(Alembic is a common choice).  be does not manage schema migrations.
 
 Step 6 -- Run the server
 ------------------------

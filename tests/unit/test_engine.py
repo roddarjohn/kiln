@@ -5,11 +5,11 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel, Field
 
+from be.operations.types import RouteHandler
 from foundry import Engine, Scoped, operation
 from foundry.engine import _resolve_options
 from foundry.operation import EmptyOptions, OperationRegistry
 from foundry.outputs import StaticFile
-from kiln.operations.types import RouteHandler
 
 # -------------------------------------------------------------------
 # Test config models

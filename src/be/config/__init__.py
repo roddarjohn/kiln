@@ -1,1 +1,1 @@
-"""Configuration loading and validation for kiln."""
+"""Configuration loading and validation for be."""

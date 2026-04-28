@@ -3,11 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from foundry.engine import BuildContext
-from foundry.outputs import StaticFile
-from foundry.scope import PROJECT, Scope, ScopeTree
-from foundry.store import BuildStore
-from kiln.config.schema import (
+from be.config.schema import (
     App,
     AppConfig,
     DatabaseConfig,
@@ -16,8 +12,12 @@ from kiln.config.schema import (
     ResourceConfig,
     TelemetryConfig,
 )
-from kiln.operations.telemetry import TelemetryScaffold
-from kiln.operations.types import RouteHandler
+from be.operations.telemetry import TelemetryScaffold
+from be.operations.types import RouteHandler
+from foundry.engine import BuildContext
+from foundry.outputs import StaticFile
+from foundry.scope import PROJECT, Scope, ScopeTree
+from foundry.store import BuildStore
 
 # ---------------------------------------------------------------------------
 # Schema validation
@@ -223,7 +223,7 @@ class TestTelemetryScaffoldOutputs:
 
 class TestDbScaffoldInstrumentFlag:
     def test_instrument_sqlalchemy_off_when_no_telemetry(self):
-        from kiln.operations.scaffold import Scaffold
+        from be.operations.scaffold import Scaffold
 
         cfg = ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
@@ -235,7 +235,7 @@ class TestDbScaffoldInstrumentFlag:
         assert session.context["instrument_sqlalchemy"] is False
 
     def test_instrument_sqlalchemy_on_with_telemetry(self):
-        from kiln.operations.scaffold import Scaffold
+        from be.operations.scaffold import Scaffold
 
         cfg = ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
@@ -248,7 +248,7 @@ class TestDbScaffoldInstrumentFlag:
         assert session.context["instrument_sqlalchemy"] is True
 
     def test_instrument_sqlalchemy_off_when_explicitly_disabled(self):
-        from kiln.operations.scaffold import Scaffold
+        from be.operations.scaffold import Scaffold
 
         cfg = ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
@@ -278,7 +278,7 @@ class TestProjectRouterTelemetryFlag:
         )
 
     def test_has_telemetry_false_by_default(self):
-        from kiln.operations.routing import ProjectRouter
+        from be.operations.routing import ProjectRouter
 
         cfg = self._config(telemetry=None)
         outputs = list(
@@ -289,7 +289,7 @@ class TestProjectRouterTelemetryFlag:
         assert outputs[0].context["has_telemetry"] is False
 
     def test_has_telemetry_true_with_config(self):
-        from kiln.operations.routing import ProjectRouter
+        from be.operations.routing import ProjectRouter
 
         cfg = self._config(telemetry=TelemetryConfig(service_name="svc"))
         outputs = list(
@@ -309,7 +309,7 @@ class TestProjectRouterTelemetryFlag:
 
 class TestAuthScaffoldTelemetryFlag:
     def _config(self, telemetry: TelemetryConfig | None) -> ProjectConfig:
-        from kiln.config.schema import AuthConfig
+        from be.config.schema import AuthConfig
 
         return ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
@@ -322,7 +322,7 @@ class TestAuthScaffoldTelemetryFlag:
         )
 
     def test_auth_router_carries_telemetry_flag(self):
-        from kiln.operations.scaffold import AuthScaffold
+        from be.operations.scaffold import AuthScaffold
 
         cfg = self._config(telemetry=TelemetryConfig(service_name="svc"))
         outputs = list(
@@ -336,7 +336,7 @@ class TestAuthScaffoldTelemetryFlag:
         assert router.context["has_telemetry"] is True
 
     def test_auth_router_no_telemetry_by_default(self):
-        from kiln.operations.scaffold import AuthScaffold
+        from be.operations.scaffold import AuthScaffold
 
         cfg = self._config(telemetry=None)
         outputs = list(
@@ -356,7 +356,7 @@ class TestAuthScaffoldTelemetryFlag:
 # ---------------------------------------------------------------------------
 
 
-from kiln.operations.tracing import Tracing  # noqa: E402
+from be.operations.tracing import Tracing  # noqa: E402
 
 
 def _crud_handler(op_name: str = "get") -> RouteHandler:

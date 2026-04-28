@@ -25,9 +25,9 @@ default:
 bootstrap:
     uv run foundry generate --target be_root --config {% raw %}{{ bootstrap }}{% endraw %} --out .
 
-# Generate routes and schemas from the kiln config
+# Generate routes and schemas from the be config
 generate:
-    uv run foundry generate --target kiln --config {% raw %}{{ config }}{% endraw %} --out {% raw %}{{ out }}{% endraw %} --clean
+    uv run foundry generate --target be --config {% raw %}{{ config }}{% endraw %} --out {% raw %}{{ out }}{% endraw %} --clean
 
 alias g := generate
 

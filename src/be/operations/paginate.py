@@ -9,16 +9,16 @@ keyset/offset defaults onto the parent's search handler.
 
 from typing import TYPE_CHECKING
 
+from be.config.schema import PaginateConfig
+from be.operations.list import ListResult, resource_model
+from be.operations.types import SchemaClass
 from foundry.operation import operation
-from kiln.config.schema import PaginateConfig
-from kiln.operations.list import ListResult, resource_model
-from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from be.config.schema import ModifierConfig, ProjectConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ModifierConfig, ProjectConfig
 
 
 @operation(
@@ -40,7 +40,7 @@ class Paginate:
 
         Args:
             ctx: Build context for the ``"paginate"`` op entry.
-            options: Parsed :class:`~kiln.config.schema.PaginateConfig`.
+            options: Parsed :class:`~be.config.schema.PaginateConfig`.
 
         Yields:
             ``{Model}Page`` response schema.

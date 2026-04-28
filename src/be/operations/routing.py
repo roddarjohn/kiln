@@ -2,17 +2,17 @@
 
 from typing import TYPE_CHECKING, cast
 
+from be.operations.types import RouteHandler
 from foundry.operation import operation
 from foundry.outputs import StaticFile
-from kiln.operations.types import RouteHandler
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pydantic import BaseModel
 
+    from be.config.schema import App, ProjectConfig, ResourceConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import App, ProjectConfig, ResourceConfig
 
 
 @operation("router", scope="app", after_children=True)
@@ -22,9 +22,9 @@ class Router:
     Runs in the post-children phase of the app scope so the build
     store is fully populated with resource-scope output beneath
     this app.  Emits one
-    :class:`~kiln.operations.types.RouterMount` per resource that
+    :class:`~be.operations.types.RouterMount` per resource that
     produced at least one
-    :class:`~kiln.operations.types.RouteHandler` plus a single
+    :class:`~be.operations.types.RouteHandler` plus a single
     :class:`~foundry.outputs.StaticFile` that aggregates them into
     the app's router module.
     """
@@ -38,7 +38,7 @@ class Router:
 
         Args:
             ctx: Build context for one
-                :class:`~kiln.config.schema.App`; ``store`` is
+                :class:`~be.config.schema.App`; ``store`` is
                 fully populated with resource-scope output because
                 ``after_children=True``.
             _options: Unused.
@@ -47,7 +47,7 @@ class Router:
             A single :class:`~foundry.outputs.StaticFile` for the
             app's routes package, carrying one ``routes`` entry
             per resource that produced a
-            :class:`~kiln.operations.types.RouteHandler`.  Nothing
+            :class:`~be.operations.types.RouteHandler`.  Nothing
             is yielded when no resource in the app produced a
             handler.
 
@@ -100,7 +100,7 @@ class ProjectRouter:
         """Produce the project-level router file.
 
         Only produces output for configs that have an ``apps``
-        list.  :class:`~kiln.config.schema.ProjectConfig` wraps a
+        list.  :class:`~be.config.schema.ProjectConfig` wraps a
         single-app shorthand into an implicit app with
         ``prefix=""`` at validation time, so every project config
         routed through ``foundry generate`` has at least one app and

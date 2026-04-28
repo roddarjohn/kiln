@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from be.config.schema import ProjectConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ProjectConfig
 
 
 @operation("scaffold", scope="project")
@@ -92,7 +92,7 @@ class AuthScaffold:
     * ``auth/__init__.py`` -- package marker.
     * ``auth/dependencies.py`` -- binds :func:`ingot.auth.session_auth`
       against the consumer's
-      :attr:`~kiln.config.schema.AuthConfig.session_schema` to
+      :attr:`~be.config.schema.AuthConfig.session_schema` to
       produce the ``get_session`` FastAPI dependency used by every
       protected route.
     * ``auth/router.py`` -- login (``POST {token_url}``) and logout

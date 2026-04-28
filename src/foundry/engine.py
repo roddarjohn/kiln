@@ -12,7 +12,7 @@ a set of operations, and a render registry, it:
 6. Returns the store for a downstream assembler to render.
 
 The engine does *not* render output to files -- that belongs
-to framework-specific assemblers in the ``kiln`` package.
+to framework-specific assemblers in the ``be`` package.
 """
 
 from dataclasses import dataclass, field
@@ -39,7 +39,7 @@ class BuildContext[InstanceT, ConfigT: BaseModel]:
       ``ResourceConfig`` for resource-scope ops).
     * ``ConfigT`` -- the project root config.  The engine itself
       uses ``BuildContext[Any, BaseModel]`` since it's
-      target-agnostic; target-specific ops (e.g. all of kiln)
+      target-agnostic; target-specific ops (e.g. all of be)
       annotate ``BuildContext[X, ProjectConfig]`` and get typed
       access to ``ctx.config.*`` without casting.
 
@@ -282,7 +282,7 @@ def _resolve_options(op_cls: type, instance: object) -> BaseModel:
     """Build the Options model for an operation.
 
     If the instance exposes an ``options`` dict (as
-    :class:`~kiln.config.schema.OperationConfig` does via
+    :class:`~be.config.schema.OperationConfig` does via
     ``model_extra``), those keys populate the Options model.
     Otherwise a default-constructed Options is returned.
 

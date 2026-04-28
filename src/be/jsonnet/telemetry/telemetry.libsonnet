@@ -1,6 +1,6 @@
-// kiln stdlib — OpenTelemetry config helper
+// be stdlib — OpenTelemetry config helper
 // Usage:
-//   local telemetry = import 'kiln/telemetry/telemetry.libsonnet';
+//   local telemetry = import 'be/telemetry/telemetry.libsonnet';
 //   {
 //     telemetry: telemetry.otel('blog-api', {
 //       sampler: 'parentbased_traceidratio',
@@ -9,7 +9,7 @@
 //     }),
 //   }
 //
-// Defaults mirror kiln.config.schema.TelemetryConfig: traces and
+// Defaults mirror be.config.schema.TelemetryConfig: traces and
 // metrics on, logs off, FastAPI + SQLAlchemy auto-instrumented,
 // per-handler spans on, request/response body capture off (PII
 // risk), and `parentbased_always_on` sampling for friendly dev

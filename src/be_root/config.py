@@ -25,9 +25,9 @@ class RootConfig(FoundryConfig):
             distribution name (lowercase, hyphens or
             underscores).
         module: Default Python package name for the user's first
-            kiln app.  The generated starter ``config/{module}.jsonnet``
+            be app.  The generated starter ``config/{module}.jsonnet``
             file references it, and the bootstrap creates an
-            empty ``{module}/`` package so kiln has somewhere to
+            empty ``{module}/`` package so be has somewhere to
             attach generated routes on the first ``just generate``.
         description: Free-form one-line description.  Flows into
             ``pyproject.toml`` and the FastAPI app's
@@ -38,7 +38,7 @@ class RootConfig(FoundryConfig):
             ``pyproject.toml``, emit the ``init_telemetry(app)``
             call in ``main.py``, *and* stamp a default
             ``telemetry: telemetry.otel(name)`` block into
-            ``config/project.jsonnet`` so kiln actually
+            ``config/project.jsonnet`` so be actually
             generates ``_generated/telemetry.py``.  All three
             sides flip together -- a half-set telemetry pulls
             an ``ImportError`` at startup.
@@ -58,13 +58,13 @@ class RootConfig(FoundryConfig):
             output, so re-bootstrap won't reset the user's
             real ``validate_login`` implementation.
         psycopg: When ``True``, add ``psycopg[binary]`` to the
-            base dependency list.  Required by kiln's
+            base dependency list.  Required by be's
             sync-engine login path: the generated
             ``POST /auth/token`` handler is a plain ``def`` and
             can't ride the asyncpg pool.
         pgcraft: When ``True``, add ``pgcraft`` to the base
             dependency list.  Pulls in the migration / schema
-            tooling kiln integrates with.
+            tooling be integrates with.
         pgqueuer: When ``True``, emit ``queue-install`` and
             ``worker`` recipes in the generated ``justfile`` for
             apps that run a pgqueuer-backed background-job
@@ -72,7 +72,7 @@ class RootConfig(FoundryConfig):
         editable: When ``True``, emit a ``[tool.uv.sources]``
             block pinning ``kiln-generator`` (and ``pgcraft``,
             when enabled) to editable sibling-repo installs at
-            ``../kiln`` / ``../pgcraft``.  Right for local
+            ``../be`` / ``../pgcraft``.  Right for local
             development against unreleased changes; flip off
             when publishing.
 

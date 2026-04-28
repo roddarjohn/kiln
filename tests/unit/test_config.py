@@ -1,13 +1,11 @@
-"""Tests for kiln config loading and schema validation."""
+"""Tests for be config loading and schema validation."""
 
 import json
 from typing import TYPE_CHECKING
 
 import pytest
 
-from foundry.config import load_config
-from foundry.errors import ConfigError
-from kiln.config.schema import (
+from be.config.schema import (
     AppConfig,
     AuthConfig,
     DatabaseConfig,
@@ -16,6 +14,8 @@ from kiln.config.schema import (
     ProjectConfig,
     ResourceConfig,
 )
+from foundry.config import load_config
+from foundry.errors import ConfigError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -349,7 +349,7 @@ def test_field_spec_load_on_scalar_rejected():
 
 
 def _load(path: Path) -> ProjectConfig:
-    from kiln.target import target as kiln_target
+    from be.target import target as kiln_target
 
     stdlibs = (
         {kiln_target.name: kiln_target.jsonnet_stdlib_dir}
@@ -383,7 +383,7 @@ def test_load_json(tmp_path: Path):
             }
         ],
     }
-    cfg_file = tmp_path / "kiln.json"
+    cfg_file = tmp_path / "be.json"
     cfg_file.write_text(json.dumps(data))
 
     cfg = _load(cfg_file)
@@ -394,7 +394,7 @@ def test_load_json(tmp_path: Path):
 
 
 def test_load_unsupported_extension(tmp_path: Path):
-    bad = tmp_path / "kiln.yaml"
+    bad = tmp_path / "be.yaml"
     bad.write_text("version: '1'")
 
     with pytest.raises(ConfigError, match="Unsupported"):
@@ -407,7 +407,7 @@ def test_load_jsonnet(tmp_path: Path):
         "prefix: '' }], "
         "databases: [{ key: 'primary', default: true }] }"
     )
-    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file = tmp_path / "be.jsonnet"
     cfg_file.write_text(jsonnet_src)
     cfg = _load(cfg_file)
     assert cfg.apps[0].config.module == "jsonnet_app"
@@ -421,7 +421,7 @@ def test_load_jsonnet_relative_import(tmp_path: Path):
         "{ apps: [{ config: { module: h.mod }, prefix: '' }], "
         "databases: [{ key: 'primary', default: true }] }"
     )
-    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file = tmp_path / "be.jsonnet"
     cfg_file.write_text(jsonnet_src)
     cfg = _load(cfg_file)
     assert cfg.apps[0].config.module == "helper_app"
@@ -439,7 +439,7 @@ def test_load_validation_error(tmp_path: Path):
 
 def test_load_jsonnet_stdlib_resources(tmp_path: Path):
     src = """
-    local resource = import "kiln/resources/presets.libsonnet";
+    local resource = import "be/resources/presets.libsonnet";
     {
       databases: [{ key: "primary", default: true }],
       apps: [{
@@ -461,7 +461,7 @@ def test_load_jsonnet_stdlib_resources(tmp_path: Path):
       }],
     }
     """
-    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file = tmp_path / "be.jsonnet"
     cfg_file.write_text(src)
     cfg = _load(cfg_file)
     app = cfg.apps[0]
@@ -483,7 +483,7 @@ def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
     """``resource.action`` emits ``require_auth`` for bool values and
     omits the key only when explicitly passed ``null`` (inherit)."""
     src = """
-    local resource = import "kiln/resources/presets.libsonnet";
+    local resource = import "be/resources/presets.libsonnet";
     {
       databases: [{ key: "primary", default: true }],
       apps: [{
@@ -512,7 +512,7 @@ def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
       }],
     }
     """
-    cfg_file = tmp_path / "kiln.jsonnet"
+    cfg_file = tmp_path / "be.jsonnet"
     cfg_file.write_text(src)
     cfg = _load(cfg_file)
     ops = cfg.apps[0].config.resources[0].operations

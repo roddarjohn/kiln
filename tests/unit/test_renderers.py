@@ -4,21 +4,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from foundry.assembler import assemble
-from foundry.env import create_jinja_env, render_template
-from foundry.imports import ImportCollector
-from foundry.outputs import StaticFile
-from foundry.render import FileFragment, RenderCtx, SnippetFragment
-from foundry.render import registry as shared_registry
-from foundry.scope import discover_scopes
-from foundry.store import BuildStore
-from kiln.config.schema import AuthConfig, ProjectConfig, ResourceConfig
-from kiln.operations.renderers import (
+from be.config.schema import AuthConfig, ProjectConfig, ResourceConfig
+from be.operations.renderers import (
     _response_schema_name,
     _status_suffix,
     render_enum_class,
 )
-from kiln.operations.types import (
+from be.operations.types import (
     EnumClass,
     Field,
     RouteHandler,
@@ -27,7 +19,15 @@ from kiln.operations.types import (
     SerializerFn,
     TestCase,
 )
-from kiln.target import target as kiln_target
+from be.target import target as kiln_target
+from foundry.assembler import assemble
+from foundry.env import create_jinja_env, render_template
+from foundry.imports import ImportCollector
+from foundry.outputs import StaticFile
+from foundry.render import FileFragment, RenderCtx, SnippetFragment
+from foundry.render import registry as shared_registry
+from foundry.scope import discover_scopes
+from foundry.store import BuildStore
 
 jinja_env = create_jinja_env(kiln_target.template_dir)
 

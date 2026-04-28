@@ -1,8 +1,8 @@
 """Tracing operation -- prepends ``@traced_handler`` to CRUD/action routes.
 
-Mirrors :class:`~kiln.operations.auth.Auth`: resource-scoped,
+Mirrors :class:`~be.operations.auth.Auth`: resource-scoped,
 ``after_children=True``, emits nothing.  Walks every
-:class:`~kiln.operations.types.RouteHandler` produced under the
+:class:`~be.operations.types.RouteHandler` produced under the
 resource and prepends a ``@traced_handler(...)`` decorator string
 when telemetry is enabled and not opted out at the resource or
 operation level.
@@ -17,17 +17,17 @@ the body-template path.
 
 from typing import TYPE_CHECKING
 
+from be.operations.types import RouteHandler
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln.operations.types import RouteHandler
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pydantic import BaseModel
 
+    from be.config.schema import ProjectConfig, ResourceConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ProjectConfig, ResourceConfig
 
 
 @operation("tracing", scope="resource", after_children=True)

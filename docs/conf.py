@@ -9,7 +9,7 @@ _pyproject = tomllib.loads(
     .read_text()
 )
 
-project = "kiln"
+project = "be"
 author = "Rodda John"
 copyright = "2026, Rodda John"
 version = _pyproject["project"]["version"]
@@ -27,11 +27,11 @@ extensions = [
 
 # -- Theme -----------------------------------------------------------
 html_theme = "alabaster"
-html_title = "kiln"
+html_title = "be"
 html_theme_options = {
     "description": "CLI for autogenerating files from templates",
     "github_user": "roddajohn",
-    "github_repo": "kiln",
+    "github_repo": "be",
     "github_button": False,
     "fixed_sidebar": True,
     "show_powered_by": False,

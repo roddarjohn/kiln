@@ -1,9 +1,9 @@
-// kiln/fields.libsonnet
+// be/fields.libsonnet
 //
 // Helpers for common field-list bundles.
 //
 // Usage:
-//   local fields = import "kiln/fields.libsonnet";
+//   local fields = import "be/fields.libsonnet";
 //
 //   operations: [
 //     {

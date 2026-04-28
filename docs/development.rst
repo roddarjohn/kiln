@@ -1,7 +1,7 @@
 Development
 ===========
 
-This guide explains how to set up a local development environment for **kiln**,
+This guide explains how to set up a local development environment for **be**,
 run tests, lint code, and build the documentation.
 
 Prerequisites
@@ -38,8 +38,8 @@ Fork and clone
 
 `Fork the repository <https://github.com/roddarjohn/kiln/fork>`_ on GitHub, then clone your fork::
 
-    git clone https://github.com/<your-username>/kiln
-    cd kiln
+    git clone https://github.com/<your-username>/be
+    cd be
 
 Install all dependency groups and activate the virtual environment::
 
@@ -54,7 +54,7 @@ That's it. You're ready to develop.
 Running tests
 -------------
 
-kiln uses `pytest <https://docs.pytest.org>`_ for testing.
+be uses `pytest <https://docs.pytest.org>`_ for testing.
 
 Tests are organised into two directories:
 
@@ -82,7 +82,7 @@ Both commands pass arguments through to pytest::
 Coverage
 --------
 
-kiln uses `coverage.py <https://coverage.readthedocs.io/>`_ for
+be uses `coverage.py <https://coverage.readthedocs.io/>`_ for
 coverage reporting::
 
     just coverage
@@ -93,7 +93,7 @@ coverage table to the terminal.
 Linting and formatting
 -----------------------
 
-kiln uses `ruff <https://docs.astral.sh/ruff/>`_ for Python linting and formatting,
+be uses `ruff <https://docs.astral.sh/ruff/>`_ for Python linting and formatting,
 and `jsonnetfmt <https://github.com/google/go-jsonnet>`_ for Jsonnet formatting.
 Both run automatically as pre-commit hooks, but you can also run them manually.
 
@@ -116,7 +116,7 @@ Jsonnet::
 Type checking
 -------------
 
-kiln uses `zuban <https://zubanls.com>`_ for type checking (native mode,
+be uses `zuban <https://zubanls.com>`_ for type checking (native mode,
 not mypy-compatible)::
 
     just type-check
@@ -145,7 +145,7 @@ The source is split into two packages:
     ``@operation`` protocol, the build store, the render registry,
     and typed output dataclasses live here.
 
-``src/kiln/``
+``src/be/``
     FastAPI / SQLAlchemy generator built on ``foundry``.  The
     config schema, CLI, built-in operations, Jinja templates, and
     renderers live here.

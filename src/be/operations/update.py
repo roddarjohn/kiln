@@ -2,11 +2,9 @@
 
 from typing import TYPE_CHECKING, cast
 
-from foundry.naming import Name
-from foundry.operation import operation
-from kiln.config.schema import PYTHON_TYPES
-from kiln.operations.renderers import utils_imports
-from kiln.operations.types import (
+from be.config.schema import PYTHON_TYPES
+from be.operations.renderers import utils_imports
+from be.operations.types import (
     Field,
     FieldsOptions,
     RouteHandler,
@@ -15,16 +13,18 @@ from kiln.operations.types import (
     TestCase,
     _field_dicts,
 )
+from foundry.naming import Name
+from foundry.operation import operation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from foundry.engine import BuildContext
-    from kiln.config.schema import (
+    from be.config.schema import (
         OperationConfig,
         ProjectConfig,
         ResourceConfig,
     )
+    from foundry.engine import BuildContext
 
 
 @operation(
@@ -47,7 +47,7 @@ class Update:
 
         Args:
             ctx: Build context for the ``"update"`` operation entry.
-            options: Parsed :class:`~kiln.operations.types.FieldsOptions`.
+            options: Parsed :class:`~be.operations.types.FieldsOptions`.
 
         Yields:
             The ``{Model}UpdateRequest`` schema (all fields

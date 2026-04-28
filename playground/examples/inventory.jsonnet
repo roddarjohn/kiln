@@ -9,8 +9,8 @@
 //     email/json/datetime fields
 //   - Actions with and without params, with and without auth
 
-local list = import "kiln/operations/list.libsonnet";
-local resource = import "kiln/resources/presets.libsonnet";
+local list = import "be/operations/list.libsonnet";
+local resource = import "be/resources/presets.libsonnet";
 
 {
   version: "1",

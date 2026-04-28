@@ -9,16 +9,16 @@ generated route calls ``ingot.apply_filters``.
 
 from typing import TYPE_CHECKING
 
+from be.config.schema import FilterConfig
+from be.operations.list import ListResult, resource_model
+from be.operations.types import SchemaClass
 from foundry.operation import operation
-from kiln.config.schema import FilterConfig
-from kiln.operations.list import ListResult, resource_model
-from kiln.operations.types import SchemaClass
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from be.config.schema import ModifierConfig, ProjectConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ModifierConfig, ProjectConfig
 
 
 @operation(
@@ -46,7 +46,7 @@ class Filter:
 
         Args:
             ctx: Build context for the ``"filter"`` op entry.
-            options: Parsed :class:`~kiln.config.schema.FilterConfig`.
+            options: Parsed :class:`~be.config.schema.FilterConfig`.
 
         Yields:
             ``{Model}FilterCondition`` schema.  (The expression

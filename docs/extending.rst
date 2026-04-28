@@ -1,11 +1,11 @@
-Extending kiln
+Extending be
 ==============
 
 .. contents:: On this page
    :local:
    :depth: 2
 
-kiln is designed to be extended at three levels:
+be is designed to be extended at three levels:
 
 1. **Add an operation.**  The most common extension -- contribute a
    new CRUD-like endpoint, a cross-cutting concern (auth, rate
@@ -15,7 +15,7 @@ kiln is designed to be extended at three levels:
    produces it.
 3. **Ship a new target.**  Build a generator for a different
    framework entirely by using ``foundry`` directly -- no
-   dependency on ``kiln``'s FastAPI-specific bits.
+   dependency on ``be``'s FastAPI-specific bits.
 
 This document covers all three, in increasing order of ambition.
 For background on the architecture, see :doc:`architecture`.
@@ -37,7 +37,7 @@ Step 1 -- write the class
 
    from foundry.engine import BuildContext
    from foundry.operation import operation
-   from kiln.operations.types import RouteHandler, RouteParam
+   from be.operations.types import RouteHandler, RouteParam
 
 
    @operation("bulk_create", scope="resource", requires=["create"])
@@ -82,7 +82,7 @@ A few things to notice:
 * The class name is irrelevant to the engine -- the name from the
   ``@operation(...)`` decorator is what matters.
 * ``scope="resource"`` means ``build()`` runs once per
-  :class:`~kiln.config.schema.ResourceConfig`.
+  :class:`~be.config.schema.ResourceConfig`.
 * ``requires=["create"]`` ensures the ``create`` operation builds
   first, so its schemas are available in the build store before this
   runs (useful if you want to inspect or extend them).
@@ -100,7 +100,7 @@ Add your operation to your package's ``pyproject.toml``:
    bulk_create = "my_pkg.ops:BulkCreate"
 
 ``foundry generate`` discovers all installed operations at startup, so
-as long as your package is ``pip install``\ ed alongside kiln the
+as long as your package is ``pip install``\ ed alongside be the
 operation is available.
 
 Step 3 -- opt resources in
@@ -138,7 +138,7 @@ Declare a ``when()`` method instead of relying on the opt-in list:
 
    from foundry.engine import BuildContext
    from foundry.operation import operation
-   from kiln.operations.types import RouteHandler
+   from be.operations.types import RouteHandler
 
 
    @operation(
@@ -178,7 +178,7 @@ Three important properties:
   existing objects in place; they produce no new outputs of their
   own.
 
-See ``src/kiln/operations/auth.py`` for the real-world auth
+See ``src/be/operations/auth.py`` for the real-world auth
 implementation.
 
 Augmenting vs producing
@@ -208,12 +208,12 @@ earlier ones in the same ``build`` call.
 Mutating output objects
 -----------------------
 
-Every type in ``foundry.outputs`` and ``kiln.operations.types``
+Every type in ``foundry.outputs`` and ``be.operations.types``
 is a mutable dataclass with helpers for safe modification:
 
 .. code-block:: python
 
-   from kiln.operations.types import RouteHandler, SchemaClass
+   from be.operations.types import RouteHandler, SchemaClass
 
    for handler in ctx.store.get_by_type(RouteHandler):
        handler.add_decorator("@cache(ttl=60)")
@@ -224,7 +224,7 @@ is a mutable dataclass with helpers for safe modification:
        if schema.name.endswith("Resource"):
            schema.add_field("cached_at", "datetime", optional=True)
 
-:attr:`~kiln.operations.types.RouteHandler.extra_imports` is the recommended way to add
+:attr:`~be.operations.types.RouteHandler.extra_imports` is the recommended way to add
 imports.  The assembler merges every handler's ``extra_imports`` into
 the route file's top-of-file import block automatically.
 
@@ -233,9 +233,9 @@ Swapping a renderer
 
 Every output type has a default renderer.  Op-specific
 ``RouteHandler`` subclasses register their renderers at the bottom of
-each ``kiln.operations.<op>`` module; the shared cross-cutting
+each ``be.operations.<op>`` module; the shared cross-cutting
 renderers (``SchemaClass``, ``EnumClass``, ``SerializerFn``,
-``StaticFile``, ``TestCase``) live in ``kiln.operations.renderers``.
+``StaticFile``, ``TestCase``) live in ``be.operations.renderers``.
 You can override or supplement any of these without changing the
 operation that produces the output.
 
@@ -245,7 +245,7 @@ registrations in order and uses the first whose predicate matches:
 
 .. code-block:: python
 
-   from kiln.operations.types import RouteHandler
+   from be.operations.types import RouteHandler
    from foundry.render import registry
 
    @registry.renders(
@@ -312,7 +312,7 @@ If you are generating code for something that has nothing to do with
 FastAPI (a Go CLI, a Terraform module, a gRPC service), you can ship
 your own plugin that registers as a ``foundry`` target.  Install it
 alongside ``foundry`` and the ``foundry`` CLI will discover and
-dispatch to it the same way it does for kiln.
+dispatch to it the same way it does for be.
 
 Step 1 -- write the generator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -370,7 +370,7 @@ Install your package and ``foundry generate --target mytarget --config
 ...`` works.  Raise subclasses of :class:`foundry.errors.CLIError` for
 user-facing mistakes; anything else will propagate with a traceback.
 
-You still need, as with kiln:
+You still need, as with be:
 
 * A Pydantic config schema for your target.
 * Your own operations.
@@ -420,9 +420,9 @@ Run your operations through the engine directly -- no CLI needed:
 
 .. code-block:: python
 
-   from kiln.config.schema import ProjectConfig
+   from be.config.schema import ProjectConfig
    from foundry.engine import Engine
-   from kiln.operations.types import RouteHandler
+   from be.operations.types import RouteHandler
 
    from my_pkg.ops import BulkCreate
 

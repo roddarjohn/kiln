@@ -45,7 +45,7 @@ def render_template(
 ) -> str:
     r"""Render *template_name* against *context* and return the raw result.
 
-    Every jinja call in foundry/kiln flows through this helper so
+    Every jinja call in foundry/be flows through this helper so
     whitespace policy lives at the call site, not hidden inside a
     render wrapper.  Callers handle trimming themselves:
 

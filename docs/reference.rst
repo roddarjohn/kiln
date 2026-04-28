@@ -8,69 +8,69 @@ Reference
 Config schema
 -------------
 
-All config files parse into a :class:`~kiln.config.schema.ProjectConfig`
+All config files parse into a :class:`~be.config.schema.ProjectConfig`
 instance.  The classes below correspond directly to the fields you
 write in ``.jsonnet`` / ``.json``.
 
-.. autoclass:: kiln.config.schema.ProjectConfig
+.. autoclass:: be.config.schema.ProjectConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.AppConfig
+.. autoclass:: be.config.schema.AppConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.App
+.. autoclass:: be.config.schema.App
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.ResourceConfig
+.. autoclass:: be.config.schema.ResourceConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.OperationConfig
+.. autoclass:: be.config.schema.OperationConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.ModifierConfig
+.. autoclass:: be.config.schema.ModifierConfig
    :members:
    :undoc-members:
 
-.. autodata:: kiln.config.schema.FieldType
+.. autodata:: be.config.schema.FieldType
    :no-value:
 
-.. autoclass:: kiln.config.schema.FieldSpec
+.. autoclass:: be.config.schema.FieldSpec
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.AuthConfig
+.. autoclass:: be.config.schema.AuthConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.DatabaseConfig
+.. autoclass:: be.config.schema.DatabaseConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.TelemetryConfig
+.. autoclass:: be.config.schema.TelemetryConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.FilterConfig
+.. autoclass:: be.config.schema.FilterConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.OrderConfig
+.. autoclass:: be.config.schema.OrderConfig
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.config.schema.PaginateConfig
+.. autoclass:: be.config.schema.PaginateConfig
    :members:
    :undoc-members:
 
 Field types
 ^^^^^^^^^^^
 
-The ``type`` field on :class:`~kiln.config.schema.FieldSpec` accepts:
+The ``type`` field on :class:`~be.config.schema.FieldSpec` accepts:
 
 .. list-table::
    :header-rows: 1
@@ -165,14 +165,14 @@ Nested fields are supported on read ops (``get`` / ``list``) only.
 Write-op request bodies (``create`` / ``update``) must use scalar
 fields.
 
-The ``kiln/fields.libsonnet`` helper library exposes a ``nested``
+The ``be/fields.libsonnet`` helper library exposes a ``nested``
 shortcut for common cases — see :doc:`usage` for examples.
 
 Built-in operations
 -------------------
 
 Every built-in operation is registered under the ``foundry.operations``
-entry-point group in kiln's own ``pyproject.toml``.  See :doc:`usage`
+entry-point group in be's own ``pyproject.toml``.  See :doc:`usage`
 for what each one generates and :doc:`extending` for the operation
 protocol.
 
@@ -185,35 +185,35 @@ protocol.
      - Scope
      - Description
    * - ``scaffold``
-     - :mod:`kiln.operations.scaffold`
+     - :mod:`be.operations.scaffold`
      - project
      - Two project-scope ops live here.  ``Scaffold`` always emits
        ``db/*_session.py``.  ``AuthScaffold`` emits the ``auth/``
        package when ``config.auth`` is set.
    * - ``get`` / ``list`` / ``create`` / ``update`` / ``delete``
-     - :mod:`kiln.operations.get`, :mod:`~kiln.operations.list`,
-       :mod:`~kiln.operations.create`, :mod:`~kiln.operations.update`,
-       :mod:`~kiln.operations.delete`
+     - :mod:`be.operations.get`, :mod:`~be.operations.list`,
+       :mod:`~be.operations.create`, :mod:`~be.operations.update`,
+       :mod:`~be.operations.delete`
      - resource
      - The five CRUD endpoints.  Each op lives in its own module
        alongside the FastAPI renderer for its output.
    * - ``action``
-     - :mod:`kiln.operations.action`
+     - :mod:`be.operations.action`
      - resource
      - Custom action endpoints: ``POST /{pk}/{slug}`` for per-instance
        actions, ``POST /{slug}`` for collection-level actions.
    * - ``auth``
-     - :mod:`kiln.operations.auth`
+     - :mod:`be.operations.auth`
      - resource
      - Cross-cutting augmenter.  Appends ``current_user`` dependency
        to every CRUD / action handler when ``config.auth`` is set.
    * - ``router``
-     - :mod:`kiln.operations.routing`
+     - :mod:`be.operations.routing`
      - app
      - Emits ``routes/__init__.py`` for one app, aggregating every
        resource router via ``include_router``.
    * - ``project_router``
-     - :mod:`kiln.operations.routing`
+     - :mod:`be.operations.routing`
      - project
      - Multi-app projects only.  Emits the top-level
        ``routes/__init__.py`` that mounts each app at its prefix.
@@ -221,7 +221,7 @@ protocol.
 Generated file layout
 ---------------------
 
-The table below summarises every file kiln can produce.  Paths are
+The table below summarises every file be can produce.  Paths are
 relative to the ``--out`` directory (or to the config's
 ``package_prefix`` when ``--out`` is omitted).  ``{module}`` is the
 app's ``module`` config field.  ``{name}`` is the lowercase,
@@ -342,45 +342,45 @@ Typed outputs
 Every operation's ``build`` method returns instances of the types
 below.  Framework-agnostic types live in ``foundry.outputs``;
 FastAPI-specific output dataclasses live in
-``kiln.operations.types``.
+``be.operations.types``.
 
 .. autoclass:: foundry.outputs.StaticFile
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.RouteHandler
+.. autoclass:: be.operations.types.RouteHandler
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.RouteParam
+.. autoclass:: be.operations.types.RouteParam
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.SchemaClass
+.. autoclass:: be.operations.types.SchemaClass
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.Field
+.. autoclass:: be.operations.types.Field
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.EnumClass
+.. autoclass:: be.operations.types.EnumClass
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.SerializerFn
+.. autoclass:: be.operations.types.SerializerFn
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.TestCase
+.. autoclass:: be.operations.types.TestCase
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.RouterMount
+.. autoclass:: be.operations.types.RouterMount
    :members:
    :undoc-members:
 
-.. autoclass:: kiln.operations.types.FieldsOptions
+.. autoclass:: be.operations.types.FieldsOptions
    :members:
    :undoc-members:
 
@@ -442,17 +442,17 @@ Jinja environment
 Stdlib reference
 ----------------
 
-The following ``.libsonnet`` files ship inside the kiln package and
-are importable from any config file using the ``kiln/`` prefix.
+The following ``.libsonnet`` files ship inside the be package and
+are importable from any config file using the ``be/`` prefix.
 
-``kiln/auth/jwt.libsonnet``
+``be/auth/jwt.libsonnet``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Configures JWT authentication.
 
 .. code-block:: jsonnet
 
-   local auth = import 'kiln/auth/jwt.libsonnet';
+   local auth = import 'be/auth/jwt.libsonnet';
 
    auth.jwt({
      secret_env:            "JWT_SECRET",
@@ -466,14 +466,14 @@ To supply a custom ``get_current_user`` dependency instead of the
 generated JWT flow, set ``get_current_user_fn`` to a dotted import
 path.  In that case ``verify_credentials_fn`` is not required.
 
-``kiln/db/databases.libsonnet``
+``be/db/databases.libsonnet``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Configures async PostgreSQL connections.
 
 .. code-block:: jsonnet
 
-   local db = import 'kiln/db/databases.libsonnet';
+   local db = import 'be/db/databases.libsonnet';
 
    db.postgres("primary", {
      url_env:       "DATABASE_URL",
@@ -491,7 +491,7 @@ Resources that omit ``db_key`` use the database with ``default: true``.
 pgqueuer integration
 ^^^^^^^^^^^^^^^^^^^^
 
-kiln does not scaffold pgqueuer wiring.  See :doc:`pgqueuer` for
+be does not scaffold pgqueuer wiring.  See :doc:`pgqueuer` for
 the full guide — the two helpers in :mod:`ingot.queue`
 (:func:`ingot.queue.get_queue` for transactional-outbox enqueue,
 :func:`ingot.queue.open_worker_driver` for the SQLAlchemy→asyncpg

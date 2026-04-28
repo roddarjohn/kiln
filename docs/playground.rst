@@ -1,12 +1,12 @@
 Playground
 ==========
 
-The ``playground/`` directory in the kiln repository is a runnable
-multi-app FastAPI project that demonstrates kiln's project mode.  It
+The ``playground/`` directory in the be repository is a runnable
+multi-app FastAPI project that demonstrates be's project mode.  It
 generates a blog API and an inventory API from Jsonnet configs, mounts
 them both under ``/v1/``, and serves them with uvicorn.
 
-It is the fastest way to see kiln end-to-end without setting up your
+It is the fastest way to see be end-to-end without setting up your
 own project.
 
 Structure
@@ -96,8 +96,8 @@ shared auth and databases, then lists each app with its URL prefix:
 
 .. code-block:: jsonnet
 
-   local auth = import "kiln/auth/jwt.libsonnet";
-   local db   = import "kiln/db/databases.libsonnet";
+   local auth = import "be/auth/jwt.libsonnet";
+   local db   = import "be/db/databases.libsonnet";
 
    {
      auth: auth.jwt({ secret_env: "JWT_SECRET" }),
@@ -114,7 +114,7 @@ shared auth and databases, then lists each app with its URL prefix:
    }
 
 Each app config (``blog.jsonnet``, ``inventory.jsonnet``) is a
-self-contained kiln config with its own ``module``, ``resources``.
+self-contained be config with its own ``module``, ``resources``.
 Kiln merges the project-level ``auth`` and ``databases``
 into each app config before generating, so app configs do not need to
 redeclare them.

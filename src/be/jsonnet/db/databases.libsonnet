@@ -1,7 +1,7 @@
-// kiln stdlib — database connection helpers
+// be stdlib — database connection helpers
 //
 // Usage:
-//   local db = import 'kiln/db/databases.libsonnet';
+//   local db = import 'be/db/databases.libsonnet';
 //
 //   databases: [
 //     db.postgres("primary"),                          // default key

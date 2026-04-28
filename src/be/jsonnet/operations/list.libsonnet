@@ -1,10 +1,10 @@
-// kiln/operations/list.libsonnet
+// be/operations/list.libsonnet
 //
 // Bundles a list op with its optional filter / order / paginate
 // modifiers into the single nested shape the engine consumes.
 //
 // Usage:
-//   local list = import "kiln/operations/list.libsonnet";
+//   local list = import "be/operations/list.libsonnet";
 //
 //   operations: [
 //     list.searchable(

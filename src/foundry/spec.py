@@ -14,7 +14,7 @@ class GeneratedFile:
         if_exists: Per-file write policy honored by
             :func:`foundry.output.write_files`.  ``"overwrite"``
             (the default) always replaces the target on disk --
-            the historical behaviour every kiln scaffold output
+            the historical behaviour every be scaffold output
             relied on.  ``"skip"`` writes the file only if it
             does not yet exist; right for one-shot scaffolding
             (e.g. be_root's bootstrap) where users edit the

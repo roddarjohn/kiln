@@ -1,4 +1,4 @@
-"""Generate src/kiln/jsonnet/pgcraft/plugins.libsonnet from pgcraft.
+"""Generate src/be/jsonnet/pgcraft/plugins.libsonnet from pgcraft.
 
 Walks pgcraft.plugins.* and pgcraft.extensions.* to discover Plugin
 subclasses, inspects their __init__ signatures, and emits a Jsonnet
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "src" / "kiln" / "jsonnet" / "pgcraft" / "plugins.libsonnet"
+OUT = ROOT / "src" / "be" / "jsonnet" / "pgcraft" / "plugins.libsonnet"
 
 # Params that are pgcraft-internal context keys or require Callable values.
 # These are never exposed in the Jsonnet stdlib.
@@ -209,13 +209,13 @@ def generate() -> str:
                 noarg_lines.append(_render_noarg_plugin(fq_path, cls, alias))
 
     sections: list[str] = [
-        "// kiln stdlib — pgcraft plugin helpers",
+        "// be stdlib — pgcraft plugin helpers",
         "//",
         "// Auto-generated from pgcraft introspection — do not edit by hand.",
         "// Re-generate with: just generate-pgcraft-stdlib",
         "//",
         "// Usage:",
-        "//   local plugins = import 'kiln/pgcraft/plugins.libsonnet';",
+        "//   local plugins = import 'be/pgcraft/plugins.libsonnet';",
         "//",
         "//   // PK plugin (use as primary_key value on a field):",
         "//   field.uuid('id', primary_key=plugins.pk.uuid_v4)",

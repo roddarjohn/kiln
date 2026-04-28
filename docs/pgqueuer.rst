@@ -12,7 +12,7 @@ The queue lives in the same database as your app, so producer-side
 enqueue can join the request's transaction (transactional outbox)
 and you don't run a separate broker.
 
-kiln contributes two helpers in :mod:`ingot.queue` that bridge
+be contributes two helpers in :mod:`ingot.queue` that bridge
 SQLAlchemy and pgqueuer:
 
 * :func:`ingot.queue.get_queue` — wraps a SQLAlchemy
@@ -24,14 +24,14 @@ SQLAlchemy and pgqueuer:
   the same env var works for both halves.
 
 Everything else (defining tasks, running the worker, tuning
-entrypoints) is straight pgqueuer — kiln does not wrap, scaffold,
+entrypoints) is straight pgqueuer — be does not wrap, scaffold,
 or rename pgqueuer's API.
 
 Prerequisites
 -------------
 
 ``pgqueuer[asyncpg]`` is already a runtime dep of ``kiln-generator``,
-pulled in transitively when you install kiln.  No extra install is
+pulled in transitively when you install be.  No extra install is
 needed.
 
 You need PostgreSQL 9.5 or newer (any version with ``LISTEN`` /
@@ -178,7 +178,7 @@ factory each pod uses are pulled.
 Enqueueing from a request
 -------------------------
 
-This is where kiln's :func:`~ingot.queue.get_queue` shines.  It
+This is where be's :func:`~ingot.queue.get_queue` shines.  It
 returns a ``pgqueuer.Queries`` bound to the asyncpg connection
 underlying your SQLAlchemy session — so ``enqueue`` runs in the
 **same transaction** as your other writes.  If the request commits,
@@ -207,7 +207,7 @@ automatically):
            ["index_article"],
            [str(article_id).encode()],
        )
-       # The session commit (handled by kiln) makes both the row
+       # The session commit (handled by be) makes both the row
        # update AND the job insert durable atomically.  Roll back
        # and neither one happened.
 
@@ -309,6 +309,6 @@ after upgrading pgqueuer).
 Schema migrations
 ^^^^^^^^^^^^^^^^^
 
-kiln's alembic chain doesn't manage pgqueuer's tables.  Don't try
+be's alembic chain doesn't manage pgqueuer's tables.  Don't try
 to put them in there — let pgqueuer's CLI own the schema.  This
 is the pattern recommended by pgqueuer itself.

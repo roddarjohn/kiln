@@ -1,6 +1,6 @@
 """Action-function introspection.
 
-Used by the :class:`~kiln.operations.action.Action` operation to
+Used by the :class:`~be.operations.action.Action` operation to
 inspect a consumer-supplied callable and decide what code to
 generate.  The function's parameters classify the action as either
 *object* (operates on one model instance) or *collection* (operates

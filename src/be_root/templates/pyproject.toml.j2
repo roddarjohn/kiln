@@ -20,14 +20,14 @@ dependencies = [
   "asyncpg>=0.29",
   "uvicorn[standard]>=0.30",
   # ``pyjwt`` powers the JWT helpers in ``ingot.auth`` that
-  # kiln's auth scaffold composes; ``python-multipart`` is what
+  # be's auth scaffold composes; ``python-multipart`` is what
   # FastAPI uses to parse OAuth2-style form bodies on the
   # generated ``POST /auth/token`` route.  Cheap to ship even
   # when auth is off, expensive to discover missing later.
   "pyjwt>=2.0",
   "python-multipart>=0.0.22",
 {% if psycopg %}
-  # psycopg powers the sync engine kiln's auth.validate_login
+  # psycopg powers the sync engine be's auth.validate_login
   # uses.  The generated ``POST /auth/token`` route is sync (it
   # consumes a plain BaseModel, not a coroutine), so the user
   # lookup can't ride the asyncpg-backed session pool the rest
@@ -80,9 +80,9 @@ ignore = [
   "TC003",   # datetime used at runtime by SQLAlchemy
 ]
 "**/actions.py" = [
-  "ARG001",  # action signatures match kiln's expected interface
-  "TC001",   # model imports used at runtime by kiln
-  "TC002",   # AsyncSession used at runtime by kiln
+  "ARG001",  # action signatures match be's expected interface
+  "TC001",   # model imports used at runtime by be
+  "TC002",   # AsyncSession used at runtime by be
 ]
 "tests/**" = [
   "S101",

@@ -5,14 +5,14 @@ Constructs :data:`target` and exposes it via the
 ``pyproject.toml``.  At build time foundry walks
 ``be_root.operations`` (the entry-point group named in
 ``operations_entry_point`` below) to assemble the per-build
-registry; be_root's ops never end up in kiln's registry, and
+registry; be_root's ops never end up in be's registry, and
 vice versa.
 """
 
 from pathlib import Path
 
-from foundry.target import Target
 from be_root.config import RootConfig
+from foundry.target import Target
 
 _HERE = Path(__file__).parent
 

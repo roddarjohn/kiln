@@ -12,7 +12,7 @@ constructed and before it is mounted::
     init_telemetry(app)
 
 The function is decorated with :func:`ingot.utils.run_once`, so
-a second invocation (e.g. a test reload, or a second kiln tree
+a second invocation (e.g. a test reload, or a second be tree
 imported into the same process) is a silent no-op rather than a
 duplicate provider install.
 

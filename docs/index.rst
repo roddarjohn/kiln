@@ -1,13 +1,13 @@
-kiln
+be
 ====
 
 .. warning::
 
-   kiln is in **pre-alpha**. APIs may change between releases.
+   be is in **pre-alpha**. APIs may change between releases.
 
-kiln is a CLI for generating FastAPI routes and Pydantic schemas from
+be is a CLI for generating FastAPI routes and Pydantic schemas from
 a declarative config file.  It ships an extensible architecture --
-``foundry`` is the generic code-generation engine, ``kiln`` is the
+``foundry`` is the generic code-generation engine, ``be`` is the
 FastAPI generator built on top of it.
 
 .. toctree::

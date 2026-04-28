@@ -14,9 +14,9 @@ re-bootstrap" rather than expecting be_root to merge them.
 Run with::
 
     just serve         # hot-reload dev server
-    just fresh         # regenerate kiln output, then serve
+    just fresh         # regenerate be output, then serve
 
-Routes are produced by ``kiln`` from ``config/project.jsonnet``
+Routes are produced by ``be`` from ``config/project.jsonnet``
 and land under ``{{ package_prefix }}/``; this module just mounts
 the aggregated router at ``/v1``.
 """

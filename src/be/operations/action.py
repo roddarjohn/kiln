@@ -4,31 +4,31 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
+from be.config.schema import PYTHON_TYPES
+from be.operations._introspect import introspect_action_fn
+from be.operations.renderers import utils_imports
+from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name
 from foundry.operation import operation
-from kiln.config.schema import PYTHON_TYPES
-from kiln.operations._introspect import introspect_action_fn
-from kiln.operations.renderers import utils_imports
-from kiln.operations.types import RouteHandler, RouteParam, TestCase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from foundry.engine import BuildContext
-    from kiln.config.schema import (
+    from be.config.schema import (
         OperationConfig,
         ProjectConfig,
         ResourceConfig,
     )
+    from foundry.engine import BuildContext
 
 
 @operation("action", scope="operation", dispatch_on="type")
 class Action:
     """Custom action endpoint via function introspection.
 
-    Dispatches on :attr:`~kiln.config.schema.OperationConfig.type`
+    Dispatches on :attr:`~be.config.schema.OperationConfig.type`
     ``== "action"``.  Every action config declares ``type: "action"``
-    explicitly (typically via ``kiln/resources/presets.libsonnet``),
+    explicitly (typically via ``be/resources/presets.libsonnet``),
     with a user-defined ``name`` and the ``fn`` import path to
     introspect.
     """

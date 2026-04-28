@@ -1,14 +1,10 @@
-"""Tests for kiln.operations — scaffold, routing, crud, action."""
+"""Tests for be.operations — scaffold, routing, crud, action."""
 
 from unittest.mock import patch
 
 from pydantic import BaseModel
 
-from foundry.engine import BuildContext
-from foundry.outputs import StaticFile
-from foundry.scope import PROJECT, Scope, ScopeTree
-from foundry.store import BuildStore
-from kiln.config.schema import (
+from be.config.schema import (
     App,
     AppConfig,
     AuthConfig,
@@ -23,16 +19,16 @@ from kiln.config.schema import (
     ResourceConfig,
     TelemetryConfig,
 )
-from kiln.operations.create import Create
-from kiln.operations.delete import Delete
-from kiln.operations.filter import Filter
-from kiln.operations.get import Get
-from kiln.operations.list import List
-from kiln.operations.order import Order
-from kiln.operations.paginate import Paginate
-from kiln.operations.routing import ProjectRouter, Router
-from kiln.operations.scaffold import AuthScaffold, Scaffold
-from kiln.operations.types import (
+from be.operations.create import Create
+from be.operations.delete import Delete
+from be.operations.filter import Filter
+from be.operations.get import Get
+from be.operations.list import List
+from be.operations.order import Order
+from be.operations.paginate import Paginate
+from be.operations.routing import ProjectRouter, Router
+from be.operations.scaffold import AuthScaffold, Scaffold
+from be.operations.types import (
     EnumClass,
     Field,
     RouteHandler,
@@ -41,7 +37,11 @@ from kiln.operations.types import (
     TestCase,
     _field_dicts,
 )
-from kiln.operations.update import Update
+from be.operations.update import Update
+from foundry.engine import BuildContext
+from foundry.outputs import StaticFile
+from foundry.scope import PROJECT, Scope, ScopeTree
+from foundry.store import BuildStore
 
 # -------------------------------------------------------------------
 # Helpers
@@ -1620,7 +1620,7 @@ class TestAction:
 
     def test_action_object_level(self):
         """Object-level action includes pk in path."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1640,12 +1640,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="blog.actions.publish")
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))
@@ -1665,7 +1665,7 @@ class TestAction:
 
     def test_action_collection_level(self):
         """Collection-level action has no pk in path."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1685,12 +1685,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="blog.actions.bulk_import")
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))
@@ -1703,7 +1703,7 @@ class TestAction:
 
     def test_action_returns_none_emits_204(self):
         """``-> None`` action: 204 status, no response model, no return."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1723,12 +1723,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="blog.actions.archive")
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))
@@ -1744,7 +1744,7 @@ class TestAction:
 
     def test_action_status_code_override(self):
         """Caller-supplied ``status_code`` wins over the framework default."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1764,12 +1764,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="blog.actions.publish", status_code=202)
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))
@@ -1782,7 +1782,7 @@ class TestAction:
 
     def test_action_model_class_param_propagates_to_body_context(self):
         """``type[X]`` param name flows to the template so it can pass it."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1802,12 +1802,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="ingot.files.request_upload")
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))
@@ -1819,7 +1819,7 @@ class TestAction:
 
     def test_action_status_code_overrides_default_204(self):
         """Override beats the ``-> None`` 204 default too."""
-        from kiln.operations._introspect import IntrospectedAction
+        from be.operations._introspect import IntrospectedAction
 
         resource = ResourceConfig(model="blog.models.Post")
 
@@ -1839,12 +1839,12 @@ class TestAction:
         )
         ctx = _operation_ctx(resource, op_config)
 
-        from kiln.operations.action import Action
+        from be.operations.action import Action
 
         opts = Action.Options(fn="blog.actions.reset", status_code=205)
 
         with patch(
-            "kiln.operations.action.introspect_action_fn",
+            "be.operations.action.introspect_action_fn",
             return_value=info,
         ):
             result = list(Action().build(ctx, opts))

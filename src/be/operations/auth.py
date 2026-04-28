@@ -3,22 +3,22 @@
 Resource-scoped, ``after_children=True``, emits nothing.  Stamps a
 ``Depends(get_session)`` parameter onto each handler whose op has
 effective ``require_auth`` and flips
-:attr:`~kiln.operations.types.TestCase.requires_auth` to match.
+:attr:`~be.operations.types.TestCase.requires_auth` to match.
 """
 
 from typing import TYPE_CHECKING
 
+from be.operations.types import RouteHandler, TestCase
 from foundry.naming import prefix_import
 from foundry.operation import operation
-from kiln.operations.types import RouteHandler, TestCase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pydantic import BaseModel
 
+    from be.config.schema import ProjectConfig, ResourceConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ProjectConfig, ResourceConfig
 
 
 @operation("auth", scope="resource", after_children=True)

@@ -12,8 +12,8 @@ effect.
 
 from pathlib import Path
 
-from foundry.target import Target
 from be.config.schema import ProjectConfig
+from foundry.target import Target
 
 _HERE = Path(__file__).parent
 

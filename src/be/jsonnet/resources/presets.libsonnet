@@ -1,9 +1,9 @@
-// kiln/resources/presets.libsonnet
+// be/resources/presets.libsonnet
 //
 // Helpers for common resource configurations.
 //
 // Usage:
-//   local resource = import "kiln/resources/presets.libsonnet";
+//   local resource = import "be/resources/presets.libsonnet";
 //
 //   resources: [
 //     {

@@ -9,12 +9,12 @@ fragments by path, folds snippets into the file's context, and
 renders each wrapper template once.
 
 Per-op RouteHandler rendering is owned by each op module (e.g.
-:mod:`kiln.operations.list`).  Those modules call
+:mod:`be.operations.list`).  Those modules call
 ``build_handler_fragment`` with their op-specific body template,
 context, and import tuple.  This module keeps only the
 cross-cutting renderers (schema / enum / serializer / testcase /
 static) plus a generic
-:class:`~kiln.operations.types.RouteHandler` fallback for
+:class:`~be.operations.types.RouteHandler` fallback for
 hand-written handlers that aren't one of the registered
 subclasses.
 """
@@ -22,12 +22,9 @@ subclasses.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from foundry.imports import ImportCollector
-from foundry.naming import Name, prefix_import
-from foundry.render import FileFragment, Fragment, SnippetFragment, registry
-from kiln.config.schema import PYTHON_TYPES
-from kiln.operations.list import ListResult
-from kiln.operations.types import (
+from be.config.schema import PYTHON_TYPES
+from be.operations.list import ListResult
+from be.operations.types import (
     EnumClass,
     Field,
     RouteHandler,
@@ -35,12 +32,15 @@ from kiln.operations.types import (
     SerializerFn,
     TestCase,
 )
+from foundry.imports import ImportCollector
+from foundry.naming import Name, prefix_import
+from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from be.config.schema import ResourceConfig
     from foundry.render import RenderCtx
-    from kiln.config.schema import ResourceConfig
 
 
 # -------------------------------------------------------------------

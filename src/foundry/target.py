@@ -1,7 +1,7 @@
 """Target plugin protocol and discovery.
 
 A *target* is the glue between foundry's generic engine and a
-concrete framework (FastAPI + SQLAlchemy in kiln's case).  A
+concrete framework (FastAPI + SQLAlchemy in be's case).  A
 target is pure data:
 
 * the pydantic schema its config files validate against,
@@ -51,7 +51,7 @@ class Target:
             environment rooted here.
         operations_entry_point: Entry-point group name where the
             target's ``@operation``-decorated classes are
-            registered, e.g. ``"kiln.operations"`` or
+            registered, e.g. ``"be.operations"`` or
             ``"be_root.operations"``.  At build time the
             pipeline calls
             :func:`~foundry.operation.load_registry` against

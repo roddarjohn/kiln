@@ -14,10 +14,8 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
-from foundry.naming import Name
-from foundry.operation import operation
-from kiln.config.schema import FieldSpec  # noqa: TC001
-from kiln.operations.types import (
+from be.config.schema import FieldSpec  # noqa: TC001
+from be.operations.types import (
     RouteHandler,
     RouteParam,
     SchemaClass,
@@ -25,17 +23,19 @@ from kiln.operations.types import (
     TestCase,
     _construct_dump,
 )
+from foundry.naming import Name
+from foundry.operation import operation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from foundry.engine import BuildContext
-    from kiln.config.schema import (
+    from be.config.schema import (
         ModifierConfig,
         OperationConfig,
         ProjectConfig,
         ResourceConfig,
     )
+    from foundry.engine import BuildContext
 
 
 @dataclass
@@ -43,7 +43,7 @@ class ListResult:
     """Direct references to everything the list op emits.
 
     Not a rendered output (see the no-op renderer registered in
-    :mod:`kiln.operations.renderers`) — just a typed handle that
+    :mod:`be.operations.renderers`) — just a typed handle that
     modifier ops fetch to amend specific objects by name rather
     than scanning the store.
     """

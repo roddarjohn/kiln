@@ -1,4 +1,4 @@
-"""Pydantic models for kiln configuration."""
+"""Pydantic models for be configuration."""
 
 from typing import Annotated, Any, Literal
 
@@ -45,7 +45,7 @@ PYTHON_TYPES: dict[FieldType, str] = {
     "date": "date",
     "json": "dict[str, Any]",
 }
-"""Python annotation strings for each :data:`~kiln.config.schema.FieldType`.
+"""Python annotation strings for each :data:`~be.config.schema.FieldType`.
 
 Used by op builders to render pk/field type annotations into the
 generated Pydantic schemas and route handlers.
@@ -55,7 +55,7 @@ generated Pydantic schemas and route handlers.
 class AuthConfig(BaseModel):
     """Authentication configuration.
 
-    kiln owns the auth *package* (dependency + login/logout routes);
+    be owns the auth *package* (dependency + login/logout routes);
     the consumer owns the three types that characterise their domain:
 
     * :attr:`credentials_schema` -- Pydantic model (or discriminated
@@ -278,7 +278,7 @@ class TelemetryConfig(BaseModel):
 
     The OTel SDK already reads ``OTEL_EXPORTER_OTLP_ENDPOINT`` and
     ``OTEL_EXPORTER_OTLP_HEADERS`` natively when the exporter is
-    constructed -- kiln does not duplicate that lookup, so override
+    constructed -- be does not duplicate that lookup, so override
     the *values* of the standard variables in your deployment
     config; there are no kiln-side knobs for the variable *names*."""
 
@@ -341,7 +341,7 @@ class DatabaseConfig(BaseModel):
     def session_module(self) -> str:
         """Dotted module path of the scaffolded session file.
 
-        Matches what :class:`~kiln.operations.scaffold.Scaffold` emits at
+        Matches what :class:`~be.operations.scaffold.Scaffold` emits at
         ``db/{key}_session.py``.
         """
         return f"db.{self.key}_session"
@@ -356,7 +356,7 @@ class FieldSpec(BaseModel):
     """A named, typed field — used in operation schemas and action params.
 
     Most fields are scalars: ``{name, type}`` where ``type`` is one
-    of the :data:`~kiln.config.schema.FieldType` values.  A field
+    of the :data:`~be.config.schema.FieldType` values.  A field
     can also be *nested* — a dump of a related model — by setting
     ``type: "nested"`` and
     supplying ``model`` (dotted import path to the related
@@ -440,8 +440,8 @@ class ModifierConfig(BaseModel):
     Modifiers nest inside their parent op's config (under
     ``modifiers: [...]``) and augment the parent's outputs.  The
     ``type`` field discriminates which modifier op consumes the
-    entry — ``"filter"`` routes to :class:`~kiln.operations.filter.Filter`,
-    ``"order"`` to :class:`~kiln.operations.order.Order`, etc.  All
+    entry — ``"filter"`` routes to :class:`~be.operations.filter.Filter`,
+    ``"order"`` to :class:`~be.operations.order.Order`, etc.  All
     other keys are collected into :attr:`options` via Pydantic's
     ``extra="allow"`` and fed to the modifier op's own ``Options``
     model.
@@ -600,7 +600,7 @@ class App(BaseModel):
 
 
 class ProjectConfig(FoundryConfig):
-    """Top-level kiln configuration.
+    """Top-level be configuration.
 
     A project is a collection of apps plus shared infrastructure
     (auth, databases, framework target).  Resources always live

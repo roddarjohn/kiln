@@ -1,12 +1,12 @@
-// Project-level configuration for kiln.
+// Project-level configuration for be.
 //
 // Declares auth, databases, and all apps in one place.
 // Run with:
 //   just generate          (from playground/)
 //   just rg                (reset + generate)
 
-local auth = import "kiln/auth/jwt.libsonnet";
-local db = import "kiln/db/databases.libsonnet";
+local auth = import "be/auth/jwt.libsonnet";
+local db = import "be/db/databases.libsonnet";
 
 {
   // -------------------------------------------------------------------------

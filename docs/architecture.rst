@@ -5,7 +5,7 @@ Architecture
    :local:
    :depth: 2
 
-kiln is split into two packages that serve very different audiences:
+be is split into two packages that serve very different audiences:
 
 ``foundry`` -- a generic, framework-agnostic code-generation engine.
    Provides the build pipeline, scope discovery, operation protocol,
@@ -15,18 +15,18 @@ kiln is split into two packages that serve very different audiences:
    dispatches to a plugin-provided :class:`~foundry.target.Target`
    discovered via the ``foundry.targets`` entry-point group.
 
-``kiln`` -- a concrete FastAPI / SQLAlchemy generator registered as a ``foundry`` target.
+``be`` -- a concrete FastAPI / SQLAlchemy generator registered as a ``foundry`` target.
    Defines the config schema, ships a set of built-in operations (CRUD,
    actions, scaffolding, routing), and a set of renderers backed by
-   Jinja2 templates.  Registers itself as the ``kiln`` target so
+   Jinja2 templates.  Registers itself as the ``be`` target so
    ``foundry generate`` can load and run it.
 
 Keeping the two apart means you can:
 
 * Build a completely different generator (e.g. a TypeScript client, a
   Go server, a gRPC skeleton) on ``foundry`` without touching
-  ``kiln``.
-* Extend the FastAPI generator in ``kiln`` without having to know
+  ``be``.
+* Extend the FastAPI generator in ``be`` without having to know
   anything about the engine internals.
 
 The build pipeline
@@ -61,7 +61,7 @@ Every ``foundry generate`` invocation flows through the same four steps:
                              write_files
 
 1. **Load** the config file.  :func:`foundry.config.load_config` parses
-   JSON or Jsonnet and validates it against :class:`~kiln.config.schema.ProjectConfig`.
+   JSON or Jsonnet and validates it against :class:`~be.config.schema.ProjectConfig`.
 
 2. **Build** runs every registered operation.
    :class:`~foundry.engine.Engine` walks the config tree scope by
@@ -88,7 +88,7 @@ A *scope* is a level in the config tree at which an operation runs.
 The engine discovers scopes by inspecting the config model's fields:
 any field whose annotation is ``list[SomeBaseModel]`` becomes a scope.
 
-For the current :class:`~kiln.config.schema.ProjectConfig`:
+For the current :class:`~be.config.schema.ProjectConfig`:
 
 .. list-table::
    :header-rows: 1
@@ -165,7 +165,7 @@ Operations do not produce strings or files directly.  They produce
 mutable dataclass instances.  The framework-agnostic
 :class:`~foundry.outputs.StaticFile` lives in
 ``foundry.outputs``; the FastAPI-specific output types live in
-``kiln.operations.types``:
+``be.operations.types``:
 
 .. list-table::
    :header-rows: 1
@@ -173,19 +173,19 @@ mutable dataclass instances.  The framework-agnostic
 
    * - Type
      - Represents
-   * - :class:`~kiln.operations.types.RouteHandler`
+   * - :class:`~be.operations.types.RouteHandler`
      - One FastAPI route handler function.
-   * - :class:`~kiln.operations.types.SchemaClass`
+   * - :class:`~be.operations.types.SchemaClass`
      - One Pydantic model class.
-   * - :class:`~kiln.operations.types.SerializerFn`
+   * - :class:`~be.operations.types.SerializerFn`
      - A model-to-schema serializer function.
-   * - :class:`~kiln.operations.types.TestCase`
+   * - :class:`~be.operations.types.TestCase`
      - Metadata for a generated pytest test.
-   * - :class:`~kiln.operations.types.RouterMount`
+   * - :class:`~be.operations.types.RouterMount`
      - One ``include_router`` call in an app/project router.
    * - :class:`~foundry.outputs.StaticFile`
      - A file rendered directly from a template (auth, db session).
-   * - :class:`~kiln.operations.types.EnumClass`
+   * - :class:`~be.operations.types.EnumClass`
      - An enum definition (used for list-sort fields).
 
 Every type is a plain dataclass, so later operations can freely
@@ -193,7 +193,7 @@ inspect and mutate earlier output:
 
 .. code-block:: python
 
-   from kiln.operations.types import RouteHandler
+   from be.operations.types import RouteHandler
 
    for handler in ctx.store.get_by_type(RouteHandler):
        handler.extra_deps.append("user: Annotated[dict, Depends(...)]")
@@ -216,7 +216,7 @@ string.  Renderers live in a
 
 .. code-block:: python
 
-   from kiln.operations.types import RouteHandler
+   from be.operations.types import RouteHandler
    from foundry.render import RenderRegistry
 
    registry = RenderRegistry()
@@ -236,10 +236,10 @@ The ``when`` parameter selects between competing renderers:
        ...  # called instead when config.grpc is truthy
 
 Kiln's built-in renderers are colocated with their operations:
-op-specific :class:`~kiln.operations.types.RouteHandler` subclasses register at the bottom
-of each op module (``kiln.operations.get``, ``kiln.operations.list``,
+op-specific :class:`~be.operations.types.RouteHandler` subclasses register at the bottom
+of each op module (``be.operations.get``, ``be.operations.list``,
 …), and the shared cross-cutting renderers plus fragment-builder
-helpers live in ``kiln.operations.renderers``.  All registrations run
+helpers live in ``be.operations.renderers``.  All registrations run
 at module import time and populate the module-level
 :data:`foundry.render.registry` singleton; loading operations via
 the ``foundry.operations`` entry-point group is therefore enough to
@@ -255,7 +255,7 @@ The assembler (:mod:`foundry.assembler`) is the last step.  It:
    ``routes/{name}.py``).
 2. Runs each output through its renderer.
 3. Collects and deduplicates imports from
-   :attr:`~kiln.operations.types.RouteHandler.extra_imports` and schema references.
+   :attr:`~be.operations.types.RouteHandler.extra_imports` and schema references.
 4. Renders the *outer* template
    (``fastapi/route.py.j2``, ``fastapi/schema_outer.py.j2``) with the
    collected snippets and import list.
@@ -271,23 +271,23 @@ Discovery via entry points
 
 Operations are loaded from the ``foundry.operations`` entry-point
 group at import time.  From foundry's
-perspective, kiln is just one of potentially many packages that
-register operations; kiln's built-ins live in kiln's own
+perspective, be is just one of potentially many packages that
+register operations; be's built-ins live in be's own
 ``pyproject.toml``:
 
 .. code-block:: toml
 
    [project.entry-points."foundry.operations"]
-   scaffold       = "kiln.operations.scaffold:Scaffold"
-   get            = "kiln.operations.get:Get"
-   list           = "kiln.operations.list:List"
-   create         = "kiln.operations.create:Create"
-   update         = "kiln.operations.update:Update"
-   delete         = "kiln.operations.delete:Delete"
-   action         = "kiln.operations.action:Action"
-   auth           = "kiln.operations.auth:Auth"
-   router         = "kiln.operations.routing:Router"
-   project_router = "kiln.operations.routing:ProjectRouter"
+   scaffold       = "be.operations.scaffold:Scaffold"
+   get            = "be.operations.get:Get"
+   list           = "be.operations.list:List"
+   create         = "be.operations.create:Create"
+   update         = "be.operations.update:Update"
+   delete         = "be.operations.delete:Delete"
+   action         = "be.operations.action:Action"
+   auth           = "be.operations.auth:Auth"
+   router         = "be.operations.routing:Router"
+   project_router = "be.operations.routing:ProjectRouter"
 
 Third-party packages register their own operations under the same
 group.  ``foundry generate`` discovers all installed operations at
@@ -298,12 +298,12 @@ Targets register under a second entry-point group,
 dataclass carrying four fields -- ``name``, the pydantic ``schema``,
 a ``template_dir``, and an optional ``jsonnet_stdlib_dir`` -- which
 is everything foundry needs to load config, build the Jinja
-environment, and assemble output.  kiln's own registration:
+environment, and assemble output.  be's own registration:
 
 .. code-block:: toml
 
    [project.entry-points."foundry.targets"]
-   kiln = "kiln.target:target"
+   be = "be.target:target"
 
 When exactly one target is installed, ``foundry generate`` picks it
 automatically; with multiple, the user selects by name via
@@ -334,7 +334,7 @@ Source layout
    │   ├── spec.py             # GeneratedFile
    │   └── output.py           # write_files
    │
-   └── kiln/                   # FastAPI target registered with foundry
+   └── be/                   # FastAPI target registered with foundry
        ├── target.py           # Target instance (data only)
        ├── config/             # Pydantic config schema
        ├── operations/         # built-in @operation classes
@@ -351,7 +351,7 @@ Source layout
        │   ├── _shared.py      # helpers shared by the per-op modules
        │   ├── _introspect.py  # action-fn introspection
        │   └── _list_config.py # FilterConfig, OrderConfig, PaginateConfig
-       ├── jsonnet/            # jsonnet stdlib exposed as `kiln/...`
+       ├── jsonnet/            # jsonnet stdlib exposed as `be/...`
        ├── templates/          # Jinja2 templates
        │   ├── fastapi/        # ops/, schema_parts/, outer templates
        │   └── init/           # auth + db session templates

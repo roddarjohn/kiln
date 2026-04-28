@@ -1,5 +1,5 @@
-// kiln stdlib — auth config helper
-// Usage: local auth = import 'kiln/auth/jwt.libsonnet';
+// be stdlib — auth config helper
+// Usage: local auth = import 'be/auth/jwt.libsonnet';
 //        auth.jwt({
 //          credentials_schema: "myapp.auth.LoginCredentials",
 //          session_schema: "myapp.auth.Session",
@@ -7,7 +7,7 @@
 //          sources: ["bearer", "cookie"],  // optional, defaults to ["bearer"]
 //        })
 //
-// The consumer owns the three types; kiln owns the auth package
+// The consumer owns the three types; be owns the auth package
 // (get_session dep + login/logout routes).  See ingot.auth for the
 // runtime primitives the generated code composes.
 {

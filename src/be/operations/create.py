@@ -2,10 +2,8 @@
 
 from typing import TYPE_CHECKING, cast
 
-from foundry.naming import Name
-from foundry.operation import operation
-from kiln.config.schema import PYTHON_TYPES, FieldType
-from kiln.operations.types import (
+from be.config.schema import PYTHON_TYPES, FieldType
+from be.operations.types import (
     FieldsOptions,
     RouteHandler,
     RouteParam,
@@ -13,16 +11,18 @@ from kiln.operations.types import (
     TestCase,
     _field_dicts,
 )
+from foundry.naming import Name
+from foundry.operation import operation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from foundry.engine import BuildContext
-    from kiln.config.schema import (
+    from be.config.schema import (
         OperationConfig,
         ProjectConfig,
         ResourceConfig,
     )
+    from foundry.engine import BuildContext
 
 
 @operation(
@@ -45,7 +45,7 @@ class Create:
 
         Args:
             ctx: Build context for the ``"create"`` operation entry.
-            options: Parsed :class:`~kiln.operations.types.FieldsOptions`.
+            options: Parsed :class:`~be.operations.types.FieldsOptions`.
 
         Yields:
             The ``{Model}CreateRequest`` schema, the route handler,

@@ -6,7 +6,7 @@ Usage
    :depth: 2
 
 This page covers day-to-day usage of the ``foundry`` CLI as backed
-by the kiln target.  For a walkthrough of a brand-new project, see
+by the be target.  For a walkthrough of a brand-new project, see
 :doc:`getting_started`.  For the complete config schema, see
 :doc:`reference`.
 
@@ -18,7 +18,7 @@ Install
    pip install kiln-generator  # or: uv add kiln-generator
 
 Installing ``kiln-generator`` ships both the generic ``foundry`` CLI
-and the kiln target it discovers at startup.
+and the be target it discovers at startup.
 
 The CLI
 -------
@@ -34,12 +34,12 @@ The CLI
     Path to the ``.json`` or ``.jsonnet`` config file.
 ``--out / -o`` *(optional)*
     Output root directory.  Defaults to the target's own policy --
-    kiln writes into the config's ``package_prefix`` value (e.g.
+    be writes into the config's ``package_prefix`` value (e.g.
     ``_generated``).  Set ``package_prefix: ""`` in the config to
     write directly into the current directory.
 ``--target / -t`` *(optional)*
     Which registered target to use.  Optional when exactly one target
-    is installed (``kiln``, when only kiln-generator is installed).
+    is installed (``be``, when only kiln-generator is installed).
 ``--clean``
     Run ``foundry clean`` before generating.  Useful when you remove a
     resource from the config -- without ``--clean`` the previously
@@ -64,7 +64,7 @@ never deleted.
 Config format
 -------------
 
-kiln accepts ``.json`` and ``.jsonnet`` files.  Jsonnet is
+be accepts ``.json`` and ``.jsonnet`` files.  Jsonnet is
 recommended: imports, variables, and array concatenation make it much
 more ergonomic for sharing common patterns across resources.
 
@@ -208,7 +208,7 @@ inline by giving a field ``type: "nested"``:
      ],
    }
 
-kiln emits a scoped sub-schema (``ArticleResourceAuthorNested``) and
+be emits a scoped sub-schema (``ArticleResourceAuthorNested``) and
 a sub-serializer (``to_article_resource_author_nested``), and attaches
 a ``selectinload(Article.author)`` to the handler's ``select(...)`` so
 the relationship is eagerly loaded -- lazy access in async SQLAlchemy
@@ -233,11 +233,11 @@ Strategies mix across nesting levels, producing chains like
 outer ``select(...)``.  See :ref:`nested-fields` in the reference
 for all keys.
 
-The ``kiln/fields.libsonnet`` helper shortens the common shape:
+The ``be/fields.libsonnet`` helper shortens the common shape:
 
 .. code-block:: jsonnet
 
-   local fields = import "kiln/fields.libsonnet";
+   local fields = import "be/fields.libsonnet";
 
    fields: [
      fields.id(),
@@ -321,17 +321,17 @@ these by defining their own blocks.
 Jsonnet stdlib
 --------------
 
-kiln bundles a small Jsonnet stdlib that is importable from any config
-file without a path prefix (the ``kiln`` prefix resolves to the stdlib
+be bundles a small Jsonnet stdlib that is importable from any config
+file without a path prefix (the ``be`` prefix resolves to the stdlib
 directory shipped inside the package).
 
 See :doc:`reference` for the full stdlib list.  The most common:
 
-* ``kiln/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
-* ``kiln/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
-* ``kiln/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
+* ``be/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
+* ``be/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
+* ``be/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
   and ``fields.nested(name, model, fields, many=false, load="selectin")``.
-* ``kiln/resources/presets.libsonnet`` -- ``resource.action(...)`` and
+* ``be/resources/presets.libsonnet`` -- ``resource.action(...)`` and
   ``resource.files(...)`` for bundling action operations onto a
   resource.  See :ref:`file-uploads` for the file-upload flow.
 
@@ -340,7 +340,7 @@ See :doc:`reference` for the full stdlib list.  The most common:
 File uploads
 ------------
 
-kiln supports a presigned-URL upload flow on top of the existing
+be supports a presigned-URL upload flow on top of the existing
 ``action`` machinery -- no new operation type, just a SQLAlchemy mixin
 plus four ready-made action functions in :mod:`ingot.files`.
 
@@ -406,7 +406,7 @@ Point a resource at the bound model and call ``resource.files()``:
 
 .. code-block:: jsonnet
 
-   local resource = import "kiln/resources/presets.libsonnet";
+   local resource = import "be/resources/presets.libsonnet";
 
    {
      model: "myapp.models.File",
@@ -483,7 +483,7 @@ test per generated operation; run them with pytest as usual::
 API versioning
 --------------
 
-kiln has no built-in ``--version`` flag.  To maintain multiple API
+be has no built-in ``--version`` flag.  To maintain multiple API
 versions, run ``foundry generate`` against separate configs into separate
 output trees and mount each at a different prefix:
 
@@ -500,7 +500,7 @@ output trees and mount each at a different prefix:
    app.include_router(v1_router, prefix="/v1")
    app.include_router(v2_router, prefix="/v2")
 
-Extending kiln
+Extending be
 --------------
 
 To add your own operations, swap renderers, or build an entirely new

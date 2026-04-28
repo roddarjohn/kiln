@@ -1,7 +1,7 @@
 """Telemetry scaffold operation.
 
 Generates ``telemetry.py`` in the project's output tree when
-:attr:`~kiln.config.schema.ProjectConfig.telemetry` is set.  The
+:attr:`~be.config.schema.ProjectConfig.telemetry` is set.  The
 file exposes a single ``init_telemetry(app)`` entry point that
 builds and installs the configured providers and wires the
 requested instrumentors.
@@ -15,7 +15,7 @@ from ``ingot``), so installing ``kiln-generator[opentelemetry]``
 is enough.
 
 The op follows the same shape as
-:class:`~kiln.operations.scaffold.AuthScaffold` -- gated by a
+:class:`~be.operations.scaffold.AuthScaffold` -- gated by a
 :meth:`when` predicate so a project without telemetry produces
 zero references to OpenTelemetry anywhere in the generated tree.
 """
@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from be.config.schema import ProjectConfig
     from foundry.engine import BuildContext
-    from kiln.config.schema import ProjectConfig
 
 
 @operation("telemetry_scaffold", scope="project")

@@ -1,6 +1,6 @@
 """pgqueuer integration for kiln-generated FastAPI projects.
 
-Two helpers — that's the whole surface kiln contributes to the
+Two helpers — that's the whole surface be contributes to the
 queue story.  Everything else (worker run loop, ``@entrypoint``,
 CLI) is pgqueuer's own; use it directly per the upstream docs.
 

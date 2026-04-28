@@ -3,11 +3,11 @@
 These are the vocabulary of emissions every ``@operation``-decorated
 class draws from: schema classes, route handlers, serializer
 functions, test cases, etc.  Registered renderers in
-:mod:`kiln.operations.renderers` consume them to produce Python
+:mod:`be.operations.renderers` consume them to produce Python
 code.  All are mutable dataclasses so later operations can inspect
 and modify earlier operations' output.
 
-They live in kiln rather than foundry because they're
+They live in be rather than foundry because they're
 FastAPI/Pydantic-flavored — a non-Python target wouldn't use them.
 :class:`foundry.outputs.StaticFile` stays in foundry since "render
 this template to this path" is target-agnostic.
@@ -25,13 +25,13 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from foundry.naming import Name, split_dotted_class
-from kiln.config.schema import (
+from be.config.schema import (
     PYTHON_TYPES,
     FieldSpec,
     FieldType,
     LoaderStrategy,
 )
+from foundry.naming import Name, split_dotted_class
 
 _LOADER_FN: dict[LoaderStrategy, str] = {
     "selectin": "selectinload",
@@ -131,8 +131,8 @@ class RouteHandler:
     module so introspected user types import from their real location.
 
     :attr:`op_name` carries the
-    :class:`~kiln.config.schema.OperationConfig` ``name`` so
-    :class:`~kiln.operations.auth.Auth` can filter per-op
+    :class:`~be.config.schema.OperationConfig` ``name`` so
+    :class:`~be.operations.auth.Auth` can filter per-op
     ``require_auth`` overrides.
     """
 
