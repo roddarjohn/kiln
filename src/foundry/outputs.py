@@ -5,11 +5,15 @@ and lives here; Python / FastAPI / Pydantic output types live in
 :mod:`kiln.outputs` since a non-Python target wouldn't use them.
 """
 
-from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from foundry.render import FileFragment, Fragment, RenderCtx, registry
+from foundry.render import FileFragment, registry
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from foundry.render import Fragment, RenderCtx
 
 
 @dataclass
