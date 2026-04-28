@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.3...kiln-v0.8.4) (2026-04-28)
+
+
+### Features
+
+* registries fix ([#55](https://github.com/roddarjohn/kiln/issues/55)) ([4e0dd91](https://github.com/roddarjohn/kiln/commit/4e0dd9162879a1c53ebb09ea4a3bedaec8f54e53))
+
 ## [0.8.3](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.2...kiln-v0.8.3) (2026-04-28)
 
 
