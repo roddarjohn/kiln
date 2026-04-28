@@ -1,0 +1,27 @@
+"""FastAPI app entry point for {{ name }}.
+
+Run with::
+
+    just serve         # hot-reload dev server
+    just fresh         # regenerate kiln output, then serve
+
+Routes are produced by ``kiln`` from ``config/project.jsonnet``
+and land under ``{{ package_prefix }}/``; this module just mounts
+the aggregated router at ``/v1``.  Edit the kiln config and run
+``just generate`` to add resources -- this file rarely needs to
+change after the initial bootstrap.
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+
+from {{ package_prefix }}.routes import router
+
+app = FastAPI(
+    title="{{ name }}",
+    description="{{ description }}",
+    version="0.1.0",
+)
+
+app.include_router(router, prefix="/v1")

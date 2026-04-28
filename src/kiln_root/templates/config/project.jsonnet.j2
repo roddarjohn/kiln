@@ -1,0 +1,19 @@
+// Project-level configuration for {{ name }}.
+//
+// Declares databases and apps in one place.  Run kiln with::
+//
+//   just generate
+//
+// See https://roddarjohn.github.io/kiln/ for the full schema.
+
+local db = import "kiln/db/databases.libsonnet";
+
+{
+  databases: [
+    db.postgres("primary", { default: true }),
+  ],
+
+  apps: [
+    { config: import "{{ module }}.jsonnet", prefix: "/{{ module }}" },
+  ],
+}

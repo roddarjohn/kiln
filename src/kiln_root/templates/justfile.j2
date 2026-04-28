@@ -1,0 +1,41 @@
+config := "config/project.jsonnet"
+out    := "{{ package_prefix }}"
+
+export PYTHONPATH := "."
+
+# List available recipes
+default:
+    @just --list
+
+# Generate routes and schemas from the kiln config
+generate:
+    uv run foundry generate --target kiln --config {% raw %}{{ config }}{% endraw %} --out {% raw %}{{ out }}{% endraw %} --clean
+
+alias g := generate
+
+# Start the dev server (hot-reload)
+serve:
+    uv run uvicorn main:app --reload
+
+alias s := serve
+
+# Generate then start the dev server
+fresh: generate serve
+
+alias f := fresh
+
+# Dump the OpenAPI schema for the running app shape to openapi.json
+openapi:
+    uv run python -c "import json, main; print(json.dumps(main.app.openapi(), indent=2))" > openapi.json
+
+# Run linter and formatter checks
+lint:
+    uv run --group dev ruff check . && uv run --group dev ruff format --check .
+
+# Auto-fix lint and formatting
+fix:
+    uv run --group dev ruff check --fix . && uv run --group dev ruff format .
+
+# Run the test suite (user + generated)
+test:
+    uv run --group dev pytest tests/ {% raw %}{{ out }}{% endraw %}/tests/

@@ -1,0 +1,24 @@
+// App-level configuration for the ``{{ module }}`` package.
+//
+// Add resources to the ``resources`` list to expose them as
+// CRUD endpoints.  Each resource is a small jsonnet object
+// pointing at a SQLAlchemy model and listing the operations to
+// generate; see the kiln docs for the full schema.
+
+{
+  version: "1",
+  module: "{{ module }}",
+
+  resources: [
+    // Example -- delete or replace once you have real models::
+    //
+    //   {
+    //     model: "{{ module }}.models.Widget",
+    //     operations: [
+    //       { name: "get" },
+    //       { name: "list" },
+    //       { name: "create" },
+    //     ],
+    //   },
+  ],
+}
