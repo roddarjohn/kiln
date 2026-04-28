@@ -20,3 +20,5 @@ coverage.xml
 # Playground generated output
 playground/generated/
 playground/_generated/
+
+.playwright-mcp/
