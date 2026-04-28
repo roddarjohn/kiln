@@ -28,7 +28,7 @@ class RootScaffold:
     """Emit the bootstrap files for a fresh be project.
 
     Each file is a :class:`~foundry.outputs.StaticFile` whose
-    template lives under :mod:`be_root.templates`.  Templates
+    template lives under ``be_root/templates/``.  Templates
     interpolate :class:`~be_root.config.RootConfig` fields
     (``name``, ``module``, ``description``) and reference the
     target's ``package_prefix`` so the generated ``project.jsonnet``

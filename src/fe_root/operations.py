@@ -28,7 +28,7 @@ class RootScaffold:
     """Emit the bootstrap files for a fresh fe project.
 
     Each file is a :class:`~foundry.outputs.StaticFile` whose
-    template lives under :mod:`fe_root.templates`.  Templates
+    template lives under ``fe_root/templates/``.  Templates
     interpolate :class:`~fe_root.config.RootConfig` fields
     (``name``, ``description``, ``glaze``, ``editable``,
     ``openapi_spec``).
