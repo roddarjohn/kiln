@@ -7,4 +7,5 @@ class {{ model_name }}Page(BaseModel):
     next_cursor: str | None = None
 {% elif mode == "offset" %}
     total: int
+    total_pages: int
 {% endif %}

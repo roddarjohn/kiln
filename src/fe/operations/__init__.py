@@ -12,15 +12,19 @@ which submodule each lives in.
 from fe.operations.auth import Auth
 from fe.operations.openapi_ts import OpenApiTsConfig
 from fe.operations.resource_action import ResourceAction
+from fe.operations.resource_detail import ResourceDetail
 from fe.operations.resource_form import ResourceForm
 from fe.operations.resource_list import ResourceList
+from fe.operations.routes import Routes
 from fe.operations.scaffold import Scaffold
 
 __all__ = [
     "Auth",
     "OpenApiTsConfig",
     "ResourceAction",
+    "ResourceDetail",
     "ResourceForm",
     "ResourceList",
+    "Routes",
     "Scaffold",
 ]

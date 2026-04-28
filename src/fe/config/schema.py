@@ -136,6 +136,12 @@ class ColumnSpec(BaseModel):
             ``Badge`` whose tone is ``"success"`` for truthy
             values and ``"neutral"`` otherwise -- right for
             booleans like ``completed``.
+        sortable: When True, the column header is clickable and
+            toggles ascending / descending; the active sort is
+            sent to the list-fn body's ``sort`` array.  The
+            field name must appear in the BE's
+            ``{Resource}SortField`` enum (i.e. it must be
+            declared sortable on the BE list op).
 
     """
 
@@ -144,6 +150,58 @@ class ColumnSpec(BaseModel):
     field: str
     label: str | None = Field(default=None)
     display: Literal["text", "badge"] = Field(default="text")
+    sortable: bool = Field(default=False)
+
+
+FilterOp = Literal[
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "starts_with",
+    "in",
+]
+
+
+class FilterSpec(BaseModel):
+    """One filter rendered in the list page's FilterBar.
+
+    The filter's value is sent to the list endpoint as a single
+    condition ``{field, op, value}``.  The codegen wraps multiple
+    active conditions in an ``{and: [...]}`` expression so the BE
+    sees them all at once.
+
+    Attributes:
+        field: Field name on the list-fn request body's
+            ``filter.field`` literal.
+        label: Display text on the filter chip.  Defaults to a
+            humanized version of *field*.
+        type: Control type.
+
+            * ``"text"``: glaze ``<TextField>``; default op is
+              ``"contains"``.
+            * ``"boolean"``: glaze ``<Switch>``; default op is
+              ``"eq"``.
+            * ``"select"``: glaze ``<Select>`` with *options*
+              entries; default op is ``"eq"``.
+        options: Choices for ``"select"`` filters.  Ignored
+            otherwise.
+        op: Filter operator sent to the BE.  Defaults to a
+            sensible per-type value (text -> contains,
+            boolean -> eq, select -> eq).
+
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    label: str | None = Field(default=None)
+    type: Literal["text", "boolean", "select"] = Field(default="text")
+    options: list[str] = Field(default_factory=list)
+    op: FilterOp | None = Field(default=None)
 
 
 class ListConfig(BaseModel):
@@ -161,6 +219,10 @@ class ListConfig(BaseModel):
             a Drawer rendering the resource's Detail component
             (requires ``detail`` + ``get_fn`` on the resource).
             ``None`` (default) makes rows non-clickable.
+        filters: Filter chips rendered above the table via glaze
+            ``FilterBar`` + ``useFilters``.  Active filter values
+            are sent to the list-fn as a single condition or an
+            ``{and: [...]}`` expression.
 
     """
 
@@ -170,6 +232,8 @@ class ListConfig(BaseModel):
     toolbar_actions: list[Literal["create"]] = Field(default_factory=list)
     row_actions: list[Literal["delete"]] = Field(default_factory=list)
     row_click: Literal["detail"] | None = Field(default=None)
+    filters: list[FilterSpec] = Field(default_factory=list)
+    page_size: int | None = Field(default=None)
 
 
 class FormConfig(BaseModel):

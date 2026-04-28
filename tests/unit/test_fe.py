@@ -85,6 +85,8 @@ def test_fe_entry_point_group_holds_expected_ops():
         "resource_list",
         "resource_form",
         "resource_action",
+        "resource_detail",
+        "routes",
     }
 
 

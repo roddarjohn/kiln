@@ -74,48 +74,21 @@ class TestApiClientWithAuth:
 # ---------------------------------------------------------------------------
 
 
-class TestAppNoAuthNoShell:
-    def test_renders_message_when_no_views(self) -> None:
+class TestAppNoAuth:
+    def test_app_renders_router_provider_directly_without_auth(self) -> None:
+        # Without auth, App mounts RouterProvider unconditionally.
+        # The Shell (root route) handles whatever views exist; an
+        # empty resources dict produces a router with just the
+        # index route -- no "No views configured" message anymore.
         out = _files(ProjectConfig())
         app = out["src/App.tsx"]
 
+        assert "<RouterProvider router={router} />" in app
         assert "AuthProvider" not in app
-        assert "<Shell />" not in app
-        assert "No views configured." in app
-
-    def test_renders_first_resource_view_when_no_shell(self) -> None:
-        cfg = ProjectConfig(
-            resources={
-                "projects": ResourceConfig(
-                    label=ResourceLabel(singular="Project", plural="Projects"),
-                    list_item_type="ProjectListItem",
-                ),
-            },
-        )
-        out = _files(cfg)
-        app = out["src/App.tsx"]
-
-        assert "<ProjectsList />" in app
-        assert 'import { ProjectsList } from "./projects/ProjectsList"' in app
+        assert 'import { router } from "./router"' in app
 
 
-class TestAppWithShellNoAuth:
-    def test_renders_shell_directly(self) -> None:
-        cfg = ProjectConfig(
-            shell=ShellConfig(
-                brand="kiln-sample",
-                nav=[NavItem(label="Projects", view="projects")],
-            ),
-        )
-        out = _files(cfg)
-        app = out["src/App.tsx"]
-
-        assert "<Shell />" in app
-        assert "AuthProvider" not in app
-        assert "AuthGate" not in app
-
-
-class TestAppWithAuthAndShell:
+class TestAppWithAuth:
     def _cfg(self) -> ProjectConfig:
         return ProjectConfig(
             shell=ShellConfig(
@@ -152,15 +125,18 @@ class TestAppWithAuthAndShell:
 
         assert 'storage="localStorage"' in app
 
-    def test_renders_loading_then_login_then_shell(self) -> None:
+    def test_renders_loading_then_router_then_login(self) -> None:
         out = _files(self._cfg())
         app = out["src/App.tsx"]
 
-        # Three branches: loading, authenticated -> Shell, else Login.
+        # Three branches: loading, authenticated -> RouterProvider,
+        # else Login.  The Shell component is the root route so it
+        # only mounts inside the router tree, not directly here.
         assert 'auth.status === "loading"' in app
         assert 'auth.status === "authenticated"' in app
-        assert "<Shell />" in app
+        assert "<RouterProvider router={router} />" in app
         assert "<Login />" in app
+        assert "<Shell />" not in app  # Shell only mounts via the router
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +176,14 @@ class TestShellEmission:
         assert "kiln-sample" in shell
         assert "Projects" in shell
         assert "Tasks" in shell
-        # Each resource imports its list component.
-        assert 'import { ProjectsList } from "./projects/ProjectsList"' in shell
-        assert 'import { TasksList } from "./tasks/TasksList"' in shell
+        # The Shell is the root route layout; the Outlet renders
+        # whichever resource list the user navigated to.  Resource
+        # list components are imported by the router, not the Shell.
+        assert "<Outlet />" in shell
+        assert (
+            'import { ProjectsList } from "./projects/ProjectsList"'
+            not in shell
+        )
 
     def test_user_menu_omitted_without_auth(self) -> None:
         cfg = ProjectConfig(
@@ -240,7 +221,10 @@ class TestShellEmission:
         assert "useSession" in shell
         assert "Sign out" in shell
 
-    def test_default_view_is_first_nav_item(self) -> None:
+    def test_nav_items_use_router_navigation(self) -> None:
+        # The active state is derived from the current location and
+        # the onPress hands off to TanStack Router instead of toggling
+        # local state.  No useState<View> anywhere.
         cfg = ProjectConfig(
             shell=ShellConfig(
                 brand="X",
@@ -263,4 +247,10 @@ class TestShellEmission:
         out = _files(cfg)
         shell = out["src/Shell.tsx"]
 
-        assert 'useState<View>("tasks")' in shell
+        assert "useState<View>" not in shell
+        assert "useLocation" in shell
+        assert "useRouter" in shell
+        assert 'router.navigate({ to: "/tasks" })' in shell
+        assert 'router.navigate({ to: "/projects" })' in shell
+        assert 'location.pathname.startsWith("/tasks")' in shell
+        assert 'location.pathname.startsWith("/projects")' in shell

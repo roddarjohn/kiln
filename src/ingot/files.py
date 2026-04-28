@@ -58,7 +58,15 @@ from typing import TYPE_CHECKING, Any, cast
 import boto3
 from fastapi import HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import BigInteger, DateTime, String, delete, insert, update
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    String,
+    Uuid,
+    delete,
+    insert,
+    update,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
@@ -103,6 +111,7 @@ class FileMixin:
     """
 
     id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )

@@ -3,6 +3,9 @@
 // Edits will be overwritten -- change config/fe.jsonnet instead.
 // ============================================================
 
+{% if row_click_detail or filters or page_size or has_sortable %}
+import { useState } from "react";
+{% endif %}
 {% if has_delete_row %}
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 {% else %}
@@ -15,7 +18,7 @@ import {
   Button,
   Cell,
   Column,
-{% if has_create_toolbar %}
+{% if has_create_toolbar or row_click_detail %}
   Drawer,
   DrawerTrigger,
 {% endif %}
@@ -24,19 +27,45 @@ import {
   DialogTrigger,
 {% endif %}
   EmptyState,
-{% if has_create_toolbar %}
+{% if filters %}
+  FilterBar,
+{% endif %}
+{% if has_create_toolbar and not filters %}
   Inline,
 {% endif %}
+{% if page_size %}
+  Pagination,
+{% endif %}
   Row,
+{% if filters | selectattr('type', 'equalto', 'select') | list %}
+  Select,
+  SelectItem,
+{% endif %}
   Spinner,
   Stack,
+{% if filters | selectattr('type', 'equalto', 'boolean') | list %}
+  Switch,
+{% endif %}
   Table,
   TableBody,
   TableHeader,
+{% if filters | selectattr('type', 'equalto', 'text') | list %}
+  TextField,
+{% endif %}
 {% if has_delete_row %}
   toast,
 {% endif %}
+{% if filters %}
+  useFilters,
+{% endif %}
 } from "@roddarjohn/glaze";
+
+{% if filters %}
+import type { FilterDefinition } from "@roddarjohn/glaze";
+{% endif %}
+{% if has_sortable %}
+import type { SortDescriptor } from "react-aria-components";
+{% endif %}
 
 import {
 {% for fn in sdk_imports %}
@@ -46,19 +75,152 @@ import {
 {% if has_create_toolbar %}
 import { Create{{ pascal }}Form } from "./Create{{ pascal }}Form";
 {% endif %}
+{% if row_click_detail %}
+import { {{ detail_component }} } from "./{{ detail_component }}";
+{% endif %}
 {% for action in row_actions %}
 import { {{ action.component }} } from "./actions/{{ action.component }}";
 {% endfor %}
 
+{% if filters %}
+// Per-filter spec used to drive both the FilterBar UI and the
+// list-fn body's filter expression.
+const {{ pascal }}_FILTERS: FilterDefinition[] = [
+{% for f in filters %}
+  {
+    id: {{ f.id | tojson }},
+    label: {{ f.label | tojson }},
+    clearValue: {% if f.type == "boolean" %}false{% else %}""{% endif %},
+    isActive: (v) => {
+{% if f.type == "boolean" %}
+      return v === true;
+{% elif f.type == "text" %}
+      return typeof v === "string" && v.length > 0;
+{% else %}
+      return typeof v === "string" && v.length > 0;
+{% endif %}
+    },
+    formatValue: (v) => {
+{% if f.type == "boolean" %}
+      return v === true ? "yes" : null;
+{% else %}
+      return typeof v === "string" && v.length > 0 ? v : null;
+{% endif %}
+    },
+    renderControl: (value, onChange, _close) => (
+{% if f.type == "boolean" %}
+      <Switch
+        selected={value === true}
+        onChange={(next) => onChange(next)}
+      >
+        {{ f.label }}
+      </Switch>
+{% elif f.type == "select" %}
+      <Select
+        label={{ f.label | tojson }}
+        selectedKey={typeof value === "string" ? value : null}
+        onSelectionChange={(k) => onChange(k)}
+      >
+{% for opt in f.options %}
+        <SelectItem id={{ opt | tojson }}>{{ opt }}</SelectItem>
+{% endfor %}
+      </Select>
+{% else %}
+      <TextField
+        label={{ f.label | tojson }}
+        value={typeof value === "string" ? value : ""}
+        onChange={(next) => onChange(next)}
+        autoFocus
+      />
+{% endif %}
+    ),
+  },
+{% endfor %}
+];
+
+// Translate active FilterBar values into the BE's filter shape.
+// Single condition stays a condition; multiple conditions are
+// wrapped in `{ and: [...] }`. Empty -> undefined so the body
+// omits the field entirely.
+function build{{ pascal }}Filter(
+  values: Record<string, unknown>,
+): unknown {
+  const conds: unknown[] = [];
+{% for f in filters %}
+  {
+    const v = values[{{ f.id | tojson }}];
+{% if f.type == "boolean" %}
+    if (v === true) conds.push({ field: {{ f.field | tojson }}, op: {{ f.op | tojson }}, value: true });
+{% else %}
+    if (typeof v === "string" && v.length > 0) {
+      conds.push({ field: {{ f.field | tojson }}, op: {{ f.op | tojson }}, value: v });
+    }
+{% endif %}
+  }
+{% endfor %}
+  if (conds.length === 0) return undefined;
+  if (conds.length === 1) return conds[0];
+  return { and: conds };
+}
+
+{% endif %}
 export function {{ pascal }}List() {
 {% if has_delete_row %}
   const qc = useQueryClient();
 {% endif %}
+{% if row_click_detail %}
+  const [openId, setOpenId] = useState<string | null>(null);
+{% endif %}
+{% if filters %}
+  const filterState = useFilters({{ pascal }}_FILTERS);
+{% endif %}
+{% if has_sortable %}
+  const [sortDescriptor, setSortDescriptor] = useState<
+    SortDescriptor | undefined
+  >(undefined);
+{% endif %}
+{% if page_size %}
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = {{ page_size }};
+{% endif %}
 
   const { data, isLoading } = useQuery({
-    queryKey: [{{ key | tojson }}, "list"],
+    queryKey: [
+      {{ key | tojson }},
+      "list",
+{% if filters %}
+      filterState.values,
+{% endif %}
+{% if has_sortable %}
+      sortDescriptor,
+{% endif %}
+{% if page_size %}
+      page,
+{% endif %}
+    ],
     queryFn: async () => {
-      const res = await {{ list_fn }}({ body: {} });
+      const res = await {{ list_fn }}({
+        body: {
+{% if filters %}
+          filter: build{{ pascal }}Filter(filterState.values) as never,
+{% endif %}
+{% if has_sortable %}
+          sort: sortDescriptor
+            ? ([
+                {
+                  field: String(sortDescriptor.column),
+                  dir:
+                    sortDescriptor.direction === "descending" ? "desc" : "asc",
+                },
+              ] as never)
+            : undefined,
+{% endif %}
+{% if page_size %}
+          offset: (page - 1) * PAGE_SIZE,
+          limit: PAGE_SIZE,
+{% endif %}
+        },
+      });
       if (res.error || !res.data) {
         throw new Error("Failed to load {{ label_plural | lower }}.");
       }
@@ -88,8 +250,31 @@ export function {{ pascal }}List() {
 
   return (
     <Stack gap="3">
+{% if filters %}
+      <FilterBar
+        values={filterState.values}
+        onChange={filterState.onChange}
+        filters={ {{ pascal }}_FILTERS }
+        onClearAll={filterState.onClearAll}
 {% if has_create_toolbar %}
-      <Inline gap="2">
+        actions={
+          <DrawerTrigger>
+            <Button data-testid={{ ('create-' + key + '-button') | tojson }}>
+              New {{ label_singular | lower }}
+            </Button>
+            <Drawer
+              side="right"
+              size="md"
+              title={{ ('New ' + label_singular | lower) | tojson }}
+            >
+              {({ close }) => <Create{{ pascal }}Form close={close} />}
+            </Drawer>
+          </DrawerTrigger>
+        }
+{% endif %}
+      />
+{% elif has_create_toolbar %}
+      <Inline gap="2" justify="end">
         <DrawerTrigger>
           <Button data-testid={{ ('create-' + key + '-button') | tojson }}>
             New {{ label_singular | lower }}
@@ -113,10 +298,30 @@ export function {{ pascal }}List() {
 {% endif %}
         />
       ) : (
-        <Table aria-label={{ label_plural | tojson }} data-testid={{ (key + '-table') | tojson }}>
+        <Table
+          aria-label={{ label_plural | tojson }}
+          data-testid={{ (key + '-table') | tojson }}
+{% if row_click_detail %}
+          onRowAction={(rowId) => {
+            setOpenId(String(rowId));
+          }}
+{% endif %}
+{% if has_sortable %}
+          sortDescriptor={sortDescriptor}
+          onSortChange={setSortDescriptor}
+{% endif %}
+        >
           <TableHeader>
 {% for col in columns %}
-            <Column id={{ col.field | tojson }}{% if col.is_first %} rowHeader{% endif %}>
+            <Column
+              id={{ col.field | tojson }}
+{% if col.is_first %}
+              rowHeader
+{% endif %}
+{% if col.sortable %}
+              allowsSorting
+{% endif %}
+            >
               {{ col.label }}
             </Column>
 {% endfor %}
@@ -180,6 +385,53 @@ export function {{ pascal }}List() {
           </TableBody>
         </Table>
       )}
+{% if page_size %}
+
+      {data && data.total > PAGE_SIZE ? (
+        <Pagination
+          page={page}
+          // Prefer the BE-supplied total_pages; fall back to a
+          // client-side ceil for older BEs that haven't shipped
+          // the field yet.
+          totalPages={
+            (data as { total_pages?: number }).total_pages ??
+            Math.max(1, Math.ceil(data.total / PAGE_SIZE))
+          }
+          onPageChange={setPage}
+        />
+      ) : null}
+{% endif %}
+{% if row_click_detail %}
+
+      <DrawerTrigger
+        open={openId !== null}
+        onOpenChange={(open) => {
+          if (!open) setOpenId(null);
+        }}
+      >
+        {/* Controlled overlay: the row click sets `openId`, which
+            opens this Drawer. The hidden button satisfies
+            DrawerTrigger's two-children contract. */}
+        <button type="button" hidden aria-hidden />
+        <Drawer
+          side="right"
+          size="md"
+          title={{ (label_singular + ' details') | tojson }}
+        >
+          {({ close }) =>
+            openId !== null ? (
+              <{{ detail_component }}
+                id={openId}
+                close={() => {
+                  setOpenId(null);
+                  close();
+                }}
+              />
+            ) : null
+          }
+        </Drawer>
+      </DrawerTrigger>
+{% endif %}
     </Stack>
   );
 }

@@ -8,17 +8,14 @@ import { AuthProvider, ToastRegion, useAuth } from "@roddarjohn/glaze";
 {% else %}
 import { ToastRegion } from "@roddarjohn/glaze";
 {% endif %}
+import { RouterProvider } from "@tanstack/react-router";
 
 import "./api/client";
 {% if auth %}
 import { login, logout, validate } from "./api/auth";
 import { Login } from "./auth/Login";
 {% endif %}
-{% if has_shell %}
-import { Shell } from "./Shell";
-{% elif first_view_component %}
-import { {{ first_view_component }} } from "{{ first_view_module }}";
-{% endif %}
+import { router } from "./router";
 
 import type { ReactElement } from "react";
 {% if auth %}
@@ -41,13 +38,7 @@ export default function App(): ReactElement {
         <AuthGate />
       </AuthProvider>
 {% else %}
-{% if has_shell %}
-      <Shell />
-{% elif first_view_component %}
-      <{{ first_view_component }} />
-{% else %}
-      <main>No views configured.</main>
-{% endif %}
+      <RouterProvider router={router} />
 {% endif %}
       <ToastRegion />
     </>
@@ -71,13 +62,7 @@ function AuthGate(): ReactElement {
     );
   }
   if (auth.status === "authenticated") {
-{% if has_shell %}
-    return <Shell />;
-{% elif first_view_component %}
-    return <{{ first_view_component }} />;
-{% else %}
-    return <></>;
-{% endif %}
+    return <RouterProvider router={router} />;
   }
   return <Login />;
 }

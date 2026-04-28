@@ -37,8 +37,21 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from fe.config import ActionConfig, ColumnSpec, ProjectConfig
+    from fe.config import (
+        ActionConfig,
+        ColumnSpec,
+        FilterSpec,
+        ProjectConfig,
+    )
     from foundry.engine import BuildContext
+
+
+# Default operator per filter type when the user doesn't override.
+_DEFAULT_OP: dict[str, str] = {
+    "text": "contains",
+    "boolean": "eq",
+    "select": "eq",
+}
 
 
 def _pascal(key: str) -> str:
@@ -51,6 +64,7 @@ class _ColumnContext(TypedDict):
     label: str
     display: str
     is_first: bool
+    sortable: bool
 
 
 class _RowActionContext(TypedDict):
@@ -60,6 +74,17 @@ class _RowActionContext(TypedDict):
     label: str
     component: str  # the action form/dialog component name
     when: str | None  # JS expression gating the row button
+
+
+class _FilterContext(TypedDict):
+    """Pre-rendered filter metadata for the list template."""
+
+    id: str
+    field: str
+    label: str
+    type: str
+    op: str
+    options: list[str]
 
 
 @operation("resource_list", scope="project")
@@ -83,6 +108,7 @@ class ResourceList:
             pascal = _pascal(key)
             columns = _columns_for(resource.list.columns)
             row_actions = _row_actions_for(resource.actions, pascal)
+            filters = _filters_for(resource.list.filters)
             has_create_toolbar = (
                 "create" in resource.list.toolbar_actions
                 and resource.create_fn is not None
@@ -91,6 +117,13 @@ class ResourceList:
             has_delete_row = (
                 "delete" in resource.list.row_actions
                 and resource.delete_fn is not None
+            )
+            # Row-click drill-down requires both the list-side
+            # opt-in AND a real detail surface to render.
+            row_click_detail = (
+                resource.list.row_click == "detail"
+                and resource.detail is not None
+                and resource.get_fn is not None
             )
 
             # Build the SDK import set lazily -- only import what
@@ -117,6 +150,13 @@ class ResourceList:
                     "has_create_toolbar": has_create_toolbar,
                     "has_delete_row": has_delete_row,
                     "row_actions": row_actions,
+                    "filters": filters,
+                    "page_size": resource.list.page_size,
+                    "has_sortable": any(c["sortable"] for c in columns),
+                    "row_click_detail": row_click_detail,
+                    "detail_component": (
+                        f"{pascal}Detail" if row_click_detail else None
+                    ),
                     "sdk_imports": sorted(sdk_imports),
                 },
             )
@@ -133,6 +173,7 @@ def _columns_for(columns: list[ColumnSpec]) -> list[_ColumnContext]:
                 "label": col.label or _humanize(col.field),
                 "display": col.display,
                 "is_first": i == 0,
+                "sortable": col.sortable,
             },
         )
 
@@ -165,3 +206,18 @@ def _row_actions_for(
 def _humanize(field: str) -> str:
     """Title-case a snake_case field name for the column header."""
     return " ".join(p[:1].upper() + p[1:] for p in field.split("_"))
+
+
+def _filters_for(filters: list[FilterSpec]) -> list[_FilterContext]:
+    """Materialize filter specs with defaulted op + label."""
+    return [
+        {
+            "id": f.field,
+            "field": f.field,
+            "label": f.label or _humanize(f.field),
+            "type": f.type,
+            "op": f.op or _DEFAULT_OP[f.type],
+            "options": list(f.options),
+        }
+        for f in filters
+    ]

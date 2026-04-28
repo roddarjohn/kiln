@@ -47,6 +47,35 @@ local presets = import "fe/resources/presets.libsonnet";
   // -- List view -------------------------------------------------
   list(opts):: opts,
 
+  // -- Filter ----------------------------------------------------
+  //
+  // Shorthand for declaring a list-view filter.  ``field`` matches
+  // the list-fn request body's filter.field literal; ``type``
+  // picks the control (text|boolean|select); ``op`` overrides
+  // the BE operator (default: contains for text, eq for everything
+  // else).
+  filter(field, type="text", label=null, op=null, options=[]):: {
+    field: field,
+    type: type,
+    [if label != null then "label"]: label,
+    [if op != null then "op"]: op,
+    [if std.length(options) > 0 then "options"]: options,
+  },
+
+  // -- Detail view -----------------------------------------------
+  detail(opts):: opts,
+
+  // -- Detail section --------------------------------------------
+  //
+  // Either a fields-list section (for label/value pairs from the
+  // resource type) or a custom-component section (relative import
+  // path; receives the resource as ``item`` prop).
+  section(title=null, fields=[], component=null):: {
+    [if title != null then "title"]: title,
+    [if std.length(fields) > 0 then "fields"]: fields,
+    [if component != null then "component"]: component,
+  },
+
   // -- Form -------------------------------------------------------
   form(opts):: opts,
 
@@ -59,11 +88,12 @@ local presets = import "fe/resources/presets.libsonnet";
   // Convenience: a column entry.  Either a bare field name string
   // (which jsonnet+pydantic accepts as ``{field: name}`` via the
   // schema's ``ColumnSpec`` defaults) or an explicit object with
-  // a custom ``label`` / ``display``.
-  column(field, label=null, display="text"):: {
+  // a custom ``label`` / ``display`` / ``sortable``.
+  column(field, label=null, display="text", sortable=false):: {
     field: field,
     [if label != null then "label"]: label,
     [if display != "text" then "display"]: display,
+    [if sortable then "sortable"]: true,
   },
 
   // Resource label shortcut.
