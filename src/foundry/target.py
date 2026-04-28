@@ -50,7 +50,7 @@ class Target:
             renderers reference.  Foundry builds the Jinja
             environment rooted here.
         operations_entry_point: Entry-point group name where the
-            target's :class:`@operation`-decorated classes are
+            target's ``@operation``-decorated classes are
             registered, e.g. ``"kiln.operations"`` or
             ``"kiln_root.operations"``.  At build time the
             pipeline calls
