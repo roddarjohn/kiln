@@ -513,6 +513,7 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
         path=sf.path,
         template=sf.template,
         context=dict(sf.context),
+        if_exists=sf.if_exists,
     )
 
 

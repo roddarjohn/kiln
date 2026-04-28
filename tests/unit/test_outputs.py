@@ -189,6 +189,20 @@ def test_static_file_with_context():
     assert f.context["url_env"] == "DATABASE_URL"
 
 
+def test_static_file_default_if_exists_is_overwrite():
+    f = StaticFile(path="db/session.py", template="init/db_session.py.j2")
+    assert f.if_exists == "overwrite"
+
+
+def test_static_file_skip_mode_is_explicit_opt_in():
+    f = StaticFile(
+        path="pyproject.toml",
+        template="pyproject.toml.j2",
+        if_exists="skip",
+    )
+    assert f.if_exists == "skip"
+
+
 # -------------------------------------------------------------------
 # Mutability
 # -------------------------------------------------------------------

@@ -117,7 +117,11 @@ def _render_file(
     (convention for empty files like ``__init__.py``).
     """
     if not file.template:
-        return GeneratedFile(path=file.path, content="")
+        return GeneratedFile(
+            path=file.path,
+            content="",
+            if_exists=file.if_exists,
+        )
 
     imports = file.imports
     slots: dict[str, list[Any]] = {}
@@ -142,4 +146,8 @@ def _render_file(
         **context,
     )
 
-    return GeneratedFile(path=file.path, content=rendered.rstrip() + "\n")
+    return GeneratedFile(
+        path=file.path,
+        content=rendered.rstrip() + "\n",
+        if_exists=file.if_exists,
+    )

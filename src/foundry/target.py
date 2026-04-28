@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from foundry.config import FoundryConfig
+    from foundry.operation import OperationRegistry
 
 
 ENTRY_POINT_GROUP = "foundry.targets"
@@ -53,6 +54,17 @@ class Target:
             ``.libsonnet`` files exposed to configs as
             ``<name>/...`` imports.  ``None`` when the target
             ships no stdlib.
+        registry: Dedicated operation registry holding the ops
+            this target wants the engine to run.  Each target
+            owns its own registry: targets that ship together
+            (e.g. ``kiln`` and ``kiln_root``) declare overlapping
+            scope names but their ops would crash on each other's
+            configs, so foundry never mixes them.  Populate by
+            having the target's package import its op modules at
+            the same time it constructs the :class:`Target` --
+            the :func:`~foundry.operation.operation` decorator
+            then pushes each op into whichever registry the
+            module passed it.
 
     """
 
@@ -60,6 +72,7 @@ class Target:
     language: str
     schema: type[FoundryConfig]
     template_dir: Path
+    registry: OperationRegistry
     jsonnet_stdlib_dir: Path | None = None
 
 

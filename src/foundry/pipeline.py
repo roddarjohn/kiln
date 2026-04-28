@@ -27,15 +27,21 @@ _FOUNDRY_TEMPLATES = Path(__file__).parent / "templates"
 def generate(config: FoundryConfig, target: Target) -> list[GeneratedFile]:
     """Generate all files for a validated *config*.
 
-    :class:`~foundry.engine.Engine` auto-discovers operations from
-    the ``foundry.operations`` entry-point group, runs the
-    hierarchical engine once over the full config tree, and hands
-    the resulting build store to foundry's generic assembler.
+    :class:`~foundry.engine.Engine` runs the hierarchical engine
+    once over the full config tree, then foundry's generic
+    assembler turns the resulting build store into files.
+
+    Operation discovery is target-scoped: every target carries
+    its own :class:`~foundry.operation.OperationRegistry`, populated
+    by the target's package importing its op modules (the
+    :func:`~foundry.operation.operation` decorator pushes into
+    whichever registry the target wires in).
 
     Args:
         config: Validated config model.
         target: The selected target; its ``template_dir`` is used
-            to build the Jinja environment passed to renderers.
+            to build the Jinja environment passed to renderers,
+            and its ``registry`` is used by the engine.
 
     Returns:
         Flat list of generated files.
@@ -49,7 +55,10 @@ def generate(config: FoundryConfig, target: Target) -> list[GeneratedFile]:
     env = create_jinja_env(target.template_dir, _FOUNDRY_TEMPLATES)
 
     try:
-        engine = Engine(package_prefix=config.package_prefix)
+        engine = Engine(
+            registry=target.registry,
+            package_prefix=config.package_prefix,
+        )
         store = engine.build(config)
 
         ctx = RenderCtx(

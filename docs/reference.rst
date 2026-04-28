@@ -307,6 +307,8 @@ Operations
 
 .. autofunction:: foundry.operation.operation
 
+.. autofunction:: foundry.operation.load_default_registry
+
 .. autoclass:: foundry.operation.OperationMeta
    :members:
 

@@ -9,7 +9,7 @@ by output path to produce final files.
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from foundry.env import render_template
 from foundry.imports import ImportCollector
@@ -77,6 +77,15 @@ class FileFragment:
             FileFragments at this path (shared keys must agree).
         imports: Imports the wrapper itself needs, on top of any
             contributed by snippets.
+        if_exists: Write policy for the assembled output.  Set to
+            ``"skip"`` to make :func:`foundry.output.write_files`
+            leave existing files alone (kiln_root's
+            re-bootstrap-safe path); defaults to ``"overwrite"``.
+            When two fragments at the same path disagree, the
+            assembler picks the stricter ``"overwrite"`` -- a
+            single contributor that wants the file regenerated
+            wins over any contributor that would have been happy
+            to skip.
 
     """
 
@@ -84,13 +93,16 @@ class FileFragment:
     template: str
     context: dict[str, Any] = field(default_factory=dict)
     imports: ImportCollector = field(default_factory=ImportCollector)
+    if_exists: Literal["overwrite", "skip"] = "overwrite"
 
     def __or__(self, other: FileFragment) -> FileFragment:
         """Merge two FileFragments targeting the same path.
 
         Raises :class:`ValueError` if the two fragments disagree
         on :attr:`template`, or if any shared :attr:`context` key
-        has two different values.  Imports union.
+        has two different values.  Imports union.  ``if_exists``
+        resolves to ``"overwrite"`` when either side says so --
+        any contributor that wants the file regenerated wins.
         """
         if self.template != other.template:
             msg = (
@@ -108,11 +120,18 @@ class FileFragment:
                 )
                 raise ValueError(msg)
 
+        merged_if_exists: Literal["overwrite", "skip"] = (
+            "overwrite"
+            if "overwrite" in (self.if_exists, other.if_exists)
+            else "skip"
+        )
+
         return FileFragment(
             path=self.path,
             template=self.template,
             context=self.context | other.context,
             imports=self.imports | other.imports,
+            if_exists=merged_if_exists,
         )
 
 
