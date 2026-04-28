@@ -11,12 +11,12 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+
 from be.target import target as be_target
 from fe.target import target as fe_target
 from fe_root.config import RootConfig
 from fe_root.operations import RootScaffold
 from fe_root.target import target as root_target
-
 from foundry.config import load_config
 from foundry.operation import load_registry
 from foundry.pipeline import generate
@@ -74,8 +74,12 @@ def test_fe_root_target_declares_its_own_entry_point_group():
     # ``operations_entry_point`` separately so be / fe ops never
     # fire on a fe_root config.
     assert root_target.operations_entry_point == "fe_root.operations"
-    assert root_target.operations_entry_point != fe_target.operations_entry_point
-    assert root_target.operations_entry_point != be_target.operations_entry_point
+    assert (
+        root_target.operations_entry_point != fe_target.operations_entry_point
+    )
+    assert (
+        root_target.operations_entry_point != be_target.operations_entry_point
+    )
 
 
 def test_fe_root_entry_point_group_holds_only_root_scaffold():
