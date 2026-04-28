@@ -509,6 +509,23 @@ class OperationConfig(BaseModel):
     from the project's :attr:`TelemetryConfig.span_per_handler` /
     :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
     skip span emission for noisy / hot-path operations."""
+    can: str | None = None
+    """Dotted path to an async ``(resource, session) -> bool`` guard.
+
+    The same callable serves two purposes: it gates execution of
+    the operation (handlers raise 403 when it returns False) and
+    it decides whether the operation appears in serialized
+    ``actions`` lists for visibility.  ``None`` means "always
+    available to authenticated users" -- bound to
+    :func:`ingot.actions.always_true` at generation time.
+
+    Object-scope ops (``get``, ``update``, ``delete``, custom
+    object actions) receive the resource instance; collection-
+    scope ops (``list``, ``create``, custom collection actions)
+    receive ``None`` as the resource argument.  ``can_list`` is
+    additionally used as the row-level visibility filter on the
+    list endpoint, so it sees each candidate row in turn.
+    """
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
