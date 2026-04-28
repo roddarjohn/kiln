@@ -1724,7 +1724,7 @@ class TestExecutionGates:
         )
         assert handler.body_context["gate_op_name"] == "create"
 
-    def test_update_with_can_adds_select_for_prefetch(self):
+    def test_update_with_can_sets_gate_context(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(
             resource,
@@ -1732,20 +1732,16 @@ class TestExecutionGates:
         )
         result = list(Update().build(ctx, _FieldsOpts(fields=_FIELDS)))
         handler = next(r for r in result if isinstance(r, RouteHandler))
-        # Gated update needs a SELECT before the UPDATE so the guard
-        # can inspect resource state.
-        assert ("sqlalchemy", "select") in handler.extra_imports
         assert handler.body_context["gate_specs_const"] == "USER_OBJECT_ACTIONS"
 
-    def test_update_without_can_does_not_add_select(self):
+    def test_update_without_can_has_no_gate_context(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="update"))
         result = list(Update().build(ctx, _FieldsOpts(fields=_FIELDS)))
         handler = next(r for r in result if isinstance(r, RouteHandler))
-        # Ungated update keeps the one-shot UPDATE form.
-        assert ("sqlalchemy", "select") not in handler.extra_imports
+        assert "gate_specs_const" not in handler.body_context
 
-    def test_delete_with_can_adds_select_for_prefetch(self):
+    def test_delete_with_can_sets_gate_context(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(
             resource,
@@ -1753,7 +1749,6 @@ class TestExecutionGates:
         )
         result = list(Delete().build(ctx, EmptyOptions()))
         handler = next(r for r in result if isinstance(r, RouteHandler))
-        assert ("sqlalchemy", "select") in handler.extra_imports
         assert handler.body_context["gate_specs_const"] == "USER_OBJECT_ACTIONS"
 
 

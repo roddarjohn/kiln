@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from be.config.schema import PYTHON_TYPES
 from be.operations._introspect import introspect_action_fn
-from be.operations.renderers import gate_wiring, utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT, gate_wiring
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name
 from foundry.operation import operation
@@ -80,7 +80,7 @@ class Action:
             extra_imports = [
                 (fn_module, fn_name),
                 ("sqlalchemy", "select"),
-                *utils_imports(),
+                FETCH_OR_404_IMPORT,
             ]
 
         else:
