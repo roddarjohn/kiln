@@ -8,9 +8,20 @@ Reference
 Config schema
 -------------
 
-All config files parse into a :class:`~be.config.schema.ProjectConfig`
-instance.  The classes below correspond directly to the fields you
-write in ``.jsonnet`` / ``.json``.
+Each target has its own pydantic schema that its config files parse
+into:
+
+* ``be`` -- :class:`~be.config.schema.ProjectConfig` (covered in detail
+  below).
+* ``be_root`` -- :class:`~be_root.config.RootConfig` (:ref:`be_root-schema`).
+* ``fe`` -- :class:`~fe.config.ProjectConfig` (:ref:`fe-schema`).
+* ``fe_root`` -- :class:`~fe_root.config.RootConfig` (:ref:`fe_root-schema`).
+
+The classes below correspond directly to the fields you write in
+the matching ``.jsonnet`` / ``.json`` file for that target.
+
+be config schema
+^^^^^^^^^^^^^^^^
 
 .. autoclass:: be.config.schema.ProjectConfig
    :members:
@@ -168,13 +179,46 @@ fields.
 The ``be/fields.libsonnet`` helper library exposes a ``nested``
 shortcut for common cases — see :doc:`usage` for examples.
 
+.. _be_root-schema:
+
+be_root config schema
+^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: be_root.config.RootConfig
+   :members:
+   :undoc-members:
+
+.. _fe-schema:
+
+fe config schema
+^^^^^^^^^^^^^^^^
+
+.. autoclass:: fe.config.ProjectConfig
+   :members:
+   :undoc-members:
+
+.. _fe_root-schema:
+
+fe_root config schema
+^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: fe_root.config.RootConfig
+   :members:
+   :undoc-members:
+
 Built-in operations
 -------------------
 
-Every built-in operation is registered under the ``foundry.operations``
-entry-point group in be's own ``pyproject.toml``.  See :doc:`usage`
-for what each one generates and :doc:`extending` for the operation
-protocol.
+Every built-in operation is registered under its target's own
+entry-point group in ``pyproject.toml``: ``be.operations`` for the
+``be`` target, ``be_root.operations`` for ``be_root``, and so on.
+See :doc:`usage` for what each one generates and :doc:`extending`
+for the operation protocol.
+
+The table below covers ``be``'s built-in ops; ``be_root``, ``fe``,
+and ``fe_root`` each ship a single project-scope ``RootScaffold`` /
+``OpenApiTsConfig`` op (see :ref:`be_root-schema`, :ref:`fe-schema`,
+:ref:`fe_root-schema` for the configs that drive them).
 
 .. list-table::
    :header-rows: 1

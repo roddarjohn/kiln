@@ -13,7 +13,6 @@ Add a ``telemetry`` block to your project config:
 
 .. code-block:: jsonnet
 
-   local be = import 'be/lib.libsonnet';
    local telemetry = import 'be/telemetry/telemetry.libsonnet';
 
    {

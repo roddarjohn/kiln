@@ -1,24 +1,30 @@
-Extending be
+Extending kiln
 ==============
 
 .. contents:: On this page
    :local:
    :depth: 2
 
-be is designed to be extended at three levels:
+kiln is designed to be extended at three levels:
 
-1. **Add an operation.**  The most common extension -- contribute a
-   new CRUD-like endpoint, a cross-cutting concern (auth, rate
-   limiting, caching), or a completely new file type.
+1. **Add an operation to an existing target.**  The most common
+   extension -- contribute a new CRUD-like endpoint to ``be``, a
+   cross-cutting concern (auth, rate limiting, caching), or a
+   completely new file type.
 2. **Swap a renderer.**  Replace or augment how an existing output
    type is turned into code, without touching the operation that
    produces it.
 3. **Ship a new target.**  Build a generator for a different
    framework entirely by using ``foundry`` directly -- no
-   dependency on ``be``'s FastAPI-specific bits.
+   dependency on any of the existing target packages
+   (``be`` / ``be_root`` / ``fe`` / ``fe_root``).
 
 This document covers all three, in increasing order of ambition.
-For background on the architecture, see :doc:`architecture`.
+The worked examples target ``be`` since it has the deepest config
+surface, but the same patterns apply to operations on any target
+(swap the ``@operation``-decorator scope and the entry-point group
+for the target you're extending).  For background on the
+architecture, see :doc:`architecture`.
 
 Adding an operation
 -------------------
@@ -92,16 +98,22 @@ A few things to notice:
 Step 2 -- register via entry point
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Add your operation to your package's ``pyproject.toml``:
+Each target declares its own entry-point group for the operations
+that extend it.  ``be``'s group is ``be.operations``; add your
+operation to your package's ``pyproject.toml`` under that group:
 
 .. code-block:: toml
 
-   [project.entry-points."foundry.operations"]
+   [project.entry-points."be.operations"]
    bulk_create = "my_pkg.ops:BulkCreate"
 
-``foundry generate`` discovers all installed operations at startup, so
-as long as your package is ``pip install``\ ed alongside be the
-operation is available.
+When you run ``foundry generate --target be``, foundry walks the
+``be.operations`` group and registers every entry alongside ``be``'s
+own built-ins.  Your operation is available as long as your package
+is ``pip install``\ ed alongside ``kiln-generator``.
+
+The same pattern works for ``be_root``, ``fe``, and ``fe_root``: pick
+the matching ``<target>.operations`` group.
 
 Step 3 -- opt resources in
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -260,9 +272,10 @@ registrations in order and uses the first whose predicate matches:
 
 Import the module where this decorator runs from one of your
 operations (or from the package's ``__init__``) so it registers when
-foundry discovers operations via the ``foundry.operations``
-entry-point group.  Register the predicate-guarded renderer *before*
-the default unguarded one if you want it to win when the flag is on.
+foundry discovers operations via the target's
+``<target>.operations`` entry-point group.  Register the
+predicate-guarded renderer *before* the default unguarded one if you
+want it to win when the flag is on.
 
 Adding a new output type
 ------------------------
@@ -370,11 +383,14 @@ Install your package and ``foundry generate --target mytarget --config
 ...`` works.  Raise subclasses of :class:`foundry.errors.CLIError` for
 user-facing mistakes; anything else will propagate with a traceback.
 
-You still need, as with be:
+You still need, as with the existing targets:
 
 * A Pydantic config schema for your target.
-* Your own operations.
-* Your own renderers, registry, and assembler.
+* Your own operations under ``<your-target>.operations`` (the group
+  named in your :class:`~foundry.target.Target`'s
+  ``operations_entry_point``).
+* Your own renderers, registered against
+  :data:`foundry.render.registry`.
 * A Jinja2 template directory (or a different renderer backend).
 
 Everything in ``foundry`` is target-agnostic and reusable.

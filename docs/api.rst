@@ -16,6 +16,42 @@ be target
 .. automodule:: be.target
    :members:
 
+be_root target
+--------------
+
+.. automodule:: be_root.target
+   :members:
+
+.. automodule:: be_root.config
+   :members:
+
+.. automodule:: be_root.operations
+   :members:
+
+fe target
+---------
+
+.. automodule:: fe.target
+   :members:
+
+.. automodule:: fe.config
+   :members:
+
+.. automodule:: fe.operations
+   :members:
+
+fe_root target
+--------------
+
+.. automodule:: fe_root.target
+   :members:
+
+.. automodule:: fe_root.config
+   :members:
+
+.. automodule:: fe_root.operations
+   :members:
+
 foundry.config
 --------------
 

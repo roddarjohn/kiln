@@ -31,8 +31,8 @@ Prerequisites
 -------------
 
 ``pgqueuer[asyncpg]`` is already a runtime dep of ``kiln-generator``,
-pulled in transitively when you install be.  No extra install is
-needed.
+pulled in transitively when you install the package.  No extra install
+is needed.
 
 You need PostgreSQL 9.5 or newer (any version with ``LISTEN`` /
 ``NOTIFY``).
