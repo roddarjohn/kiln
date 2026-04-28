@@ -76,11 +76,6 @@ class Update:
             ctx.package_prefix,
             is_object_scope=True,
         )
-        # Gated update needs to fetch the row first so the guard
-        # can inspect resource state -- a one-shot UPDATE doesn't
-        # surface the row.  Pulled in unconditionally on the gated
-        # path; the ungated path keeps the single-statement form.
-        gate_extra_imports = [("sqlalchemy", "select")] if gate_ctx else []
 
         yield RouteHandler(
             method="PATCH",
@@ -99,9 +94,9 @@ class Update:
             body_template="fastapi/ops/update.py.j2",
             body_context=gate_ctx,
             extra_imports=[
+                ("sqlalchemy", "select"),
                 ("sqlalchemy", "update"),
                 *utils_imports(),
-                *gate_extra_imports,
                 *gate_imports,
             ],
         )

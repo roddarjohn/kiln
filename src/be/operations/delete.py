@@ -55,10 +55,6 @@ class Delete:
             ctx.package_prefix,
             is_object_scope=True,
         )
-        # Gated delete fetches the row first so the guard can
-        # inspect state; ungated delete keeps the single-statement
-        # DELETE form.
-        gate_extra_imports = [("sqlalchemy", "select")] if gate_ctx else []
 
         yield RouteHandler(
             method="DELETE",
@@ -76,9 +72,9 @@ class Delete:
             body_template="fastapi/ops/delete.py.j2",
             body_context=gate_ctx,
             extra_imports=[
+                ("sqlalchemy", "select"),
                 ("sqlalchemy", "delete"),
                 *utils_imports(),
-                *gate_extra_imports,
                 *gate_imports,
             ],
         )
