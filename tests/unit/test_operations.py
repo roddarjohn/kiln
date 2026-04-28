@@ -596,6 +596,253 @@ class TestProjectRouter:
 
 
 # -------------------------------------------------------------------
+# Actions registry
+# -------------------------------------------------------------------
+
+
+class TestActions:
+    """Tests for the app-scope Actions operation."""
+
+    @staticmethod
+    def _ctx(
+        module: str,
+        resources: list[ResourceConfig],
+        store: BuildStore,
+    ) -> BuildContext:
+        """Mirror :class:`TestRouter._ctx` for the Actions op."""
+        app = App(
+            config=AppConfig(module=module, resources=resources),
+            prefix="",
+        )
+        project = ProjectConfig(
+            apps=[app],
+            databases=[DatabaseConfig(key="primary", default=True)],
+        )
+        app_id = "project.apps.0"
+        store.register_instance(app_id, app)
+
+        for index, resource in enumerate(resources):
+            iid = f"{app_id}.resources.{index}"
+            store.register_instance(iid, resource, parent=app_id)
+
+        return BuildContext(
+            config=project,
+            scope=_ROUTER_APP_SCOPE,
+            instance=app,
+            instance_id=app_id,
+            store=store,
+        )
+
+    def test_no_participating_resources_returns_empty(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="pkg.models.Post",
+            operations=[OperationConfig(name="get")],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        result = list(Actions().build(ctx, _Empty()))
+        assert result == []
+
+    def test_dump_flag_emits_registry_with_default_guards(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="pkg.models.Post",
+            include_actions_in_dump=True,
+            operations=[
+                OperationConfig(name="get"),
+                OperationConfig(name="list"),
+                OperationConfig(name="create"),
+            ],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        result = list(Actions().build(ctx, _Empty()))
+        assert len(result) == 1
+        sf = result[0]
+        assert sf.path == "blog/actions.py"
+
+        resources_ctx = sf.context["resources"]
+        assert len(resources_ctx) == 1
+        entry = resources_ctx[0]
+        assert entry["constant_prefix"] == "POST"
+        assert entry["object_actions"] == [
+            {"name": "get", "can": "always_true"},
+        ]
+        assert entry["collection_actions"] == [
+            {"name": "list", "can": "always_true"},
+            {"name": "create", "can": "always_true"},
+        ]
+        assert sf.context["guard_imports"] == []
+
+    def test_can_path_registers_import_and_uses_bare_name(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="pkg.models.Post",
+            include_actions_in_dump=True,
+            operations=[
+                OperationConfig(name="get", can="pkg.guards.can_get_post"),
+                OperationConfig(
+                    name="delete", can="pkg.guards.can_delete_post"
+                ),
+                OperationConfig(name="list"),
+            ],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        sf = next(
+            r
+            for r in Actions().build(ctx, _Empty())
+            if isinstance(r, StaticFile)
+        )
+        assert sf.context["guard_imports"] == [
+            ("pkg.guards", ["can_delete_post", "can_get_post"]),
+        ]
+        entry = sf.context["resources"][0]
+        assert entry["object_actions"] == [
+            {"name": "get", "can": "can_get_post"},
+            {"name": "delete", "can": "can_delete_post"},
+        ]
+        assert entry["collection_actions"] == [
+            {"name": "list", "can": "always_true"},
+        ]
+
+    def test_resource_with_only_can_participates(self):
+        """A resource that opts in via ``can`` alone still gets a registry."""
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="pkg.models.Post",
+            operations=[OperationConfig(name="get", can="pkg.g.can_get")],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        result = list(Actions().build(ctx, _Empty()))
+        assert len(result) == 1
+
+    def test_action_op_introspected_for_object_scope(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="tests.unit._action_stubs.StubModel",
+            include_actions_in_dump=True,
+            operations=[
+                OperationConfig(
+                    name="publish",
+                    type="action",
+                    fn="tests.unit._action_stubs.object_action_no_body",
+                ),
+                OperationConfig(
+                    name="bulk_archive",
+                    type="action",
+                    fn="tests.unit._action_stubs.collection_action_no_body",
+                ),
+            ],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        sf = next(
+            r
+            for r in Actions().build(ctx, _Empty())
+            if isinstance(r, StaticFile)
+        )
+        entry = sf.context["resources"][0]
+        assert entry["object_actions"] == [
+            {"name": "publish", "can": "always_true"},
+        ]
+        assert entry["collection_actions"] == [
+            {"name": "bulk_archive", "can": "always_true"},
+        ]
+
+    def test_modifier_ops_skipped(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        resource = ResourceConfig(
+            model="pkg.models.Post",
+            include_actions_in_dump=True,
+            operations=[
+                OperationConfig(name="list"),
+                # An op with an unknown type should not appear in the
+                # registry; modifiers carry ``type`` discriminators.
+                OperationConfig(name="filter_thing", type="filter"),
+            ],
+        )
+        ctx = self._ctx("blog", [resource], store)
+
+        sf = next(
+            r
+            for r in Actions().build(ctx, _Empty())
+            if isinstance(r, StaticFile)
+        )
+        entry = sf.context["resources"][0]
+        assert entry["collection_actions"] == [
+            {"name": "list", "can": "always_true"},
+        ]
+        assert entry["object_actions"] == []
+
+    def test_multiple_resources_share_import_module(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        post = ResourceConfig(
+            model="pkg.models.Post",
+            operations=[
+                OperationConfig(name="get", can="pkg.guards.can_get_post"),
+            ],
+        )
+        comment = ResourceConfig(
+            model="pkg.models.Comment",
+            operations=[
+                OperationConfig(name="get", can="pkg.guards.can_get_comment"),
+            ],
+        )
+        ctx = self._ctx("blog", [post, comment], store)
+
+        sf = next(
+            r
+            for r in Actions().build(ctx, _Empty())
+            if isinstance(r, StaticFile)
+        )
+        assert sf.context["guard_imports"] == [
+            ("pkg.guards", ["can_get_comment", "can_get_post"]),
+        ]
+        prefixes = [r["constant_prefix"] for r in sf.context["resources"]]
+        assert prefixes == ["POST", "COMMENT"]
+
+    def test_skips_non_participating_resources_in_mixed_app(self):
+        from be.operations.actions import Actions
+
+        store = BuildStore(scope_tree=_ROUTER_SCOPE_TREE)
+        opted_in = ResourceConfig(
+            model="pkg.models.Post",
+            include_actions_in_dump=True,
+            operations=[OperationConfig(name="get")],
+        )
+        opted_out = ResourceConfig(
+            model="pkg.models.Tag",
+            operations=[OperationConfig(name="get")],
+        )
+        ctx = self._ctx("blog", [opted_in, opted_out], store)
+
+        sf = next(
+            r
+            for r in Actions().build(ctx, _Empty())
+            if isinstance(r, StaticFile)
+        )
+        prefixes = [r["constant_prefix"] for r in sf.context["resources"]]
+        assert prefixes == ["POST"]
+
+
+# -------------------------------------------------------------------
 # CRUD helpers
 # -------------------------------------------------------------------
 
