@@ -591,9 +591,57 @@ class ResourceConfig(BaseModel):
     """Ordered list of operations to run — each becomes a scope
     instance of ``"operation"`` that the engine visits in turn."""
 
+    include_actions_in_dump: bool = False
+    """When ``True``, every dumped representation of this resource
+    (object responses and list rows) gains an ``actions`` field
+    listing the operations the current session may take.  The list
+    envelope of the list endpoint also gains a collection-scoped
+    ``actions`` field.  Reserves the name ``"actions"``: no
+    :class:`FieldSpec` on any of this resource's ops may use it."""
+
+    permissions_endpoint: bool = False
+    """When ``True``, generate ``GET /{prefix}/permissions`` (collection)
+    and ``GET /{prefix}/{pk}/permissions`` (object) returning the
+    available actions for the current session without paying for a
+    full resource fetch.  Independent of
+    :attr:`include_actions_in_dump`."""
+
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
+
+    @model_validator(mode="after")
+    def _reserve_actions_field_name(self) -> ResourceConfig:
+        """Reject ``actions`` as a field name when the dump is on.
+
+        ``include_actions_in_dump`` injects an ``actions`` key into
+        the response schema; a consumer-declared field of the same
+        name would silently collide.  Walks each op's raw
+        ``fields`` extra (the same path the op's ``Options`` model
+        will parse) so the error fires at config-load time, not
+        downstream during template rendering.
+        """
+        if not self.include_actions_in_dump:
+            return self
+
+        for op in self.operations:
+            fields = op.options.get("fields")
+
+            if not isinstance(fields, list):
+                continue
+
+            for field in fields:
+                if isinstance(field, dict) and field.get("name") == "actions":
+                    msg = (
+                        f"Resource {self.model!r} sets "
+                        f"include_actions_in_dump=True, which reserves "
+                        f"the field name 'actions'.  Operation "
+                        f"{op.name!r} declares a field named 'actions' "
+                        f"-- rename it."
+                    )
+                    raise ValueError(msg)
+
+        return self
 
 
 class AppConfig(BaseModel):
