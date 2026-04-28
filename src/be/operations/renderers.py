@@ -23,6 +23,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
+from be.operations._naming import (
+    app_module_for,
+    collection_specs_const,
+    object_specs_const,
+)
 from be.operations.list import ListResult
 from be.operations.types import (
     EnumClass,
@@ -100,8 +105,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
-    parts = model_module.rsplit(".", 1)
-    app = parts[0] if len(parts) > 1 else model_module
+    app = app_module_for(model_dotted)
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
@@ -407,10 +411,10 @@ def _serializer_fragment(
     )
     imports.add_from(schema_mod, ser.schema_name)
 
-    actions_context: dict[str, str] = {}
+    actions_context: dict[str, object] = {}
 
-    if ser.dumps_actions:
-        actions_context = _wire_dumps_actions(info, imports)
+    if ser.include_actions:
+        actions_context = _wire_action_dump(info, imports)
         # Skip the synthetic ``actions`` field in the per-field
         # render loop -- the template's actions branch builds it
         # directly via ``available_actions(...)``.
@@ -442,7 +446,7 @@ def _serializer_fragment(
                 }
                 for f in rendered_fields
             ],
-            "dumps_actions": ser.dumps_actions,
+            "include_actions": ser.include_actions,
             **actions_context,
         },
         imports=imports,
@@ -567,10 +571,10 @@ def _list_result_fragment(
 # -------------------------------------------------------------------
 
 
-def _wire_dumps_actions(
+def _wire_action_dump(
     info: _ResourceInfo,
     imports: ImportCollector,
-) -> dict[str, str]:
+) -> dict[str, object]:
     """Register imports and return template context for an action dump.
 
     The action-framework path turns the resource's top-level
@@ -609,8 +613,8 @@ def _wire_dumps_actions(
 
     session_module, session_name = info.session_schema.rsplit(".", 1)
     actions_module = prefix_import(info.package_prefix, info.app, "actions")
-    object_const = f"{info.model.raw.upper()}_OBJECT_ACTIONS"
-    collection_const = f"{info.model.raw.upper()}_COLLECTION_ACTIONS"
+    object_const = object_specs_const(info.model)
+    collection_const = collection_specs_const(info.model)
 
     imports.add_from("ingot.actions", "available_actions")
     imports.add_from(actions_module, object_const, collection_const)
@@ -630,50 +634,25 @@ def gate_wiring(
     *,
     is_object_scope: bool,
 ) -> tuple[dict[str, object], list[tuple[str, str]]]:
-    """Wire execution-time gate imports + body context for one op.
+    """Wire imports + body context for one op's execution gate.
 
-    Returns ``({}, [])`` when the op has no ``can`` callable
-    configured (no gate emitted).  When configured, returns a
-    body-context fragment and the import set the gate references:
-    :func:`ingot.actions.find_can`, FastAPI's
-    :class:`~fastapi.HTTPException` for the 403 raise, and the
-    per-resource registry constant from the per-app
-    ``actions.py``.  Built-in CRUD ops and the action op share
-    this so handler templates can render an identical gate
-    regardless of source op.
-
-    Args:
-        op: The operation config carrying the optional ``can``
-            dotted path.
-        resource: Enclosing resource config; used to derive the
-            registry constant name and import path.
-        package_prefix: The project's
-            :attr:`~foundry.config.FoundryConfig.package_prefix`,
-            forwarded to :func:`foundry.naming.prefix_import`.
-        is_object_scope: ``True`` for handlers operating on a
-            single instance (``get``, ``update``, ``delete``,
-            object actions), ``False`` for collection handlers
-            (``create``, collection actions).  Selects between
-            the ``_OBJECT_ACTIONS`` and ``_COLLECTION_ACTIONS``
-            tuples in the generated registry.
-
-    Returns:
-        ``(body_context, extra_imports)``.  Each is empty when
-        the op is ungated; otherwise the body context carries
-        ``gate_specs_const`` and ``gate_op_name`` (consumed by
-        each op's body template) and the import list contains
-        the three pairs above.
-
+    Returns ``({}, [])`` when the op has no ``can`` configured.
+    Centralized so every CRUD and action op renders an identical
+    gate -- visibility predicate and 403 enforcement share the
+    one callable, so they can never drift.
     """
     if op.can is None:
         return {}, []
 
-    model_module, model = Name.from_dotted(resource.model)
-    parts = model_module.rsplit(".", 1)
-    app = parts[0] if len(parts) > 1 else model_module
-    actions_module = prefix_import(package_prefix, app, "actions")
-    suffix = "OBJECT_ACTIONS" if is_object_scope else "COLLECTION_ACTIONS"
-    const = f"{model.raw.upper()}_{suffix}"
+    _, model = Name.from_dotted(resource.model)
+    actions_module = prefix_import(
+        package_prefix, app_module_for(resource.model), "actions"
+    )
+    const = (
+        object_specs_const(model)
+        if is_object_scope
+        else collection_specs_const(model)
+    )
 
     return (
         {"gate_specs_const": const, "gate_op_name": op.name},

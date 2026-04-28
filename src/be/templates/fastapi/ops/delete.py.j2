@@ -1,14 +1,12 @@
 {% extends "fastapi/handler_default.py.j2" %}
+{% from "fastapi/ops/_gate.py.j2" import gate %}
 {% block body %}
     obj = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
-{% if gate_specs_const|default(none) %}
-    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")(obj, session):
-        raise HTTPException(status_code=403, detail="Forbidden")
-{% endif %}
+{{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
     await db.execute(delete({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}))
     await db.commit()
 {% endblock %}

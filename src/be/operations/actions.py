@@ -21,6 +21,7 @@ framework see no extra modules in their generated tree.
 from typing import TYPE_CHECKING, cast
 
 from be.operations._introspect import introspect_action_fn
+from be.operations._naming import collection_specs_const, object_specs_const
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -146,8 +147,7 @@ def _build_resource_entry(
     (only modifiers, say) -- the resource section is then omitted
     entirely so the rendered file stays clean.
     """
-    _, model_name = Name.from_dotted(resource.model)
-    constant_prefix = model_name.raw.upper()
+    _, model = Name.from_dotted(resource.model)
 
     object_actions: list[dict[str, str]] = []
     collection_actions: list[dict[str, str]] = []
@@ -167,7 +167,8 @@ def _build_resource_entry(
         return None
 
     return {
-        "constant_prefix": constant_prefix,
+        "object_const": object_specs_const(model),
+        "collection_const": collection_specs_const(model),
         "object_actions": object_actions,
         "collection_actions": collection_actions,
     }

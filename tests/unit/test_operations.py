@@ -147,6 +147,20 @@ class _Empty(BaseModel):
     """Empty options stand-in."""
 
 
+def _minimal_auth() -> AuthConfig:
+    """Cheapest valid AuthConfig for tests that need one.
+
+    Many tests now need ``project.auth`` configured solely to
+    satisfy :class:`ProjectConfig`'s action-framework validator;
+    bundling the boilerplate keeps the noise out of test bodies.
+    """
+    return AuthConfig(
+        credentials_schema="myapp.auth.LoginCredentials",
+        session_schema="myapp.auth.Session",
+        validate_fn="myapp.auth.validate",
+    )
+
+
 # -------------------------------------------------------------------
 # Scaffold
 # -------------------------------------------------------------------
@@ -616,16 +630,8 @@ class TestActions:
             config=AppConfig(module=module, resources=resources),
             prefix="",
         )
-        # Auth is required by ProjectConfig's action-framework
-        # validator whenever any resource opts into the framework;
-        # the Actions op's own behavior is independent of auth, so
-        # we keep auth configured throughout the test suite.
         project = ProjectConfig(
-            auth=AuthConfig(
-                credentials_schema="myapp.auth.LoginCredentials",
-                session_schema="myapp.auth.Session",
-                validate_fn="myapp.auth.validate",
-            ),
+            auth=_minimal_auth(),
             apps=[app],
             databases=[DatabaseConfig(key="primary", default=True)],
         )
@@ -680,7 +686,8 @@ class TestActions:
         resources_ctx = sf.context["resources"]
         assert len(resources_ctx) == 1
         entry = resources_ctx[0]
-        assert entry["constant_prefix"] == "POST"
+        assert entry["object_const"] == "POST_OBJECT_ACTIONS"
+        assert entry["collection_const"] == "POST_COLLECTION_ACTIONS"
         assert entry["object_actions"] == [
             {"name": "get", "can": "always_true"},
         ]
@@ -826,8 +833,8 @@ class TestActions:
         assert sf.context["guard_imports"] == [
             ("pkg.guards", ["can_get_comment", "can_get_post"]),
         ]
-        prefixes = [r["constant_prefix"] for r in sf.context["resources"]]
-        assert prefixes == ["POST", "COMMENT"]
+        consts = [r["object_const"] for r in sf.context["resources"]]
+        assert consts == ["POST_OBJECT_ACTIONS", "COMMENT_OBJECT_ACTIONS"]
 
     def test_skips_non_participating_resources_in_mixed_app(self):
         from be.operations.actions import Actions
@@ -849,8 +856,8 @@ class TestActions:
             for r in Actions().build(ctx, _Empty())
             if isinstance(r, StaticFile)
         )
-        prefixes = [r["constant_prefix"] for r in sf.context["resources"]]
-        assert prefixes == ["POST"]
+        consts = [r["object_const"] for r in sf.context["resources"]]
+        assert consts == ["POST_OBJECT_ACTIONS"]
 
 
 # -------------------------------------------------------------------
@@ -1840,13 +1847,7 @@ class TestAuthForcesSessionForActions:
 
     @staticmethod
     def _config_with_auth() -> MinimalConfig:
-        return MinimalConfig(
-            auth=AuthConfig(
-                credentials_schema="myapp.auth.LoginCredentials",
-                session_schema="myapp.auth.Session",
-                validate_fn="myapp.auth.validate",
-            ),
-        )
+        return MinimalConfig(auth=_minimal_auth())
 
     def test_dump_resource_threads_session_even_without_require_auth(self):
         resource = ResourceConfig(
@@ -1938,7 +1939,7 @@ class TestGetIncludesActions:
         assert len(action_fields) == 1
         assert action_fields[0].py_type == "list[ActionRef]"
 
-    def test_serializer_dumps_actions(self):
+    def test_serializer_includes_actions(self):
         resource = ResourceConfig(
             model="app.models.User",
             include_actions_in_dump=True,
@@ -1947,7 +1948,7 @@ class TestGetIncludesActions:
         result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
 
         ser = next(r for r in result if isinstance(r, SerializerFn))
-        assert ser.dumps_actions is True
+        assert ser.include_actions is True
 
     def test_handler_marks_serializer_async(self):
         resource = ResourceConfig(

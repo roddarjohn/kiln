@@ -3,8 +3,8 @@
 Each resource that opts into the action framework exposes two
 tuples:
 
-* ``{{ resources[0].constant_prefix }}_OBJECT_ACTIONS``
-* ``{{ resources[0].constant_prefix }}_COLLECTION_ACTIONS``
+* ``{{ resources[0].object_const }}``
+* ``{{ resources[0].collection_const }}``
 
 Generated route handlers and serializers iterate these tuples to
 populate the ``actions`` field on responses, drive the
@@ -21,13 +21,13 @@ from {{ module_path }} import {{ names | join(", ") }}
 
 {% for resource in resources %}
 
-{{ resource.constant_prefix }}_OBJECT_ACTIONS = (
+{{ resource.object_const }} = (
 {% for action in resource.object_actions %}
     ActionSpec(name="{{ action.name }}", can={{ action.can }}, is_object_action=True),
 {% endfor %}
 )
 
-{{ resource.constant_prefix }}_COLLECTION_ACTIONS = (
+{{ resource.collection_const }} = (
 {% for action in resource.collection_actions %}
     ActionSpec(name="{{ action.name }}", can={{ action.can }}, is_object_action=False),
 {% endfor %}

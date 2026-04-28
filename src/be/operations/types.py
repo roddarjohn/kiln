@@ -183,7 +183,7 @@ class SerializerFn:
     at the related model so the renderer can import it alongside
     the parent.
 
-    ``dumps_actions`` toggles the action-framework path: the
+    ``include_actions`` toggles the action-framework path: the
     serializer becomes ``async``, takes a ``session`` parameter,
     and includes ``actions=[*object_refs, *collection_refs]`` in
     the schema construction.  Set on the top-level resource /
@@ -197,7 +197,7 @@ class SerializerFn:
     model_module: str
     schema_name: str
     fields: list[Field] = field(default_factory=list)
-    dumps_actions: bool = False
+    include_actions: bool = False
 
 
 @dataclass
@@ -302,7 +302,7 @@ def _construct_dump(  # noqa: PLR0913
     When *include_actions* is ``True`` (the resource has
     ``include_actions_in_dump=True``), the main schema gains an
     ``actions: list[ActionRef]`` field and the main serializer is
-    flagged ``dumps_actions=True``.  Nested schemas and sub-
+    flagged ``include_actions=True``.  Nested schemas and sub-
     serializers are left untouched -- the action list belongs to
     the top-level resource, not its embedded relations.
     """
@@ -331,7 +331,7 @@ def _construct_dump(  # noqa: PLR0913
         model_module=model_module,
         schema_name=main_schema.name,
         fields=expanded,
-        dumps_actions=include_actions,
+        include_actions=include_actions,
     )
     load_options, load_imports = _build_load_chains(fields, model.pascal)
     return _DumpOutputs(

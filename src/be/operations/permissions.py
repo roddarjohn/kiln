@@ -24,6 +24,11 @@ critical because FastAPI matches in declaration order, and
 from typing import TYPE_CHECKING
 
 from be.config.schema import PYTHON_TYPES
+from be.operations._naming import (
+    app_module_for,
+    collection_specs_const,
+    object_specs_const,
+)
 from be.operations.renderers import FETCH_OR_404_IMPORT
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name, prefix_import
@@ -83,11 +88,11 @@ class Permissions:
 
         actions_module = prefix_import(
             ctx.package_prefix,
-            _app_module(resource.model),
+            app_module_for(resource.model),
             "actions",
         )
-        object_const = f"{model.raw.upper()}_OBJECT_ACTIONS"
-        collection_const = f"{model.raw.upper()}_COLLECTION_ACTIONS"
+        object_const = object_specs_const(model)
+        collection_const = collection_specs_const(model)
 
         common_imports: list[tuple[str, str]] = [
             ("ingot.actions", "ActionRef"),
@@ -100,7 +105,7 @@ class Permissions:
         object_handler = RouteHandler(
             method="GET",
             path=f"/{{{resource.pk}}}/permissions",
-            function_name=f"permissions_{model.lower}",
+            function_name=f"permissions_{model.lower}_object",
             op_name="permissions",
             params=[
                 RouteParam(
@@ -165,19 +170,3 @@ class Permissions:
             status_success=200,
             action_name="permissions_collection",
         )
-
-
-def _app_module(model_path: str) -> str:
-    """Return the consumer's app package from a model dotted path.
-
-    Mirrors :func:`be.operations.list._app_module` -- duplicated
-    rather than imported to keep the permissions op decoupled
-    from list's internals.
-    """
-    model_module, _ = Name.from_dotted(model_path)
-    parts = model_module.rsplit(".", 1)
-
-    if len(parts) > 1:
-        return parts[0]
-
-    return model_module

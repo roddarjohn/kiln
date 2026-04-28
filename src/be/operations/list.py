@@ -15,6 +15,10 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel
 
 from be.config.schema import FieldSpec  # noqa: TC001
+from be.operations._naming import (
+    app_module_for,
+    collection_specs_const,
+)
 from be.operations.types import (
     RouteHandler,
     RouteParam,
@@ -146,10 +150,10 @@ class List:
         if include_actions:
             actions_module = prefix_import(
                 ctx.package_prefix,
-                _app_module(resource.model),
+                app_module_for(resource.model),
                 "actions",
             )
-            collection_const = f"{model.raw.upper()}_COLLECTION_ACTIONS"
+            collection_const = collection_specs_const(model)
             extra_imports.extend(
                 [
                     ("ingot.actions", "filter_visible"),
@@ -229,20 +233,3 @@ def resource_model(ctx: BuildContext[ModifierConfig, ProjectConfig]) -> Name:
     _, model = Name.from_dotted(resource.model)
 
     return model
-
-
-def _app_module(model_path: str) -> str:
-    """Return the consumer's app package from a model dotted path.
-
-    For ``"blog.models.Article"`` returns ``"blog"``; mirrors the
-    derivation used by :func:`be.operations.renderers._resource_info`
-    so generated handlers and serializers import the action
-    registry from the same module.
-    """
-    model_module, _ = Name.from_dotted(model_path)
-    parts = model_module.rsplit(".", 1)
-
-    if len(parts) > 1:
-        return parts[0]
-
-    return model_module

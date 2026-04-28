@@ -34,6 +34,47 @@ if TYPE_CHECKING:
     from foundry.spec import GeneratedFile
 
 
+_FIELDS = [
+    {"name": "id", "type": "uuid"},
+    {"name": "title", "type": "str"},
+]
+
+
+def _read_op(name: str, *, can: str | None = None) -> OperationConfig:
+    """Read op (get/list) carrying the standard id+title fields."""
+    return OperationConfig(name=name, fields=_FIELDS, can=can)
+
+
+def _write_op(name: str, *, can: str | None = None) -> OperationConfig:
+    """Write op (create/update) carrying the title field."""
+    return OperationConfig(
+        name=name, fields=[{"name": "title", "type": "str"}], can=can
+    )
+
+
+def _post_resource() -> ResourceConfig:
+    """The full action-framework opt-in: dump, permissions, mixed gates.
+
+    Has both gated and ungated CRUD ops so the integration tests
+    can assert each path independently:
+
+    * ``get``, ``list``, ``update`` are gated.
+    * ``create``, ``delete`` are not.
+    """
+    return ResourceConfig(
+        model="blog.models.Post",
+        include_actions_in_dump=True,
+        permissions_endpoint=True,
+        operations=[
+            _read_op("get", can="blog.guards.can_get_post"),
+            _read_op("list", can="blog.guards.can_list_post"),
+            _write_op("create"),
+            _write_op("update", can="blog.guards.can_update_post"),
+            OperationConfig(name="delete"),
+        ],
+    )
+
+
 @pytest.fixture
 def files() -> dict[str, str]:
     """Run the full pipeline against an action-framework project."""
@@ -46,44 +87,7 @@ def files() -> dict[str, str]:
         databases=[DatabaseConfig(key="primary", default=True)],
         apps=[
             App(
-                config=AppConfig(
-                    module="blog",
-                    resources=[
-                        ResourceConfig(
-                            model="blog.models.Post",
-                            include_actions_in_dump=True,
-                            permissions_endpoint=True,
-                            operations=[
-                                OperationConfig(
-                                    name="get",
-                                    fields=[
-                                        {"name": "id", "type": "uuid"},
-                                        {"name": "title", "type": "str"},
-                                    ],
-                                    can="blog.guards.can_get_post",
-                                ),
-                                OperationConfig(
-                                    name="list",
-                                    fields=[
-                                        {"name": "id", "type": "uuid"},
-                                        {"name": "title", "type": "str"},
-                                    ],
-                                    can="blog.guards.can_list_post",
-                                ),
-                                OperationConfig(
-                                    name="create",
-                                    fields=[{"name": "title", "type": "str"}],
-                                ),
-                                OperationConfig(
-                                    name="update",
-                                    fields=[{"name": "title", "type": "str"}],
-                                    can="blog.guards.can_update_post",
-                                ),
-                                OperationConfig(name="delete"),
-                            ],
-                        ),
-                    ],
-                ),
+                config=AppConfig(module="blog", resources=[_post_resource()]),
                 prefix="/blog",
             ),
         ],
@@ -132,7 +136,7 @@ def test_resource_schema_includes_actions_field(files: dict[str, str]) -> None:
     assert schema.count("actions: list[ActionRef]") == 2
 
 
-def test_serializer_threads_session_and_dumps_actions(
+def test_serializer_threads_session_and_includes_actions(
     files: dict[str, str],
 ) -> None:
     """Serializers turn async, take session, fold action lists."""
@@ -247,7 +251,7 @@ def test_session_threaded_even_when_op_has_no_require_auth(
         "async def create_post(",
         "async def update_post(",
         "async def delete_post(",
-        "async def permissions_post(",
+        "async def permissions_post_object(",
         "async def permissions_post_collection(",
     ):
         start = routes.index(fn)
