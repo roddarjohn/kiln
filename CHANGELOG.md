@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.4...kiln-v0.9.0) (2026-04-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* be and fe division ([#57](https://github.com/roddarjohn/kiln/issues/57))
+
+### Features
+
+* be and fe division ([#57](https://github.com/roddarjohn/kiln/issues/57)) ([07604f0](https://github.com/roddarjohn/kiln/commit/07604f09373e04e5840d0b433ac0a0ac830f3031))
+
 ## [0.8.4](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.3...kiln-v0.8.4) (2026-04-28)
 
 
