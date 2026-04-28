@@ -40,7 +40,7 @@ class OpenApiTsConfig:
         ctx: BuildContext[ProjectConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[StaticFile]:
-        """Yield a single ``openapi-ts.config.ts`` :class:`StaticFile`.
+        """Yield a single ``openapi-ts.config.ts`` :class:`~foundry.outputs.StaticFile`.
 
         Args:
             ctx: Build context carrying the validated
