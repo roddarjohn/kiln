@@ -3,14 +3,21 @@
 An operation is a unit of generation that declares its scope,
 dependencies, and an ``Options`` model for configuration
 validation.  The :func:`operation` decorator captures that
-metadata and adds the class to an :class:`OperationRegistry` —
-the engine reads everything it needs from the registry at build
-time, so individual classes don't need to carry their metadata.
+metadata and stashes it on the class as ``_operation_meta``;
+:func:`load_registry` then walks a target's entry-point group
+at build time, loads each declared class, and registers them
+into a fresh :class:`OperationRegistry`.
 
-Production code relies on the process-wide :data:`DEFAULT_REGISTRY`
-populated by entry-point-discovered modules at import time.  Tests
-can pass ``registry=<isolated>`` to :func:`operation` and
-:class:`~foundry.engine.Engine` to keep their ops separate.
+There is no process-wide default registry.  Each
+:class:`~foundry.target.Target` declares the entry-point group
+its operations live under (e.g. ``"kiln.operations"`` for the
+kiln target, ``"kiln_root.operations"`` for kiln_root); the
+pipeline builds an isolated registry per build, so two targets
+installed side-by-side can never see each other's ops.
+
+Tests that want to exercise a specific op without going through
+entry-point discovery can pass ``registry=<isolated>`` to
+:func:`operation` and :class:`~foundry.engine.Engine` directly.
 """
 
 import importlib.metadata
@@ -20,7 +27,9 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 
-ENTRY_POINT_GROUP = "foundry.operations"
+#: Class attribute the :func:`operation` decorator stashes meta
+#: under, for :func:`load_registry` to read at entry-point time.
+_META_ATTR = "_operation_meta"
 
 # -------------------------------------------------------------------
 # Metadata
@@ -144,12 +153,6 @@ class OperationRegistry:
         return {name: _topo_sort(ops) for name, ops in buckets.items()}
 
 
-#: Process-wide registry populated by :func:`operation` decorators
-#: at import time.  Production callers read from this after
-#: triggering entry-point imports via :func:`discover_operations`.
-DEFAULT_REGISTRY = OperationRegistry()
-
-
 # -------------------------------------------------------------------
 # Decorator
 # -------------------------------------------------------------------
@@ -162,7 +165,7 @@ def operation(  # noqa: PLR0913
     requires: list[str] | None = None,
     after_children: bool = False,
     dispatch_on: str | None = None,
-    registry: OperationRegistry = DEFAULT_REGISTRY,
+    registry: OperationRegistry | None = None,
 ) -> Any:  # noqa: ANN401
     """Decorate a class as a kiln operation.
 
@@ -189,6 +192,14 @@ def operation(  # noqa: PLR0913
     activation, a single operation mechanism covers both
     "produce" and "augment" roles.
 
+    The decorator stashes the captured :class:`OperationMeta` on
+    the class under ``_operation_meta``;
+    :func:`load_registry` reads it back at entry-point load
+    time.  When *registry* is supplied (the test path) the
+    decorator also pushes the entry into that registry directly,
+    so unit tests can keep ops out of the entry-point flow
+    entirely.
+
     Args:
         name: Unique operation name.
         scope: Scope name (e.g. ``"resource"``, ``"app"``,
@@ -206,10 +217,12 @@ def operation(  # noqa: PLR0913
             discriminated-union config (e.g. ``OperationConfig``
             entries under a resource), where multiple ops share
             one scope and each matches a single entry.
-        registry: Registry to register into.  Defaults to the
-            process-wide :data:`DEFAULT_REGISTRY`; tests may
-            pass an isolated registry to keep their ops out of
-            the global namespace.
+        registry: Optional registry to push into directly.
+            ``None`` (the production path) means the decorator
+            only stashes meta on the class; the pipeline picks
+            it up later via :func:`load_registry`.  Tests pass
+            an isolated registry to keep their ops out of the
+            entry-point flow.
 
     Returns:
         Class decorator.
@@ -235,35 +248,59 @@ def operation(  # noqa: PLR0913
     )
 
     def decorator(cls: type) -> type:
-        registry.register(meta, cls)
+        setattr(cls, _META_ATTR, meta)
 
         if not hasattr(cls, "Options"):
             cls.Options = EmptyOptions
+
+        if registry is not None:
+            registry.register(meta, cls)
 
         return cls
 
     return decorator
 
 
-def load_default_registry() -> OperationRegistry:
-    """Return :data:`DEFAULT_REGISTRY`, loading entry-point ops first.
+def load_registry(entry_point_group: str) -> OperationRegistry:
+    """Build a fresh :class:`OperationRegistry` from an entry-point group.
 
-    Any installed package can declare operations in its
-    ``pyproject.toml``::
+    Walks ``entry_point_group``, loads each declared class, and
+    registers it via the :class:`OperationMeta` stashed on the
+    class by the :func:`operation` decorator.  Each call returns
+    a brand-new registry, so two targets sharing a process never
+    see each other's ops.
 
-        [project.entry-points."foundry.operations"]
-        my_op = "my_pkg.ops:MyOp"
+    Args:
+        entry_point_group: Dotted entry-point group name, e.g.
+            ``"kiln.operations"`` or ``"kiln_root.operations"``.
 
-    Loading those modules fires their :func:`operation`
-    decorators, which populate :data:`DEFAULT_REGISTRY`.  Used as
-    the default factory for :attr:`~foundry.engine.Engine.registry`
-    so ``Engine()`` just works; Python's import cache makes
-    repeat calls cheap.
+    Returns:
+        A populated :class:`OperationRegistry`.
+
+    Raises:
+        TypeError: If a discovered class is missing the
+            ``_operation_meta`` attribute -- typically because
+            the class wasn't decorated with
+            :func:`operation`.
+
     """
-    for entry_point in importlib.metadata.entry_points(group=ENTRY_POINT_GROUP):
-        entry_point.load()
+    registry = OperationRegistry()
 
-    return DEFAULT_REGISTRY
+    for entry_point in importlib.metadata.entry_points(group=entry_point_group):
+        cls = entry_point.load()
+        meta = getattr(cls, _META_ATTR, None)
+
+        if meta is None:
+            msg = (
+                f"Entry point {entry_point.name!r} in group "
+                f"{entry_point_group!r} loaded {cls!r}, which is "
+                f"not an @operation-decorated class"
+            )
+            raise TypeError(msg)
+
+        registry.register(meta, cls)
+
+    return registry
 
 
 # -------------------------------------------------------------------

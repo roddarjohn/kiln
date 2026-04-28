@@ -307,7 +307,7 @@ Operations
 
 .. autofunction:: foundry.operation.operation
 
-.. autofunction:: foundry.operation.load_default_registry
+.. autofunction:: foundry.operation.load_registry
 
 .. autoclass:: foundry.operation.OperationMeta
    :members:
@@ -317,11 +317,6 @@ Operations
 
 .. autoclass:: foundry.operation.OperationRegistry
    :members:
-
-.. data:: foundry.operation.DEFAULT_REGISTRY
-
-   Process-wide registry populated at import time by entry-point
-   discovery.
 
 Scopes
 ^^^^^^

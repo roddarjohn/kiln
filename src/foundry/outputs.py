@@ -6,7 +6,14 @@ and lives here; Python / FastAPI / Pydantic output types live in
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+from foundry.render import FileFragment, registry
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from foundry.render import Fragment, RenderCtx
 
 
 @dataclass
@@ -28,3 +35,22 @@ class StaticFile:
     template: str
     context: dict[str, Any] = field(default_factory=dict)
     if_exists: Literal["overwrite", "skip"] = "overwrite"
+
+
+@registry.renders(StaticFile)
+def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
+    """Render a :class:`StaticFile` into a single :class:`FileFragment`.
+
+    Lives in foundry (next to :class:`StaticFile`) rather than in
+    a target package so every target gets the renderer the moment
+    it imports :mod:`foundry.outputs` -- without this, a target
+    that doesn't transitively import kiln's renderer module would
+    fail with ``LookupError: No renderer for StaticFile`` the
+    first time an op yields one.
+    """
+    yield FileFragment(
+        path=sf.path,
+        template=sf.template,
+        context=dict(sf.context),
+        if_exists=sf.if_exists,
+    )

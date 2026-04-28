@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from foundry.config import FoundryConfig
-    from foundry.operation import OperationRegistry
 
 
 ENTRY_POINT_GROUP = "foundry.targets"
@@ -50,21 +49,19 @@ class Target:
         template_dir: Directory of Jinja templates the target's
             renderers reference.  Foundry builds the Jinja
             environment rooted here.
+        operations_entry_point: Entry-point group name where the
+            target's ``@operation``-decorated classes are
+            registered, e.g. ``"kiln.operations"`` or
+            ``"kiln_root.operations"``.  At build time the
+            pipeline calls
+            :func:`~foundry.operation.load_registry` against
+            this group to assemble a fresh, target-private
+            registry; targets installed side-by-side never see
+            each other's ops.
         jsonnet_stdlib_dir: Optional directory of jsonnet
             ``.libsonnet`` files exposed to configs as
             ``<name>/...`` imports.  ``None`` when the target
             ships no stdlib.
-        registry: Dedicated operation registry holding the ops
-            this target wants the engine to run.  Each target
-            owns its own registry: targets that ship together
-            (e.g. ``kiln`` and ``kiln_root``) declare overlapping
-            scope names but their ops would crash on each other's
-            configs, so foundry never mixes them.  Populate by
-            having the target's package import its op modules at
-            the same time it constructs the :class:`Target` --
-            the :func:`~foundry.operation.operation` decorator
-            then pushes each op into whichever registry the
-            module passed it.
 
     """
 
@@ -72,7 +69,7 @@ class Target:
     language: str
     schema: type[FoundryConfig]
     template_dir: Path
-    registry: OperationRegistry
+    operations_entry_point: str
     jsonnet_stdlib_dir: Path | None = None
 
 

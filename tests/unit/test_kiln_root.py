@@ -13,11 +13,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from foundry.config import load_config
+from foundry.operation import load_registry
 from foundry.pipeline import generate
 from foundry.target import discover_targets
 from kiln.target import target as kiln_target
 from kiln_root.config import RootConfig
-from kiln_root.operations import REGISTRY, RootScaffold
+from kiln_root.operations import RootScaffold
 from kiln_root.target import target as root_target
 
 if TYPE_CHECKING:
@@ -76,16 +77,21 @@ def test_root_target_is_registered_via_entry_point():
     assert "kiln_root" in names
 
 
-def test_root_target_uses_isolated_registry():
-    # The two targets ship in the same package; the registry on
-    # each must point to a different object so kiln's resource-
-    # scope ops never fire on a kiln_root config.
-    assert root_target.registry is not kiln_target.registry
-    assert root_target.registry is REGISTRY
+def test_root_target_declares_its_own_entry_point_group():
+    # The two targets ship in the same package and overlap at the
+    # ``project`` scope; foundry walks each target's
+    # ``operations_entry_point`` separately so kiln's
+    # resource-scope ops never fire on a kiln_root config.
+    assert root_target.operations_entry_point == "kiln_root.operations"
+    assert kiln_target.operations_entry_point == "kiln.operations"
+    assert (
+        root_target.operations_entry_point != kiln_target.operations_entry_point
+    )
 
 
-def test_root_target_registry_holds_only_root_scaffold():
-    names = {entry.meta.name for entry in REGISTRY.entries}
+def test_root_entry_point_group_holds_only_root_scaffold():
+    registry = load_registry("kiln_root.operations")
+    names = {entry.meta.name for entry in registry.entries}
 
     assert names == {"root_scaffold"}
 

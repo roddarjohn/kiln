@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, cast
 
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
-from foundry.outputs import StaticFile
 from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 from kiln.config.schema import PYTHON_TYPES
 from kiln.operations.list import ListResult
@@ -504,16 +503,6 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
             "request_fields": tc.request_fields,
             "action_name": tc.action_name,
         },
-    )
-
-
-@registry.renders(StaticFile)
-def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
-    yield FileFragment(
-        path=sf.path,
-        template=sf.template,
-        context=dict(sf.context),
-        if_exists=sf.if_exists,
     )
 
 
