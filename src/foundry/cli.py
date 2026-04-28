@@ -181,7 +181,7 @@ def generate_cmd(  # noqa: PLR0913
                 "Treat every file the target produced as "
                 '``if_exists="overwrite"``.  Use with care: '
                 "this clobbers files the target marked as "
-                '``"skip"`` (e.g. kiln_root\'s bootstrap '
+                '``"skip"`` (e.g. be_root\'s bootstrap '
                 "files), discarding any post-generation edits."
             ),
         ),

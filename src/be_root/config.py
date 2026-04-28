@@ -1,4 +1,4 @@
-"""Pydantic schema for kiln_root configs.
+"""Pydantic schema for be_root configs.
 
 The schema is small but not bare: a few identity fields plus
 a handful of opt-in toggles for the optional bits real apps
@@ -16,7 +16,7 @@ from foundry.config import FoundryConfig
 
 
 class RootConfig(FoundryConfig):
-    """Top-level config for the ``kiln_root`` target.
+    """Top-level config for the ``be_root`` target.
 
     Attributes:
         name: Project name.  Used as the ``[project].name`` value
@@ -54,7 +54,7 @@ class RootConfig(FoundryConfig):
             block in ``config/project.jsonnet`` pointing at
             those symbols.  ``pyjwt`` is in the default deps so
             no extra is needed.  ``auth.py`` is
-            ``if_exists="skip"`` like every other kiln_root
+            ``if_exists="skip"`` like every other be_root
             output, so re-bootstrap won't reset the user's
             real ``validate_login`` implementation.
         psycopg: When ``True``, add ``psycopg[binary]`` to the
@@ -81,7 +81,7 @@ class RootConfig(FoundryConfig):
     name: str = Field(default="myapp")
     module: str = Field(default="app")
     description: str = Field(
-        default="FastAPI app bootstrapped by kiln_root.",
+        default="FastAPI app bootstrapped by be_root.",
     )
     opentelemetry: bool = Field(default=False)
     files: bool = Field(default=False)

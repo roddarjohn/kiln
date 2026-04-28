@@ -21,12 +21,12 @@ runner = CliRunner()
 def _kiln_only_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     """Constrain CLI target discovery to the kiln target.
 
-    The package now ships a second target (``kiln_root``), so
+    The package now ships a second target (``be_root``), so
     ``foundry generate`` without ``--target`` would otherwise fail
     these tests with "Multiple targets installed".  These tests
     are about CLI behaviour with one specific target wired in;
     target dispatch itself is covered by ``test_targets_list_*``
-    and ``test_kiln_root.py``.
+    and ``test_be_root.py``.
     """
     monkeypatch.setattr("foundry.cli.discover_targets", lambda: [kiln_target])
 

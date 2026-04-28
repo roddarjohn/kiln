@@ -79,7 +79,7 @@ class FileFragment:
             contributed by snippets.
         if_exists: Write policy for the assembled output.  Set to
             ``"skip"`` to make :func:`foundry.output.write_files`
-            leave existing files alone (kiln_root's
+            leave existing files alone (be_root's
             re-bootstrap-safe path); defaults to ``"overwrite"``.
             When two fragments at the same path disagree, the
             assembler picks the stricter ``"overwrite"`` -- a

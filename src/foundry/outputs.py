@@ -26,7 +26,7 @@ class StaticFile:
     ``if_exists`` defaults to ``"overwrite"`` (kiln's regenerated
     scaffold behaviour); ``"skip"`` makes
     :func:`foundry.output.write_files` leave existing files alone
-    -- right for one-shot bootstraps like kiln_root, where
+    -- right for one-shot bootstraps like be_root, where
     ``--force`` / ``--force-paths`` is the explicit opt-in to
     clobber.
     """

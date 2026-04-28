@@ -27,7 +27,7 @@ def write_files(
 
     * ``"overwrite"`` (default for kiln output) -- replace
       unconditionally.
-    * ``"skip"`` (kiln_root's bootstrap files) -- leave the
+    * ``"skip"`` (be_root's bootstrap files) -- leave the
       existing file untouched.
 
     *force* and *force_paths* let the caller override ``"skip"``

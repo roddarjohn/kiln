@@ -9,15 +9,15 @@ the parent list's search handler.
 from typing import TYPE_CHECKING
 
 from foundry.operation import operation
-from kiln.config.schema import OrderConfig
-from kiln.operations.list import ListResult, resource_model
-from kiln.operations.types import EnumClass, SchemaClass
+from be.config.schema import OrderConfig
+from be.operations.list import ListResult, resource_model
+from be.operations.types import EnumClass, SchemaClass
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from foundry.engine import BuildContext
-    from kiln.config.schema import ModifierConfig, ProjectConfig
+    from be.config.schema import ModifierConfig, ProjectConfig
 
 
 @operation(
@@ -39,7 +39,7 @@ class Order:
 
         Args:
             ctx: Build context for the ``"order"`` op entry.
-            options: Parsed :class:`~kiln.config.schema.OrderConfig`.
+            options: Parsed :class:`~be.config.schema.OrderConfig`.
 
         Yields:
             ``{Model}SortField`` enum and ``{Model}SortClause``

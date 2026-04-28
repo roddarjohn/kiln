@@ -17,7 +17,7 @@ class GeneratedFile:
             the historical behaviour every kiln scaffold output
             relied on.  ``"skip"`` writes the file only if it
             does not yet exist; right for one-shot scaffolding
-            (e.g. kiln_root's bootstrap) where users edit the
+            (e.g. be_root's bootstrap) where users edit the
             file post-generation and a re-run should be
             non-destructive.  ``--force`` / ``--force-paths`` on
             the CLI override ``"skip"`` back to ``"overwrite"``

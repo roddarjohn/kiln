@@ -1,12 +1,12 @@
-"""Project-scope operation that emits the kiln_root scaffolding.
+"""Project-scope operation that emits the be_root scaffolding.
 
 A single :class:`RootScaffold` op runs at the project scope and
 yields one :class:`~foundry.outputs.StaticFile` per file in the
 template tree.  The class is registered under the
-``kiln_root.operations`` entry-point group (see
+``be_root.operations`` entry-point group (see
 ``pyproject.toml``); foundry walks that group at build time when
-the user runs ``foundry generate --target kiln_root``, keeping
-kiln_root's ops out of every other target's per-build registry.
+the user runs ``foundry generate --target be_root``, keeping
+be_root's ops out of every other target's per-build registry.
 """
 
 from typing import TYPE_CHECKING
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from foundry.engine import BuildContext
-    from kiln_root.config import RootConfig
+    from be_root.config import RootConfig
 
 
 @operation("root_scaffold", scope="project")
@@ -28,8 +28,8 @@ class RootScaffold:
     """Emit the bootstrap files for a fresh kiln project.
 
     Each file is a :class:`~foundry.outputs.StaticFile` whose
-    template lives under :mod:`kiln_root.templates`.  Templates
-    interpolate :class:`~kiln_root.config.RootConfig` fields
+    template lives under :mod:`be_root.templates`.  Templates
+    interpolate :class:`~be_root.config.RootConfig` fields
     (``name``, ``module``, ``description``) and reference the
     target's ``package_prefix`` so the generated ``project.jsonnet``
     points kiln at the same output directory the bootstrap's
@@ -45,7 +45,7 @@ class RootScaffold:
 
         Args:
             ctx: Build context carrying the validated
-                :class:`~kiln_root.config.RootConfig`.
+                :class:`~be_root.config.RootConfig`.
             _options: Unused (no per-op options).
 
         Yields:
@@ -89,7 +89,7 @@ class RootScaffold:
 
         # Every bootstrap file is ``if_exists="skip"`` so ``just
         # bootstrap`` (and any direct re-run of ``foundry generate
-        # --target kiln_root``) is non-destructive: users almost
+        # --target be_root``) is non-destructive: users almost
         # always edit these files post-bootstrap and a re-run that
         # quietly resets pyproject.toml or main.py would be a
         # nasty foot-gun.  ``--force`` / ``--force-paths`` on the

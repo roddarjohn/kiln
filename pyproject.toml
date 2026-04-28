@@ -66,7 +66,7 @@ python = "foundry.formatters.python:format_python"
 
 [project.entry-points."foundry.targets"]
 kiln = "kiln.target:target"
-kiln_root = "kiln_root.target:target"
+be_root = "be_root.target:target"
 
 [project.entry-points."kiln.operations"]
 scaffold = "kiln.operations.scaffold:Scaffold"
@@ -86,15 +86,15 @@ tracing = "kiln.operations.tracing:Tracing"
 router = "kiln.operations.routing:Router"
 project_router = "kiln.operations.routing:ProjectRouter"
 
-[project.entry-points."kiln_root.operations"]
-root_scaffold = "kiln_root.operations:RootScaffold"
+[project.entry-points."be_root.operations"]
+root_scaffold = "be_root.operations:RootScaffold"
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["kiln", "kiln_root", "foundry", "ingot"]
+module-name = ["kiln", "be_root", "foundry", "ingot"]
 
 
 [dependency-groups]

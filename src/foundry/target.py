@@ -52,7 +52,7 @@ class Target:
         operations_entry_point: Entry-point group name where the
             target's ``@operation``-decorated classes are
             registered, e.g. ``"kiln.operations"`` or
-            ``"kiln_root.operations"``.  At build time the
+            ``"be_root.operations"``.  At build time the
             pipeline calls
             :func:`~foundry.operation.load_registry` against
             this group to assemble a fresh, target-private
