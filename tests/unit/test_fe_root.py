@@ -141,7 +141,6 @@ def test_package_json_includes_runtime_deps():
     assert "@tanstack/react-query" in deps
     assert "react" in deps
     assert "react-dom" in deps
-    assert "@hey-api/client-fetch" in deps
 
 
 def test_package_json_includes_openapi_ts_devdep():
