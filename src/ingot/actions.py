@@ -159,7 +159,7 @@ def find_can(
             ``"publish"``).
 
     Returns:
-        The bound :data:`CanCallable`.
+        The bound guard callable (a ``CanCallable``).
 
     Raises:
         KeyError: If *name* is not present in *specs* -- the
