@@ -37,14 +37,12 @@ to decide where to render the button -- per row or once on the
 list page.
 """
 
+# Signature every guard conforms to: ``(resource, session) -> bool``.
+# ``resource`` is the SQLAlchemy instance for object-scope actions
+# or ``None`` for collection-scope actions; ``session`` is whatever
+# the consumer's auth dep resolves -- the type is left open since
+# consumers pick the session model.
 CanCallable = Callable[[Any, Any], Awaitable[bool]]
-"""Signature every guard conforms to: ``(resource, session) -> bool``.
-
-``resource`` is the SQLAlchemy instance for object-scope actions
-or ``None`` for collection-scope actions; ``session`` is whatever
-:func:`ingot.auth.session_auth` resolves -- the type is left open
-because the consumer picks the session model.
-"""
 
 
 class ActionRef(BaseModel):
