@@ -40,6 +40,7 @@ from be.operations.types import (
 )
 from be.operations.update import Update
 from foundry.engine import BuildContext
+from foundry.operation import EmptyOptions
 from foundry.outputs import StaticFile
 from foundry.scope import PROJECT, Scope, ScopeTree
 from foundry.store import BuildStore
@@ -1674,6 +1675,77 @@ class TestPaginate:
             if t.op_name == "list"
         )
         assert tc.is_list_response is False
+
+
+class TestExecutionGates:
+    """Tests for execution-time ``can`` gates on CRUD ops."""
+
+    def test_get_no_can_no_gate_imports(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert "gate_specs_const" not in handler.body_context
+        assert ("ingot.actions", "find_can") not in handler.extra_imports
+
+    def test_get_with_can_wires_object_gate(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="get", can="app.guards.can_get_user"),
+        )
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["gate_specs_const"] == "USER_OBJECT_ACTIONS"
+        assert handler.body_context["gate_op_name"] == "get"
+        assert ("ingot.actions", "find_can") in handler.extra_imports
+        assert ("fastapi", "HTTPException") in handler.extra_imports
+
+    def test_create_with_can_wires_collection_gate(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="create", can="app.guards.can_create"),
+        )
+        result = list(Create().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert (
+            handler.body_context["gate_specs_const"]
+            == "USER_COLLECTION_ACTIONS"
+        )
+        assert handler.body_context["gate_op_name"] == "create"
+
+    def test_update_with_can_adds_select_for_prefetch(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="update", can="app.guards.can_update"),
+        )
+        result = list(Update().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        # Gated update needs a SELECT before the UPDATE so the guard
+        # can inspect resource state.
+        assert ("sqlalchemy", "select") in handler.extra_imports
+        assert handler.body_context["gate_specs_const"] == "USER_OBJECT_ACTIONS"
+
+    def test_update_without_can_does_not_add_select(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="update"))
+        result = list(Update().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        # Ungated update keeps the one-shot UPDATE form.
+        assert ("sqlalchemy", "select") not in handler.extra_imports
+
+    def test_delete_with_can_adds_select_for_prefetch(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="delete", can="app.guards.can_delete"),
+        )
+        result = list(Delete().build(ctx, EmptyOptions()))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert ("sqlalchemy", "select") in handler.extra_imports
+        assert handler.body_context["gate_specs_const"] == "USER_OBJECT_ACTIONS"
 
 
 class TestPermissions:

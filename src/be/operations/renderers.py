@@ -629,7 +629,7 @@ def gate_wiring(
     package_prefix: str,
     *,
     is_object_scope: bool,
-) -> tuple[dict[str, str], list[tuple[str, str]]]:
+) -> tuple[dict[str, object], list[tuple[str, str]]]:
     """Wire execution-time gate imports + body context for one op.
 
     Returns ``({}, [])`` when the op has no ``can`` callable
