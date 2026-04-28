@@ -87,6 +87,7 @@ auth = "be.operations.auth:Auth"
 tracing = "be.operations.tracing:Tracing"
 router = "be.operations.routing:Router"
 project_router = "be.operations.routing:ProjectRouter"
+actions = "be.operations.actions:Actions"
 
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"

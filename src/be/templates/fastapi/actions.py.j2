@@ -1,0 +1,35 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Each resource that opts into the action framework exposes two
+tuples:
+
+* ``{{ resources[0].constant_prefix }}_OBJECT_ACTIONS``
+* ``{{ resources[0].constant_prefix }}_COLLECTION_ACTIONS``
+
+Generated route handlers and serializers iterate these tuples to
+populate the ``actions`` field on responses, drive the
+``/permissions`` endpoint, and gate handler execution on the
+same guards.
+{% endset %}
+{{ file_header("Generated action registries for the " ~ module ~ " app", extra=_extra) }}
+
+
+from ingot.actions import ActionSpec, always_true
+{% for module_path, names in guard_imports %}
+from {{ module_path }} import {{ names | join(", ") }}
+{% endfor %}
+
+{% for resource in resources %}
+
+{{ resource.constant_prefix }}_OBJECT_ACTIONS = (
+{% for action in resource.object_actions %}
+    ActionSpec(name="{{ action.name }}", can={{ action.can }}, is_object_action=True),
+{% endfor %}
+)
+
+{{ resource.constant_prefix }}_COLLECTION_ACTIONS = (
+{% for action in resource.collection_actions %}
+    ActionSpec(name="{{ action.name }}", can={{ action.can }}, is_object_action=False),
+{% endfor %}
+)
+{% endfor %}
