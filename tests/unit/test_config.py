@@ -230,6 +230,86 @@ def test_operation_config_options_excludes_known_fields():
     assert "fields" in oc.options
 
 
+def test_operation_config_can_defaults_to_none():
+    oc = OperationConfig(name="get")
+    assert oc.can is None
+
+
+def test_operation_config_can_dotted_path():
+    oc = OperationConfig(name="publish", can="myapp.guards.can_publish")
+    assert oc.can == "myapp.guards.can_publish"
+    assert "can" not in oc.options
+
+
+def test_resource_config_action_flags_default_false():
+    r = ResourceConfig(model="myapp.models.User")
+    assert r.include_actions_in_dump is False
+    assert r.permissions_endpoint is False
+
+
+def test_resource_config_action_flags_overridable():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        include_actions_in_dump=True,
+        permissions_endpoint=True,
+    )
+    assert r.include_actions_in_dump is True
+    assert r.permissions_endpoint is True
+
+
+def test_resource_config_reserved_actions_field_rejected():
+    from pydantic import ValidationError
+
+    with pytest.raises(
+        ValidationError, match="reserves the field name 'actions'"
+    ):
+        ResourceConfig(
+            model="myapp.models.User",
+            include_actions_in_dump=True,
+            operations=[
+                {
+                    "name": "get",
+                    "fields": [
+                        {"name": "id", "type": "uuid"},
+                        {"name": "actions", "type": "str"},
+                    ],
+                },
+            ],
+        )
+
+
+def test_resource_config_actions_field_allowed_when_dump_disabled():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        operations=[
+            {
+                "name": "get",
+                "fields": [
+                    {"name": "actions", "type": "str"},
+                ],
+            },
+        ],
+    )
+    assert r.include_actions_in_dump is False
+
+
+def test_resource_config_dump_with_unrelated_fields_validates():
+    r = ResourceConfig(
+        model="myapp.models.User",
+        include_actions_in_dump=True,
+        operations=[
+            {
+                "name": "get",
+                "fields": [
+                    {"name": "id", "type": "uuid"},
+                    {"name": "email", "type": "email"},
+                ],
+            },
+        ],
+    )
+    assert r.include_actions_in_dump is True
+
+
 def test_field_spec():
     f = FieldSpec(name="title", type="str")
     assert f.name == "title"
