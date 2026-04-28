@@ -33,11 +33,11 @@ import {
   Select,
   SelectItem,
 {% endif %}
-  Spinner,
   Stack,
 {% if filters | selectattr('type', 'equalto', 'boolean') | list %}
   Switch,
 {% endif %}
+  PageLoader,
   Table,
   TableBody,
   TableHeader,
@@ -293,7 +293,7 @@ export function {{ pascal }}List() {
   });
 
 {% endif %}
-  if (isLoading) return <Spinner aria-label={{ ('Loading ' + label_plural | lower) | tojson }} />;
+  if (isLoading) return <PageLoader label={{ ('Loading ' + label_plural | lower) | tojson }} />;
 
   const items = data?.items ?? [];
 

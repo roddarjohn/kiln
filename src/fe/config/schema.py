@@ -332,6 +332,13 @@ class DetailConfig(BaseModel):
         sections: Section definitions, top to bottom.
         actions: Action keys (from ``ResourceConfig.actions``)
             to render as buttons in the detail header.
+        title_field: Field on the resource type whose value
+            replaces the static :attr:`ResourceLabel.singular` in
+            the page title (e.g. ``"name"`` so the header reads
+            "Atlas" instead of "Project").  Optional.
+        subtitle_field: Field on the resource type rendered as a
+            tight subtitle under the title -- typically a slug or
+            id (e.g. ``"slug"`` -> "atlas").  Optional.
         presentation: How to surface the detail view.  ``"page"``
             (default) renders a full route page; ``"drawer"``
             wraps it in a glaze Drawer that closes via
@@ -344,6 +351,8 @@ class DetailConfig(BaseModel):
 
     sections: list[DetailSection] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
+    title_field: str | None = Field(default=None)
+    subtitle_field: str | None = Field(default=None)
     presentation: Literal["page", "drawer"] = Field(default="page")
 
 

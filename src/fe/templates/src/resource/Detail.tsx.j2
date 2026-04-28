@@ -8,7 +8,7 @@ import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 {% else %}
 import { useParams, useRouter } from "@tanstack/react-router";
 {% endif %}
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import {
 {% if has_update or actions %}
   Button,
@@ -21,11 +21,10 @@ import {
 {% endif %}
   Link,
   PageHeader,
-  Spinner,
   Stack,
 } from "@roddarjohn/glaze";
 
-import { {{ get_fn }} } from "../_generated/sdk.gen";
+import { {{ get_fn }}Options } from "../_generated/@tanstack/react-query.gen";
 
 {% for section in sections %}
 {% if section.component %}
@@ -43,34 +42,22 @@ export function {{ pascal }}Detail() {
   const navigate = useNavigate();
 {% endif %}
 
-  const { data, isLoading } = useQuery({
-    queryKey: [{{ key | tojson }}, "get", id],
-    queryFn: async () => {
-      const res = await {{ get_fn }}({ path: { id } });
-      if (res.error || !res.data) {
-        throw new Error("Failed to load {{ label_singular | lower }}.");
-      }
-      return res.data;
-    },
-    // Bubble fetch failures (e.g. 404) up to the route's
-    // ``errorComponent`` so the user gets the styled fallback
-    // rather than a silently-blank page.
-    throwOnError: true,
-  });
-
-  if (isLoading) return <Spinner aria-label={{ ('Loading ' + label_singular | lower) | tojson }} />;
-  if (!data) return null;
-
-  const item = data;
+  // ``useSuspenseQuery`` defers loading state to the route's
+  // ``pendingComponent`` (a glaze ``<PageLoader>`` configured in
+  // ``router.tsx``); errors propagate to ``errorComponent``.  No
+  // per-page ``isLoading`` branches.
+  const { data: item } = useSuspenseQuery(
+    {{ get_fn }}Options({ path: { id } }),
+  );
 
   return (
     <Stack gap="4">
       <PageHeader
-        breadcrumbs={
-          // Back traverses the browser history stack so the user
-          // returns to wherever they came from (list with filter
-          // X applied, another resource detail, etc.) -- not a
-          // hard-coded list URL.
+        eyebrow={
+          // Back traverses the browser history so the user returns
+          // to wherever they came from (list with filters applied,
+          // another resource detail, etc.) instead of hard-coding
+          // the list URL.
           <Link
             variant="muted"
             onPress={() => router.history.back()}
@@ -78,7 +65,14 @@ export function {{ pascal }}Detail() {
             &larr; Back
           </Link>
         }
+{% if title_field %}
+        title={item.{{ title_field }} ?? {{ label_singular | tojson }}}
+{% else %}
         title={{ label_singular | tojson }}
+{% endif %}
+{% if subtitle_field %}
+        subtitle={item.{{ subtitle_field }}}
+{% endif %}
 {% if has_update or actions %}
         actions={
           <>
@@ -129,7 +123,7 @@ export function {{ pascal }}Detail() {
             {
               id: {{ field.name | tojson }},
               label: {{ field.label | tojson }},
-              value: String(item.{{ field.name }} ?? ""),
+              value: item.{{ field.name }},
             },
 {% endfor %}
           ]}

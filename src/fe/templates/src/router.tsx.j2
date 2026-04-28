@@ -13,7 +13,7 @@ import {
   Outlet,
 {% endif %}
 } from "@tanstack/react-router";
-import { Button, EmptyState, Stack } from "@roddarjohn/glaze";
+import { ErrorPage, PageLoader } from "@roddarjohn/glaze";
 
 import { Shell } from "./Shell";
 {% for route in routes %}
@@ -51,11 +51,9 @@ import {
 } from "./_search";
 
 {% endif %}
-// Default error UI used by every route (and TSR's not-found
-// fallback).  The user gets a glaze-styled EmptyState plus a
-// retry button -- ``reset`` clears the error boundary so the
-// route remounts; the second button pops the history stack so
-// the user can back out to a known-good page.
+// Default error / not-found UI for every route.  ``reset`` (when
+// supplied by TSR) clears the error boundary so the route
+// remounts; ``goBack`` pops the browser history.
 function RouterError({
   error,
   reset,
@@ -64,38 +62,22 @@ function RouterError({
   reset?: () => void;
 }) {
   return (
-    <Stack gap="3" style={ { padding: "2rem" } }>
-      <EmptyState
-        title="Something went wrong"
-        description={error.message || "An unexpected error occurred."}
-        actions={
-          <>
-            {reset !== undefined ? (
-              <Button onPress={reset}>Try again</Button>
-            ) : null}
-            <Button variant="secondary" onPress={() => window.history.back()}>
-              Go back
-            </Button>
-          </>
-        }
-      />
-    </Stack>
+    <ErrorPage
+      error={error}
+      reset={reset}
+      goBack={() => window.history.back()}
+    />
   );
 }
 
 function RouterNotFound() {
   return (
-    <Stack gap="3" style={ { padding: "2rem" } }>
-      <EmptyState
-        title="Page not found"
-        description="The page you’re looking for doesn’t exist."
-        actions={
-          <Button variant="secondary" onPress={() => window.history.back()}>
-            Go back
-          </Button>
-        }
-      />
-    </Stack>
+    <ErrorPage
+      status={404}
+      title="Page not found"
+      description="The page you’re looking for doesn’t exist."
+      goBack={() => window.history.back()}
+    />
   );
 }
 
@@ -225,9 +207,13 @@ export const router = createRouter({
   routeTree,
   // Errors propagated up by route components (or thrown out of
   // ``loader`` / ``beforeLoad``) bubble to ``RouterError`` rather
-  // than the default raw stack-trace UI.
+  // than the default raw stack-trace UI.  ``defaultPendingComponent``
+  // surfaces the glaze ``<PageLoader>`` whenever a route suspends
+  // (e.g. ``useSuspenseQuery`` in Detail / Update), so individual
+  // pages don't carry their own ``isLoading`` branches.
   defaultErrorComponent: RouterError,
   defaultNotFoundComponent: RouterNotFound,
+  defaultPendingComponent: () => <PageLoader />,
 });
 
 declare module "@tanstack/react-router" {

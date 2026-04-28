@@ -159,6 +159,12 @@ class TestLoginPage:
     def test_calls_auth_login_with_credentials(self) -> None:
         out = self._out()
 
-        assert "await auth.login({" in out
-        assert "username," in out
-        assert "password," in out
+        # The form rides ``useFormMutation`` -- credentials come
+        # from the FormData object collected at submit time, then
+        # get cast and passed through ``auth.login``.
+        assert "useFormMutation" in out
+        assert "auth.login(input" in out
+        # Each credential field is rendered as a named TextField so
+        # FormData picks it up.
+        assert 'name="username"' in out
+        assert 'name="password"' in out

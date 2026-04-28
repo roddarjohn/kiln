@@ -3,11 +3,14 @@
 // Edits will be overwritten -- change config/fe.jsonnet instead.
 // ============================================================
 
+import { Suspense } from "react";
 import { Outlet, useLocation, useRouter } from "@tanstack/react-router";
 import {
   AppShell,
   AppShellNav,
   AppShellNavItem,
+  PageContent,
+  PageLoader,
 {% if user_menu %}
   UserMenu,
   useAuth,
@@ -73,7 +76,17 @@ export function Shell() {
 
   return (
     <AppShell sidebar={sidebar}>
-      <Outlet />
+      <PageContent>
+        {/*
+         * The Suspense boundary catches ``useSuspenseQuery`` calls
+         * inside route components (Detail, Update form, …) so the
+         * glaze ``<PageLoader>`` fills the content area while data
+         * loads -- no per-component ``isLoading`` branches.
+         */}
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
+      </PageContent>
     </AppShell>
   );
 }

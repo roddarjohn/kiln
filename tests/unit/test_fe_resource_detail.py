@@ -99,8 +99,10 @@ class TestSections:
         assert "<DataList" in out
         assert '"Name"' in out
         assert '"Slug"' in out
-        assert 'String(item.name ?? "")' in out
-        assert 'String(item.slug ?? "")' in out
+        # DataList accepts ReactNode and stringifies primitives
+        # itself (#53), so values pass through raw.
+        assert "value: item.name," in out
+        assert "value: item.slug," in out
 
     def test_titleless_section_omits_heading(self) -> None:
         out = self._out([DetailSection(fields=["name"])])

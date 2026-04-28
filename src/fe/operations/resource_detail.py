@@ -128,5 +128,7 @@ class ResourceDetail:
                     "detail_path": f"/{key}/$id",
                     "update_path": (f"/{key}/$id/edit" if has_update else None),
                     "has_update": has_update,
+                    "title_field": resource.detail.title_field,
+                    "subtitle_field": resource.detail.subtitle_field,
                 },
             )
