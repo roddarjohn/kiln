@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.2...kiln-v0.8.3) (2026-04-28)
+
+
+### Features
+
+* kiln_root ([#53](https://github.com/roddarjohn/kiln/issues/53)) ([297e6bb](https://github.com/roddarjohn/kiln/commit/297e6bbca5f2dacdaa94346e9af45603946f456c))
+
 ## [0.8.2](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.1...kiln-v0.8.2) (2026-04-27)
 
 
