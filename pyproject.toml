@@ -67,6 +67,8 @@ python = "foundry.formatters.python:format_python"
 [project.entry-points."foundry.targets"]
 be = "be.target:target"
 be_root = "be_root.target:target"
+fe = "fe.target:target"
+fe_root = "fe_root.target:target"
 
 [project.entry-points."be.operations"]
 scaffold = "be.operations.scaffold:Scaffold"
@@ -89,12 +91,18 @@ project_router = "be.operations.routing:ProjectRouter"
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"
 
+[project.entry-points."fe.operations"]
+openapi_ts_config = "fe.operations:OpenApiTsConfig"
+
+[project.entry-points."fe_root.operations"]
+root_scaffold = "fe_root.operations:RootScaffold"
+
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["be", "be_root", "foundry", "ingot"]
+module-name = ["be", "be_root", "fe", "fe_root", "foundry", "ingot"]
 
 
 [dependency-groups]
@@ -197,7 +205,7 @@ ignore = [
 ]
 
 [tool.coverage.run]
-source = ["be", "foundry", "ingot"]
+source = ["be", "be_root", "fe", "fe_root", "foundry", "ingot"]
 branch = true
 
 [tool.coverage.report]

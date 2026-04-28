@@ -22,14 +22,22 @@ Optional extras:
 pip install 'kiln-generator[files]'  # adds boto3 for S3 uploads
 ```
 
-## Quick start
+## Targets
 
-kiln registers itself as a target for the generic ``foundry`` CLI
-(shipped in this same package):
+`kiln-generator` ships four targets, all driven by the generic `foundry`
+CLI:
+
+- **`be`** — FastAPI/SQLAlchemy backend codegen.
+- **`be_root`** — one-shot bootstrap for a `be`-driven project.
+- **`fe`** — React/TypeScript frontend codegen (TS types + React Query
+  hooks from an OpenAPI spec).
+- **`fe_root`** — one-shot bootstrap for a `fe`-driven project.
+
+## Quick start
 
 ```bash
 foundry --help
-foundry generate --config app.jsonnet
+foundry generate --target be --config config/project.jsonnet
 ```
 
 ## Documentation

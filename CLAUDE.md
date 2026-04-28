@@ -2,7 +2,17 @@
 
 ## What is kiln?
 
-A CLI for autogenerating files from templates.
+A CLI for autogenerating files from templates.  The CLI itself is called
+`foundry`; targets ship as plugins.  This repo includes:
+
+- `be` -- FastAPI/SQLAlchemy backend codegen.
+- `be_root` -- one-shot bootstrap for a `be`-driven project.
+- `fe` -- React/TypeScript frontend codegen (TS types + React Query
+  hooks from an OpenAPI spec).
+- `fe_root` -- one-shot bootstrap for a `fe`-driven project.
+
+The PyPI distribution name is `kiln-generator`; the on-disk repo dir,
+GitHub repo, and Sphinx site stay branded `kiln`.
 
 ## Tooling
 

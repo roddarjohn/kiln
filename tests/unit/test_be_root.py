@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from be.target import target as kiln_target
+from be.target import target as be_target
 from be_root.config import RootConfig
 from be_root.operations import RootScaffold
 from be_root.target import target as root_target
@@ -83,9 +83,9 @@ def test_root_target_declares_its_own_entry_point_group():
     # ``operations_entry_point`` separately so be's
     # resource-scope ops never fire on a be_root config.
     assert root_target.operations_entry_point == "be_root.operations"
-    assert kiln_target.operations_entry_point == "be.operations"
+    assert be_target.operations_entry_point == "be.operations"
     assert (
-        root_target.operations_entry_point != kiln_target.operations_entry_point
+        root_target.operations_entry_point != be_target.operations_entry_point
     )
 
 
@@ -149,7 +149,7 @@ def test_main_py_imports_from_package_prefix():
     assert "from _generated.routes import router" in main
 
 
-def test_pyproject_carries_name_and_kiln_dep():
+def test_pyproject_carries_name_and_kiln_generator_dep():
     cfg = RootConfig(name="demo-app", description="Demo.")
     files = _build_files(cfg)
 
@@ -349,7 +349,7 @@ def test_editable_off_omits_uv_sources():
     assert "[tool.uv.sources]" not in py
 
 
-def test_editable_on_pins_kiln_to_local_path():
+def test_editable_on_pins_kiln_generator_to_local_path():
     py = _build_files(RootConfig(editable=True))["pyproject.toml"]
 
     assert "[tool.uv.sources]" in py
