@@ -55,8 +55,9 @@ class Actions:
     resource's :class:`~be.config.schema.OperationConfig` list is
     fully visited before the registry is rendered.  Built-in CRUD
     ops are classified by name; ``type == "action"`` ops are
-    introspected via :func:`~be.operations._introspect.introspect_action_fn`
-    to determine object vs. collection scope.
+    introspected via ``introspect_action_fn`` (in
+    :mod:`be.operations._introspect`) to determine object vs.
+    collection scope.
     """
 
     def build(

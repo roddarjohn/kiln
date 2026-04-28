@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 class Permissions:
     """Emit ``GET /permissions`` endpoints for a resource.
 
-    Gated by :attr:`ResourceConfig.permissions_endpoint`; when
+    Gated by :attr:`~be.config.schema.ResourceConfig.permissions_endpoint`; when
     unset, :meth:`when` returns ``False`` and nothing is emitted.
     """
 
