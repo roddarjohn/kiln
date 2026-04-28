@@ -1,16 +1,24 @@
 Getting started
 ===============
 
-This guide walks through setting up a new project with be from scratch.
-By the end you will have a working FastAPI application with generated
-routes, schemas, and (optionally) auth wired to SQLAlchemy models you
-define yourself.
+This guide walks through setting up a new project with the **be** target
+from scratch.  By the end you will have a working FastAPI application
+with generated routes, schemas, and (optionally) auth wired to
+SQLAlchemy models you define yourself.
 
-What foundry generates -- and doesn't
--------------------------------------
+For the fastest path -- a fully scaffolded ``main.py`` /
+``pyproject.toml`` / ``justfile`` / ``config/project.jsonnet``
+skeleton -- skip ahead to :ref:`bootstrap-with-be-root`; the rest of
+this page walks through the underlying pieces by hand.
 
-foundry generates FastAPI code from a config file.  Specifically, it
-produces:
+For the React / TypeScript side, see :doc:`usage` -- the ``fe`` and
+``fe_root`` targets are introduced there.
+
+What be generates -- and doesn't
+---------------------------------
+
+The ``be`` target generates FastAPI code from a config file.  Specifically,
+it produces:
 
 * **Routes** -- one FastAPI router per resource, with handlers for the
   CRUD operations (and custom actions) you enable.
@@ -31,7 +39,7 @@ yourself and point the config at them by dotted import path.
 Prerequisites
 -------------
 
-* Python 3.12+
+* Python 3.14+
 * `uv <https://docs.astral.sh/uv/>`_ (recommended) or pip
 * A PostgreSQL database, if you want to run the generated code
 
@@ -45,12 +53,56 @@ Install
    # or with uv
    uv add kiln-generator
 
+   # or, to make ``foundry`` available globally without adding a
+   # Python dep to your project:
+   uv tool install kiln-generator
+
 Verify the CLI is available::
 
    foundry --help
+   foundry targets list
 
-be registers itself as a target for the generic ``foundry`` CLI
-shipped in the same package, so ``foundry`` is the command you run.
+``kiln-generator`` ships four targets (``be``, ``be_root``, ``fe``,
+``fe_root``).  When more than one is installed, every ``foundry``
+command takes ``--target <name>`` to pick.
+
+.. _bootstrap-with-be-root:
+
+Fast path: bootstrap with ``be_root``
+-------------------------------------
+
+The ``be_root`` target is a one-shot scaffolder that emits the
+boilerplate you'd otherwise type by hand: ``main.py``,
+``pyproject.toml``, ``justfile``, ``.gitignore``, ``.python-version``,
+and the starter ``config/project.jsonnet``.  Write a small
+``bootstrap.jsonnet`` describing the project's identity and which
+optional bits to enable:
+
+.. code-block:: jsonnet
+
+   {
+     name: "myapp",
+     module: "myapp",
+     description: "FastAPI backend bootstrapped by be_root.",
+     opentelemetry: false,
+     auth: true,
+     psycopg: true,
+     pgcraft: false,
+     pgqueuer: false,
+     editable: false,
+   }
+
+Then run::
+
+   foundry generate --target be_root --config bootstrap.jsonnet --out .
+
+Every output is ``if_exists="skip"``, so re-running after editing the
+bootstrap config is non-destructive.  Pass ``--force`` (or
+``--force-paths a,b,c``) when you want a re-run to clobber.
+
+After the bootstrap, jump to :ref:`step-3-generate` -- the Step 1
+(SQLAlchemy models) and Step 2 (config) sections below describe what
+the bootstrap already gave you.
 
 Project layout
 --------------
@@ -62,7 +114,8 @@ single-app project looks like:
 .. code-block:: text
 
    myproject/
-   ├── app.jsonnet            # be config
+   ├── config/
+   │   └── project.jsonnet    # be config
    ├── myapp/
    │   └── models.py          # your hand-written SQLAlchemy models
    ├── main.py                # your FastAPI entry point
@@ -74,14 +127,14 @@ single-app project looks like:
            ├── schemas/       # Pydantic request/response models
            └── serializers/   # model-to-schema helpers
 
-Everything under ``_generated/`` is overwritten on every ``be
-generate`` run.  Source-control the config file and your models, not
-the generated output.
+Everything under ``_generated/`` is overwritten on every
+``foundry generate --target be`` run.  Source-control the config file
+and your models, not the generated output.
 
 Step 1 -- Define your SQLAlchemy models
 ---------------------------------------
 
-foundry generates routes and schemas *around* SQLAlchemy models you
+be generates routes and schemas *around* SQLAlchemy models you
 define.  A minimal ``myapp/models.py``:
 
 .. code-block:: python
@@ -118,7 +171,7 @@ define.  A minimal ``myapp/models.py``:
 Step 2 -- Write a config
 ------------------------
 
-Create ``app.jsonnet`` at your project root:
+Create ``config/project.jsonnet`` at your project root:
 
 .. code-block:: jsonnet
 
@@ -163,12 +216,14 @@ Key points:
   ``default: true`` on exactly one; resources omitting ``db_key`` use
   the default.
 
+.. _step-3-generate:
+
 Step 3 -- Generate
 ------------------
 
 Run the CLI::
 
-   foundry generate --config app.jsonnet
+   foundry generate --target be --config config/project.jsonnet
 
 Output lands in ``_generated/``:
 
@@ -248,7 +303,7 @@ Add an ``auth`` block to the config to turn on JWT authentication:
      }],
    }
 
-You provide ``verify_credentials`` -- foundry generates the rest
+You provide ``verify_credentials`` -- be generates the rest
 (``auth/dependencies.py`` with ``get_current_user``, and
 ``auth/router.py`` with a ``/auth/token`` login endpoint).
 
@@ -278,9 +333,9 @@ API, say), wrap each app's config in an ``apps`` list:
      ],
    }
 
-``foundry generate --config project.jsonnet`` produces the per-app code
-plus a top-level ``_generated/routes/__init__.py`` that mounts each
-app at its prefix.  Mount that in FastAPI:
+``foundry generate --target be --config project.jsonnet`` produces the
+per-app code plus a top-level ``_generated/routes/__init__.py`` that
+mounts each app at its prefix.  Mount that in FastAPI:
 
 .. code-block:: python
 
@@ -295,9 +350,9 @@ multiple databases, and custom actions.
 Where to next
 -------------
 
-* :doc:`usage` -- day-to-day usage patterns and the full config shape.
-* :doc:`extending` -- add your own operations, renderers, or
-  generators.
+* :doc:`usage` -- day-to-day usage patterns, the full be config shape,
+  and an introduction to the ``fe`` / ``fe_root`` frontend targets.
+* :doc:`extending` -- add your own operations, renderers, or targets.
 * :doc:`architecture` -- how the engine, scopes, operations, and
   renderers fit together.
 * :doc:`reference` -- the exhaustive config reference.

@@ -5,10 +5,12 @@ Usage
    :local:
    :depth: 2
 
-This page covers day-to-day usage of the ``foundry`` CLI as backed
-by the be target.  For a walkthrough of a brand-new project, see
-:doc:`getting_started`.  For the complete config schema, see
-:doc:`reference`.
+This page covers day-to-day usage of the ``foundry`` CLI.  Most of
+the page is centred on the ``be`` target since it has the deepest
+config surface; the ``be_root`` / ``fe`` / ``fe_root`` targets each
+get a short section near the end.  For a walkthrough of a brand-new
+project, see :doc:`getting_started`.  For the complete config schema,
+see :doc:`reference`.
 
 Install
 -------
@@ -17,8 +19,9 @@ Install
 
    pip install kiln-generator  # or: uv add kiln-generator
 
-Installing ``kiln-generator`` ships both the generic ``foundry`` CLI
-and the be target it discovers at startup.
+Installing ``kiln-generator`` ships the generic ``foundry`` CLI and
+all four targets it discovers at startup (``be``, ``be_root``,
+``fe``, ``fe_root``).  Run ``foundry targets list`` to verify.
 
 The CLI
 -------
@@ -28,18 +31,20 @@ The CLI
 
 .. code-block:: text
 
-   foundry generate --config PATH [--out DIR] [--target NAME] [--clean]
+   foundry generate --target NAME --config PATH [--out DIR] [--clean]
 
+``--target / -t``
+    Which registered target to use.  Required when more than one
+    target is installed (the default with ``kiln-generator``); may
+    be omitted when only one target is on the path.  Common values:
+    ``be``, ``be_root``, ``fe``, ``fe_root``.
 ``--config / -c`` *(required)*
     Path to the ``.json`` or ``.jsonnet`` config file.
 ``--out / -o`` *(optional)*
     Output root directory.  Defaults to the target's own policy --
-    be writes into the config's ``package_prefix`` value (e.g.
+    ``be`` writes into the config's ``package_prefix`` value (e.g.
     ``_generated``).  Set ``package_prefix: ""`` in the config to
     write directly into the current directory.
-``--target / -t`` *(optional)*
-    Which registered target to use.  Optional when exactly one target
-    is installed (``be``, when only kiln-generator is installed).
 ``--clean``
     Run ``foundry clean`` before generating.  Useful when you remove a
     resource from the config -- without ``--clean`` the previously
@@ -499,6 +504,98 @@ output trees and mount each at a different prefix:
 
    app.include_router(v1_router, prefix="/v1")
    app.include_router(v2_router, prefix="/v2")
+
+Other targets
+-------------
+
+``be_root`` -- backend bootstrap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``be_root`` is a one-shot scaffolder that emits the boilerplate a
+``be``-driven project needs once: ``main.py``, ``pyproject.toml``,
+``justfile``, ``.gitignore``, ``.python-version``, the starter
+``config/project.jsonnet``, and (when ``auth: true``) an
+``auth.py`` skeleton.  Drive it with a ``bootstrap.jsonnet`` like:
+
+.. code-block:: jsonnet
+
+   {
+     name: "myapp",
+     module: "myapp",
+     description: "FastAPI backend.",
+     opentelemetry: false,
+     auth: true,
+     psycopg: true,
+     pgcraft: false,
+     pgqueuer: false,
+     editable: false,
+   }
+
+Run::
+
+   foundry generate --target be_root --config bootstrap.jsonnet --out .
+
+Every emitted file is ``if_exists="skip"``, so re-running after
+editing the bootstrap config is non-destructive.  ``--force``
+clobbers everything; ``--force-paths a,b,c`` clobbers only the
+listed paths.
+
+``fe`` -- React / TypeScript codegen
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``fe`` target is a thin wrapper over
+`@hey-api/openapi-ts <https://heyapi.dev/>`_: it translates a
+kiln-side ``config/fe.jsonnet`` into ``openapi-ts.config.ts``, and
+the openapi-ts CLI (``yarn openapi-ts``) then produces the actual
+TypeScript SDK plus
+`@tanstack/react-query <https://tanstack.com/query>`_ hooks.  The
+config is small:
+
+.. code-block:: jsonnet
+
+   {
+     openapi_spec: "../be/openapi.json",
+     output_dir: "src/_generated",
+     client: "@hey-api/client-fetch",
+     react_query: true,
+   }
+
+Run::
+
+   foundry generate --target fe --config config/fe.jsonnet --out .
+   yarn openapi-ts
+
+The ``fe_root``-emitted ``justfile`` chains those two steps under
+``just generate``.
+
+``fe_root`` -- frontend bootstrap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``fe_root`` is the ``fe`` counterpart to ``be_root`` -- a one-shot
+scaffolder that emits a yarn / Vite / TypeScript / React project
+with React Query, openapi-ts, and (optionally) the
+`@roddarjohn/glaze <https://github.com/roddarjohn/glaze>`_
+component library wired up.  Drive it with:
+
+.. code-block:: jsonnet
+
+   {
+     name: "myapp-fe",
+     description: "React frontend.",
+     glaze: true,
+     editable: false,
+     openapi_spec: "../be/openapi.json",
+   }
+
+Run::
+
+   foundry generate --target fe_root --config bootstrap.jsonnet --out .
+
+Output: ``package.json``, ``justfile``, ``tsconfig.json``,
+``vite.config.ts``, ``index.html``, ``src/{main,App}.tsx``,
+``src/index.css``, ``.gitignore``, ``.nvmrc``, and the starter
+``config/fe.jsonnet``.  Same ``if_exists="skip"`` /
+``--force`` / ``--force-paths`` semantics as ``be_root``.
 
 Extending be
 --------------

@@ -5,29 +5,42 @@ Architecture
    :local:
    :depth: 2
 
-be is split into two packages that serve very different audiences:
+kiln is split into a target-agnostic engine and a set of target plugins
+that serve very different audiences:
 
-``foundry`` -- a generic, framework-agnostic code-generation engine.
-   Provides the build pipeline, scope discovery, operation protocol,
-   build store, render registry, typed output primitives, and the
+``foundry``
+   A generic, framework-agnostic code-generation engine.  Provides
+   the build pipeline, scope discovery, operation protocol, build
+   store, render registry, typed output primitives, and the
    ``foundry`` CLI.  Nothing in ``foundry`` knows about FastAPI,
    Pydantic schemas, routes, or any other concrete target; the CLI
-   dispatches to a plugin-provided :class:`~foundry.target.Target`
-   discovered via the ``foundry.targets`` entry-point group.
+   dispatches to plugin-provided :class:`~foundry.target.Target`
+   instances discovered via the ``foundry.targets`` entry-point
+   group.
 
-``be`` -- a concrete FastAPI / SQLAlchemy generator registered as a ``foundry`` target.
-   Defines the config schema, ships a set of built-in operations (CRUD,
-   actions, scaffolding, routing), and a set of renderers backed by
-   Jinja2 templates.  Registers itself as the ``be`` target so
-   ``foundry generate`` can load and run it.
+``be`` / ``be_root``
+   FastAPI / SQLAlchemy code generators registered as ``foundry``
+   targets.  ``be`` is the ongoing CRUD / actions / routing
+   generator that turns ``config/project.jsonnet`` into routes and
+   schemas; ``be_root`` is the one-shot bootstrap that scaffolds
+   ``main.py``, ``pyproject.toml``, ``justfile``, and the starter
+   ``config/project.jsonnet``.
 
-Keeping the two apart means you can:
+``fe`` / ``fe_root``
+   React / TypeScript counterparts.  ``fe`` is a thin wrapper over
+   `@hey-api/openapi-ts <https://heyapi.dev/>`_ -- it translates the
+   kiln-side ``config/fe.jsonnet`` into ``openapi-ts.config.ts`` so
+   the openapi-ts CLI reads the same source of truth as the rest of
+   the project.  ``fe_root`` scaffolds the surrounding yarn / Vite /
+   React skeleton, wired to
+   `@roddarjohn/glaze <https://github.com/roddarjohn/glaze>`_.
 
-* Build a completely different generator (e.g. a TypeScript client, a
-  Go server, a gRPC skeleton) on ``foundry`` without touching
-  ``be``.
-* Extend the FastAPI generator in ``be`` without having to know
-  anything about the engine internals.
+Keeping the engine and the targets apart means you can:
+
+* Build a completely different generator (e.g. a Go server, a gRPC
+  skeleton) on ``foundry`` without touching the existing targets.
+* Extend any single target without having to know anything about
+  the engine internals.
 
 The build pipeline
 ------------------
@@ -235,15 +248,15 @@ The ``when`` parameter selects between competing renderers:
    def render_grpc_route(handler, ctx):
        ...  # called instead when config.grpc is truthy
 
-Kiln's built-in renderers are colocated with their operations:
-op-specific :class:`~be.operations.types.RouteHandler` subclasses register at the bottom
-of each op module (``be.operations.get``, ``be.operations.list``,
-…), and the shared cross-cutting renderers plus fragment-builder
-helpers live in ``be.operations.renderers``.  All registrations run
-at module import time and populate the module-level
-:data:`foundry.render.registry` singleton; loading operations via
-the ``foundry.operations`` entry-point group is therefore enough to
-populate the registry.
+be's built-in renderers are colocated with their operations:
+op-specific :class:`~be.operations.types.RouteHandler` subclasses
+register at the bottom of each op module (``be.operations.get``,
+``be.operations.list``, …), and the shared cross-cutting renderers
+plus fragment-builder helpers live in ``be.operations.renderers``.
+All registrations run at module import time and populate the
+module-level :data:`foundry.render.registry` singleton; loading
+operations via the ``be.operations`` entry-point group is therefore
+enough to populate the registry.
 
 Assembler
 ---------
@@ -269,15 +282,19 @@ output vocabulary can reuse it.
 Discovery via entry points
 --------------------------
 
-Operations are loaded from the ``foundry.operations`` entry-point
-group at import time.  From foundry's
-perspective, be is just one of potentially many packages that
-register operations; be's built-ins live in be's own
-``pyproject.toml``:
+Each target declares its own entry-point group for the operations it
+ships, and foundry walks that group at build time to assemble a
+fresh, target-private registry.  Targets installed side-by-side
+never see each other's ops: a ``foundry generate --target be`` run
+walks ``be.operations`` only, a ``--target fe`` run walks
+``fe.operations``, and so on.
+
+be's built-ins live in the package's own ``pyproject.toml`` under
+``[project.entry-points."be.operations"]``:
 
 .. code-block:: toml
 
-   [project.entry-points."foundry.operations"]
+   [project.entry-points."be.operations"]
    scaffold       = "be.operations.scaffold:Scaffold"
    get            = "be.operations.get:Get"
    list           = "be.operations.list:List"
@@ -289,21 +306,26 @@ register operations; be's built-ins live in be's own
    router         = "be.operations.routing:Router"
    project_router = "be.operations.routing:ProjectRouter"
 
-Third-party packages register their own operations under the same
-group.  ``foundry generate`` discovers all installed operations at
-startup.
+Third-party packages register their own operations under any
+target's group.  Each target also has its own bootstrap counterpart
+(``be_root``, ``fe_root``) which registers a single project-scope
+op under e.g. ``be_root.operations``.
 
-Targets register under a second entry-point group,
-``foundry.targets``.  A :class:`~foundry.target.Target` is a frozen
-dataclass carrying four fields -- ``name``, the pydantic ``schema``,
-a ``template_dir``, and an optional ``jsonnet_stdlib_dir`` -- which
-is everything foundry needs to load config, build the Jinja
-environment, and assemble output.  be's own registration:
+Targets themselves register under ``foundry.targets``.  A
+:class:`~foundry.target.Target` is a frozen dataclass carrying the
+target's ``name``, the pydantic ``schema``, a ``template_dir``, the
+``operations_entry_point`` group it walks at build time, and an
+optional ``jsonnet_stdlib_dir`` -- everything foundry needs to load
+config, build the Jinja environment, and assemble output.  All four
+targets ship in this repo's ``pyproject.toml``:
 
 .. code-block:: toml
 
    [project.entry-points."foundry.targets"]
-   be = "be.target:target"
+   be      = "be.target:target"
+   be_root = "be_root.target:target"
+   fe      = "fe.target:target"
+   fe_root = "fe_root.target:target"
 
 When exactly one target is installed, ``foundry generate`` picks it
 automatically; with multiple, the user selects by name via
@@ -316,7 +338,7 @@ Source layout
 
    src/
    ├── foundry/              # generic engine + CLI -- target-agnostic
-   │   ├── cli.py              # `foundry` CLI (generate/clean)
+   │   ├── cli.py              # `foundry` CLI (generate/clean/validate)
    │   ├── target.py           # Target dataclass + discover_targets
    │   ├── errors.py           # CLIError, ConfigError, GenerationError
    │   ├── config.py           # load_config (json/jsonnet + validation)
@@ -325,34 +347,46 @@ Source layout
    │   ├── engine.py           # Engine, BuildContext
    │   ├── operation.py        # @operation decorator, OperationMeta
    │   ├── scope.py            # Scope, discover_scopes
-   │   ├── render.py           # RenderRegistry, module-level registry,
-   │   │                       #   BuildStore (with instance tracking)
-   │   ├── outputs.py          # RouteHandler, SchemaClass, StaticFile, ...
+   │   ├── render.py           # RenderRegistry, module-level registry
+   │   ├── store.py            # BuildStore (with instance tracking)
+   │   ├── outputs.py          # StaticFile (target-agnostic output)
    │   ├── naming.py           # Name helper (PascalCase, snake_case, …)
    │   ├── imports.py          # ImportCollector
    │   ├── env.py              # Jinja2 environment factory
    │   ├── spec.py             # GeneratedFile
    │   └── output.py           # write_files
    │
-   └── be/                   # FastAPI target registered with foundry
-       ├── target.py           # Target instance (data only)
-       ├── config/             # Pydantic config schema
-       ├── operations/         # built-in @operation classes
-       │   ├── get.py          # one file per op: @operation class +
-       │   ├── list.py         #   RouteHandler subclass + FastAPI
-       │   ├── create.py       #   renderer registration
-       │   ├── update.py
-       │   ├── delete.py
-       │   ├── action.py
-       │   ├── auth.py
-       │   ├── scaffold.py
-       │   ├── routing.py
-       │   ├── _render.py     # cross-cutting @renders + fragment helpers
-       │   ├── _shared.py      # helpers shared by the per-op modules
-       │   ├── _introspect.py  # action-fn introspection
-       │   └── _list_config.py # FilterConfig, OrderConfig, PaginateConfig
-       ├── jsonnet/            # jsonnet stdlib exposed as `be/...`
-       ├── templates/          # Jinja2 templates
-       │   ├── fastapi/        # ops/, schema_parts/, outer templates
-       │   └── init/           # auth + db session templates
-       └── _helpers.py         # PYTHON_TYPES type annotation map
+   ├── ingot/                # runtime helpers imported by be-generated apps
+   │   ├── auth.py             # JWT helpers, SessionStore protocol
+   │   ├── files.py            # presigned-URL upload helpers (boto3)
+   │   ├── queue.py            # pgqueuer adapter (get_queue, …)
+   │   ├── telemetry.py        # OTel init + per-handler span helpers
+   │   ├── filters.py          # list-op filtering helpers
+   │   ├── ordering.py         # list-op sorting helpers
+   │   ├── pagination.py       # keyset / offset pagination helpers
+   │   └── utils.py            # small shared helpers
+   │
+   ├── be/                   # FastAPI target registered with foundry
+   │   ├── target.py           # Target instance (data only)
+   │   ├── config/             # Pydantic config schema
+   │   ├── operations/         # built-in @operation classes
+   │   ├── jsonnet/            # jsonnet stdlib exposed as `be/...`
+   │   └── templates/          # Jinja2 templates
+   │
+   ├── be_root/              # one-shot bootstrap for a be-driven project
+   │   ├── target.py
+   │   ├── config.py           # RootConfig schema
+   │   ├── operations.py       # RootScaffold (project-scope, if_exists=skip)
+   │   └── templates/          # main.py / pyproject.toml / justfile / …
+   │
+   ├── fe/                   # React/TS target -- emits openapi-ts.config.ts
+   │   ├── target.py
+   │   ├── config.py           # ProjectConfig schema
+   │   ├── operations.py       # OpenApiTsConfig
+   │   └── templates/          # openapi-ts.config.ts.j2
+   │
+   └── fe_root/              # one-shot bootstrap for a fe-driven project
+       ├── target.py
+       ├── config.py           # RootConfig schema
+       ├── operations.py       # RootScaffold
+       └── templates/          # package.json / justfile / tsconfig / src/…
