@@ -1,9 +1,13 @@
-"""Project-scope op: ``src/router.tsx`` (TanStack Router tree).
+"""Project-scope op: top-level + per-resource route trees.
 
-Always emitted -- the kiln fe target makes TanStack Router a hard
-requirement so apps have URL-shareable views from day one.
+The kiln fe target makes TanStack Router a hard requirement, so
+this op always emits ``src/router.tsx``.  It also emits one
+``src/<key>/routes.tsx`` per resource that exports a
+``make<Pascal>Routes(parent)`` factory mirroring the BE's
+``APIRouter`` sub-app pattern -- adding a new resource means
+one new file, never editing the central router.
 
-Per resource we emit a flat set of independent routes:
+Per-resource route shape:
 
 * ``/<key>``                      -> ``{Pascal}List``
 * ``/<key>/new``                  -> ``Create{Pascal}Form``
@@ -11,11 +15,20 @@ Per resource we emit a flat set of independent routes:
 * ``/<key>/$id/edit``             -> ``Update{Pascal}Form``
 * ``/<key>/$id/<action>``         -> ``{Pascal}{Action}Action`` (one per action)
 
-Detail / create / update / action are full pages, not drawers,
-so URLs are deep-linkable and the browser back button does the
-sensible thing.
+The router.tsx file declares:
 
-The List route carries a typed ``validateSearch`` for filters,
+* ``rootRoute`` -- pathless root, just an ``<Outlet/>``.
+* ``loginRoute`` at ``/login`` -- public, no Shell chrome.
+* ``appLayoutRoute`` -- pathless layout that renders ``<Shell>``
+  and runs ``beforeLoad`` to redirect unauthenticated requests
+  to ``/login``.  All resource trees mount under this layout.
+
+Auth state is injected as TSR context via ``createRouter({
+context })``; ``beforeLoad`` reads ``context.auth`` to gate
+access.  Public routes (login) sit outside the layout so they
+never trigger the redirect.
+
+The list route carries a typed ``validateSearch`` for filters,
 sort, and pagination -- the only state that should round-trip
 through the URL on a list page.  Detail / form / action pages
 read only the ``$id`` URL param.
@@ -208,17 +221,36 @@ class Routes:
                 "routes": routes,
                 "index_redirect": first_path,
                 "first_component": first_component,
-                "needs_string": needs_string,
-                "needs_number": needs_number,
-                "needs_bool": needs_bool,
-                "needs_enum": needs_enum,
+                "auth_enabled": config.auth is not None,
             },
         )
 
-        # Search-param helpers live in their own module so router.tsx
-        # stays focused on the route tree -- the parsers are dull
-        # type-narrowing utilities that don't need to be re-read every
-        # time someone scans the routes file.
+        # Per-resource routes.tsx -- mirrors the BE's APIRouter
+        # sub-app pattern.  Each file exports a ``make<Pascal>Routes``
+        # factory that takes the parent layout route and returns the
+        # resource's child routes.  Adding a new resource is one new
+        # file and a one-line import in router.tsx.
+        for route in routes:
+            yield StaticFile(
+                path=f"src/{route['key']}/routes.tsx",
+                template="src/resource/routes.tsx.j2",
+                context={
+                    "route": route,
+                    "needs_string": route["has_sortable"]
+                    or any(
+                        f["type"] in {"text", "select"} for f in route["filters"]
+                    ),
+                    "needs_number": route["has_pagination"],
+                    "needs_bool": any(
+                        f["type"] == "boolean" for f in route["filters"]
+                    ),
+                    "needs_enum": route["has_sortable"]
+                    or any(f["type"] == "select" for f in route["filters"]),
+                },
+            )
+
+        # Search-param helpers live in their own module so the
+        # per-resource routes files don't each redeclare them.
         if needs_string or needs_number or needs_bool or needs_enum:
             yield StaticFile(
                 path="src/_search.ts",
