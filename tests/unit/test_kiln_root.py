@@ -213,6 +213,31 @@ def test_opentelemetry_on_emits_extras_and_init():
     assert "init_telemetry(app)" in main
 
 
+def test_opentelemetry_on_emits_telemetry_block_in_project_jsonnet():
+    # ``init_telemetry(app)`` imports from ``_generated.telemetry``
+    # which kiln only builds when ``telemetry: ...`` is set in the
+    # kiln config.  Without this block the flag is a half-story
+    # that ImportErrors at startup.
+    project = _build_files(
+        RootConfig(name="demo-app", opentelemetry=True),
+    )["config/project.jsonnet"]
+
+    assert (
+        'local telemetry = import "kiln/telemetry/telemetry.libsonnet"'
+        in project
+    )
+    assert 'telemetry: telemetry.otel("demo-app")' in project
+
+
+def test_opentelemetry_off_omits_telemetry_block():
+    # The banner mentions "telemetry" as a typical post-bootstrap
+    # edit; only the block itself must be absent.
+    project = _build_files(RootConfig())["config/project.jsonnet"]
+
+    assert "telemetry.otel" not in project
+    assert "kiln/telemetry/telemetry.libsonnet" not in project
+
+
 # -------------------------------------------------------------------
 # files flag
 # -------------------------------------------------------------------
@@ -235,6 +260,56 @@ def test_opentelemetry_and_files_combine_into_one_extras_list():
     assert '"kiln-generator[opentelemetry,files]"' in py
     # And only one kiln-generator line exists.
     assert py.count('"kiln-generator') == 1
+
+
+# -------------------------------------------------------------------
+# auth flag
+# -------------------------------------------------------------------
+
+
+def test_auth_off_omits_auth_py_and_auth_block():
+    files = _build_files(RootConfig())
+
+    assert "auth.py" not in files
+    project = files["config/project.jsonnet"]
+    assert "auth.jwt" not in project
+    assert "kiln/auth/jwt.libsonnet" not in project
+
+
+def test_auth_on_emits_auth_py_skeleton():
+    files = _build_files(RootConfig(auth=True))
+
+    assert "auth.py" in files
+    auth_py = files["auth.py"]
+    assert "class LoginCredentials" in auth_py
+    assert "class Session" in auth_py
+    assert "def validate_login" in auth_py
+    # The stub raises so a forgotten swap-out fails loudly rather
+    # than silently letting every login through.
+    assert "NotImplementedError" in auth_py
+
+
+def test_auth_on_emits_auth_block_in_project_jsonnet():
+    # The auth block must point at ``auth.<symbol>`` (matching
+    # the dotted paths the auth.py skeleton declares); otherwise
+    # kiln's introspector will fail to resolve the references.
+    project = _build_files(RootConfig(auth=True))["config/project.jsonnet"]
+
+    assert 'local auth = import "kiln/auth/jwt.libsonnet"' in project
+    assert 'credentials_schema: "auth.LoginCredentials"' in project
+    assert 'session_schema: "auth.Session"' in project
+    assert 'validate_fn: "auth.validate_login"' in project
+
+
+def test_auth_py_is_skip_so_real_validate_login_survives_rebootstrap():
+    # The auth flag would be a foot-gun if a re-bootstrap reset
+    # the user's real credential check -- their authn would be
+    # silently disabled.  Lock the policy in.
+    cfg = RootConfig(auth=True)
+    files = generate(cfg, root_target)
+
+    auth_file = next(f for f in files if f.path == "auth.py")
+    assert auth_file.if_exists == "skip"
 
 
 # -------------------------------------------------------------------
