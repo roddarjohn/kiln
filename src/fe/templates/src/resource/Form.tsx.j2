@@ -3,51 +3,86 @@
 // Edits will be overwritten -- change config/fe.jsonnet instead.
 // ============================================================
 
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+{% if verb == "Update" %}
+import { useParams, useRouter } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+{% else %}
+import { useRouter } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+{% endif %}
 import {
   Button,
-  DrawerBody,
-  DrawerFooter,
+  Card,
+  CardBody,
+  Form,
   Inline,
+  Link,
+  PageHeader,
+{% if verb == "Update" %}
+  Spinner,
+{% endif %}
   Stack,
+  Text,
   TextField,
   toast,
+  useFormMutation,
 } from "@roddarjohn/glaze";
 
-import { {{ fn }} } from "../_generated/sdk.gen";
+import {
+{% if verb == "Update" %}
+  {{ get_fn }},
+{% endif %}
+  {{ fn }},
+} from "../_generated/sdk.gen";
 {% if request_type %}
 import type { {{ request_type }} } from "../_generated/types.gen";
 {% endif %}
 
-interface Props {
-  close: () => void;
+export function {{ verb }}{{ pascal }}Form() {
 {% if verb == "Update" %}
-  id: string;
+  const { id } = useParams({ from: {{ form_path | tojson }} });
 {% endif %}
-}
-
-export function {{ verb }}{{ pascal }}Form({ close{% if verb == "Update" %}, id{% endif %} }: Props) {
+  const router = useRouter();
   const qc = useQueryClient();
-{% for field in fields %}
-  const [{{ field.name }}, set{{ field.name[:1].upper() + field.name[1:] }}] =
-    useState("");
-{% endfor %}
 
-  const mut = useMutation({
-    mutationFn: async () => {
+{% if verb == "Update" %}
+  // Update form is pre-populated from the existing resource so
+  // the user edits in place; ``defaultValue`` on uncontrolled
+  // TextFields means the form keeps working as a native form.
+  const { data, isLoading } = useQuery({
+    queryKey: [{{ key | tojson }}, "get", id],
+    queryFn: async () => {
+      const res = await {{ get_fn }}({ path: { id } });
+      if (res.error || !res.data) {
+        throw new Error("Failed to load {{ label_singular | lower }}.");
+      }
+      return res.data;
+    },
+    // Bubble load failures (e.g. 404) up to ``errorComponent``.
+    throwOnError: true,
+  });
+
+{% endif %}
+  // Cancel and the breadcrumb both pop the browser history so
+  // the user returns to wherever they came from -- the list
+  // (with filters / sort still applied), the detail page, etc.
+  const back = () => {
+    router.history.back();
+  };
+
+  const { onSubmit, submitting, error, validationErrors } = useFormMutation({
+    mutationFn: async (input) => {
       const res = await {{ fn }}({
 {% if verb == "Update" %}
         path: { id },
 {% endif %}
-        body: {
-{% for field in fields %}
-          {{ field.name }},
-{% endfor %}
-        }{% if request_type %} as {{ request_type }}{% endif %},
+        body: input{% if request_type %} as {{ request_type }}{% endif %},
       });
 
-      if (res.error || !res.data) {
+      // Only ``res.error`` indicates failure -- a 201/204 with
+      // an empty body is still success and the BE may legitimately
+      // return ``null`` for a create.
+      if (res.error) {
         throw new Error({{ (verb_lower + ' failed.') | tojson }});
       }
 
@@ -56,7 +91,7 @@ export function {{ verb }}{{ pascal }}Form({ close{% if verb == "Update" %}, id{
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: [{{ key | tojson }}] });
       toast.success({{ (label_singular + ' ' + verb_lower + 'd.') | tojson }});
-      close();
+      back();
     },
     onError: (err) => {
       toast.error(
@@ -65,36 +100,53 @@ export function {{ verb }}{{ pascal }}Form({ close{% if verb == "Update" %}, id{
     },
   });
 
+{% if verb == "Update" %}
+  if (isLoading) return <Spinner aria-label={{ ('Loading ' + label_singular | lower) | tojson }} />;
+  if (!data) return null;
+  const item = data;
+
+{% endif %}
   return (
-    <>
-      <DrawerBody>
-        <Stack gap="3">
+    <Stack gap="4">
+      <PageHeader
+        breadcrumbs={
+          <Link variant="muted" onPress={() => router.history.back()}>
+            &larr; Back
+          </Link>
+        }
+        title={{ (verb + ' ' + label_singular | lower) | tojson }}
+      />
+      <Card>
+        <CardBody>
+          <Form onSubmit={onSubmit} validationErrors={validationErrors}>
+            <Stack gap="3">
+              {error !== null ? <Text size="sm">{error.message}</Text> : null}
 {% for field in fields %}
-          <TextField
-            label={{ field.label | tojson }}
-            value={{ '{' }}{{ field.name }}{{ '}' }}
-            onChange={set{{ field.name[:1].upper() + field.name[1:] }}}
-            data-testid={{ (key + '-' + field.name) | tojson }}
-          />
+              <TextField
+                name={{ field.name | tojson }}
+                label={{ field.label | tojson }}
+                data-testid={{ (key + '-' + field.name) | tojson }}
+{% if verb == "Update" %}
+                defaultValue={String(item.{{ field.name }} ?? "")}
+{% endif %}
+              />
 {% endfor %}
-        </Stack>
-      </DrawerBody>
-      <DrawerFooter>
-        <Inline gap="2">
-          <Button variant="secondary" onPress={close}>
-            Cancel
-          </Button>
-          <Button
-            pending={mut.isPending}
-            onPress={() => {
-              mut.mutate();
-            }}
-            data-testid={{ (verb_lower + '-' + key + '-submit') | tojson }}
-          >
-            {{ verb }}
-          </Button>
-        </Inline>
-      </DrawerFooter>
-    </>
+              <Inline gap="2">
+                <Button variant="secondary" onPress={back}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  pending={submitting}
+                  data-testid={{ (verb_lower + '-' + key + '-submit') | tojson }}
+                >
+                  {{ verb }}
+                </Button>
+              </Inline>
+            </Stack>
+          </Form>
+        </CardBody>
+      </Card>
+    </Stack>
   );
 }

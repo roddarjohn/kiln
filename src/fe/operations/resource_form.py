@@ -67,17 +67,26 @@ class ResourceForm:
                     label_singular=resource.label.singular,
                     verb="Create",
                     fn=resource.create_fn,
+                    get_fn=None,
                     request_type=resource.create_request_type,
                     form=resource.create,
                 )
 
-            if resource.update is not None and resource.update_fn is not None:
+            # Update needs ``get_fn`` to pre-populate the form;
+            # without it we'd render blank fields and silently
+            # blow away whatever's stored.
+            if (
+                resource.update is not None
+                and resource.update_fn is not None
+                and resource.get_fn is not None
+            ):
                 yield self._form(
                     key=key,
                     pascal=pascal,
                     label_singular=resource.label.singular,
                     verb="Update",
                     fn=resource.update_fn,
+                    get_fn=resource.get_fn,
                     request_type=resource.update_request_type,
                     form=resource.update,
                 )
@@ -90,12 +99,18 @@ class ResourceForm:
         label_singular: str,
         verb: str,
         fn: str,
+        get_fn: str | None,
         request_type: str | None,
         form: FormConfig,
     ) -> StaticFile:
         """Build a single Create / Update form file."""
-        # The mutation needs path params for update; for create
-        # there are none.  The template branches on `verb`.
+        # Routes for the form pages live alongside list / detail
+        # at well-known paths so the form can navigate ``back`` on
+        # cancel / success.
+        list_path = f"/{key}"
+        detail_path = f"/{key}/$id"
+        form_path = f"/{key}/new" if verb == "Create" else f"/{key}/$id/edit"
+
         return StaticFile(
             path=f"src/{key}/{verb}{pascal}Form.tsx",
             template="src/resource/Form.tsx.j2",
@@ -106,9 +121,13 @@ class ResourceForm:
                 "verb": verb,
                 "verb_lower": verb.lower(),
                 "fn": fn,
+                "get_fn": get_fn,
                 "request_type": request_type,
                 "fields": [
                     {"name": f, "label": _humanize(f)} for f in form.fields
                 ],
+                "list_path": list_path,
+                "detail_path": detail_path,
+                "form_path": form_path,
             },
         )

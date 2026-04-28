@@ -7,44 +7,228 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-{% if not first_component %}
+{% if first_component %}
+  redirect,
+{% else %}
   Outlet,
 {% endif %}
 } from "@tanstack/react-router";
+import { Button, EmptyState, Stack } from "@roddarjohn/glaze";
 
 import { Shell } from "./Shell";
 {% for route in routes %}
 import { {{ route.list_component }} } from "{{ route.list_module }}";
+{% if route.detail_component %}
+import { {{ route.detail_component }} } from "{{ route.detail_module }}";
+{% endif %}
+{% if route.create_component %}
+import { {{ route.create_component }} } from "{{ route.create_module }}";
+{% endif %}
+{% if route.update_component %}
+import { {{ route.update_component }} } from "{{ route.update_module }}";
+{% endif %}
+{% for action in route.action_routes %}
+import { {{ action.component }} } from "{{ action.module }}";
+{% endfor %}
 {% endfor %}
 
-const rootRoute = createRootRoute({ component: Shell });
+{% if needs_string or needs_number or needs_bool or needs_enum %}
+// Search-param parsers live in ``_search.ts`` so this file stays
+// focused on the route tree.
+import {
+{% if needs_bool %}
+  asBool,
+{% endif %}
+{% if needs_enum %}
+  asEnum,
+{% endif %}
+{% if needs_number %}
+  asNumber,
+{% endif %}
+{% if needs_string %}
+  asString,
+{% endif %}
+} from "./_search";
+
+{% endif %}
+// Default error UI used by every route (and TSR's not-found
+// fallback).  The user gets a glaze-styled EmptyState plus a
+// retry button -- ``reset`` clears the error boundary so the
+// route remounts; the second button pops the history stack so
+// the user can back out to a known-good page.
+function RouterError({
+  error,
+  reset,
+}: {
+  error: Error;
+  reset?: () => void;
+}) {
+  return (
+    <Stack gap="3" style={ { padding: "2rem" } }>
+      <EmptyState
+        title="Something went wrong"
+        description={error.message || "An unexpected error occurred."}
+        actions={
+          <>
+            {reset !== undefined ? (
+              <Button onPress={reset}>Try again</Button>
+            ) : null}
+            <Button variant="secondary" onPress={() => window.history.back()}>
+              Go back
+            </Button>
+          </>
+        }
+      />
+    </Stack>
+  );
+}
+
+function RouterNotFound() {
+  return (
+    <Stack gap="3" style={ { padding: "2rem" } }>
+      <EmptyState
+        title="Page not found"
+        description="The page you’re looking for doesn’t exist."
+        actions={
+          <Button variant="secondary" onPress={() => window.history.back()}>
+            Go back
+          </Button>
+        }
+      />
+    </Stack>
+  );
+}
+
+const rootRoute = createRootRoute({
+  component: Shell,
+  errorComponent: RouterError,
+  notFoundComponent: RouterNotFound,
+});
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
 {% if first_component %}
-  component: {{ first_component }},
+  // The index redirects to the first resource's list path so a
+  // fresh visit to "/" lands the user on a real page (and any
+  // ``useSearch({ from: "/<key>" })`` inside the list page finds
+  // an active match).
+  beforeLoad: () => {
+    throw redirect({ to: {{ index_redirect | tojson }}, search: {} });
+  },
 {% else %}
   component: () => <Outlet />,
 {% endif %}
 });
 
 {% for route in routes %}
-const {{ route.key }}Route = createRoute({
+{% set has_list_state = route.has_pagination or route.has_sortable or route.filters %}
+const {{ route.key }}ListRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: {{ route.path | tojson }},
+  path: {{ route.list_path | tojson }},
   component: {{ route.list_component }},
+{% if has_list_state %}
+  // Per-route search shape lives in the URL.  Keys are typed as
+  // optional so navigating without state (``search: {}``) type-
+  // checks; missing/malformed values collapse to ``undefined``.
+  validateSearch: (search: Record<string, unknown>): {
+{% if route.has_pagination %}
+    page?: number;
+{% endif %}
+{% if route.has_sortable %}
+    sort?: string;
+    dir?: "asc" | "desc";
+{% endif %}
+{% for f in route.filters %}
+{% if f.type == "boolean" %}
+    {{ f.id }}?: boolean;
+{% elif f.type == "select" and f.options %}
+    {{ f.id }}?: {% for opt in f.options %}{{ opt | tojson }}{% if not loop.last %} | {% endif %}{% endfor %};
+{% else %}
+    {{ f.id }}?: string;
+{% endif %}
+{% endfor %}
+  } => ({
+{% if route.has_pagination %}
+    page: asNumber(search.page),
+{% endif %}
+{% if route.has_sortable %}
+    sort: asString(search.sort),
+    dir: asEnum(search.dir, ["asc", "desc"] as const),
+{% endif %}
+{% for f in route.filters %}
+{% if f.type == "boolean" %}
+    {{ f.id }}: asBool(search[{{ f.id | tojson }}]),
+{% elif f.type == "select" and f.options %}
+    {{ f.id }}: asEnum(search[{{ f.id | tojson }}], [{% for opt in f.options %}{{ opt | tojson }}{% if not loop.last %}, {% endif %}{% endfor %}] as const),
+{% else %}
+    {{ f.id }}: asString(search[{{ f.id | tojson }}]),
+{% endif %}
+{% endfor %}
+  }),
+{% endif %}
 });
 
+{% if route.create_component %}
+const {{ route.key }}CreateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: {{ route.create_path | tojson }},
+  component: {{ route.create_component }},
+});
+
+{% endif %}
+{% if route.detail_component %}
+const {{ route.key }}DetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: {{ route.detail_path | tojson }},
+  component: {{ route.detail_component }},
+});
+
+{% endif %}
+{% if route.update_component %}
+const {{ route.key }}UpdateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: {{ route.update_path | tojson }},
+  component: {{ route.update_component }},
+});
+
+{% endif %}
+{% for action in route.action_routes %}
+const {{ route.key }}{{ action.name | replace('_', '') | replace('-', '') | title }}Route = createRoute({
+  getParentRoute: () => rootRoute,
+  path: {{ action.path | tojson }},
+  component: {{ action.component }},
+});
+
+{% endfor %}
 {% endfor %}
 const routeTree = rootRoute.addChildren([
   indexRoute,
 {% for route in routes %}
-  {{ route.key }}Route,
+  {{ route.key }}ListRoute,
+{% if route.create_component %}
+  {{ route.key }}CreateRoute,
+{% endif %}
+{% if route.detail_component %}
+  {{ route.key }}DetailRoute,
+{% endif %}
+{% if route.update_component %}
+  {{ route.key }}UpdateRoute,
+{% endif %}
+{% for action in route.action_routes %}
+  {{ route.key }}{{ action.name | replace('_', '') | replace('-', '') | title }}Route,
+{% endfor %}
 {% endfor %}
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({
+  routeTree,
+  // Errors propagated up by route components (or thrown out of
+  // ``loader`` / ``beforeLoad``) bubble to ``RouterError`` rather
+  // than the default raw stack-trace UI.
+  defaultErrorComponent: RouterError,
+  defaultNotFoundComponent: RouterNotFound,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

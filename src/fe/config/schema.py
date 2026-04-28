@@ -39,6 +39,13 @@ class NavItem(BaseModel):
             resource's list page) or an arbitrary identifier
             for a custom view (only meaningful if you've added a
             custom page wired in your own ``App.tsx`` edits).
+        icon: Lucide icon name (e.g. ``"FolderOpen"``) rendered
+            beside *label*.  When set, the codegen adds the
+            matching named import from ``lucide-react`` to
+            ``Shell.tsx`` -- the project must have
+            ``lucide-react`` installed (it ships in the
+            ``fe_root`` bootstrap so any kiln-scaffolded fe app
+            already has it).
 
     """
 
@@ -46,6 +53,7 @@ class NavItem(BaseModel):
 
     label: str
     view: str
+    icon: str | None = Field(default=None)
 
 
 class ShellConfig(BaseModel):
@@ -241,7 +249,11 @@ class FormConfig(BaseModel):
 
     Attributes:
         fields: Field names on the request body type.
-        presentation: How to surface the form.
+        presentation: How to surface the form.  ``"page"``
+            (default) renders a full route page with PageHeader +
+            Card; ``"drawer"`` wraps the same content in a glaze
+            Drawer that closes via ``history.back()``.  Either
+            way the form has a stable URL.
 
     """
 
@@ -320,6 +332,11 @@ class DetailConfig(BaseModel):
         sections: Section definitions, top to bottom.
         actions: Action keys (from ``ResourceConfig.actions``)
             to render as buttons in the detail header.
+        presentation: How to surface the detail view.  ``"page"``
+            (default) renders a full route page; ``"drawer"``
+            wraps it in a glaze Drawer that closes via
+            ``history.back()``.  The route URL ``/<key>/$id`` is
+            stable across both modes.
 
     """
 
@@ -327,6 +344,7 @@ class DetailConfig(BaseModel):
 
     sections: list[DetailSection] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
+    presentation: Literal["page", "drawer"] = Field(default="page")
 
 
 class ResourceLabel(BaseModel):

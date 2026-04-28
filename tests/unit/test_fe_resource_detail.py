@@ -94,12 +94,13 @@ class TestSections:
         )
 
         assert "Overview" in out
-        # One label/value block per field; uses Text "muted" for the
-        # label and a plain Text for the value.
-        assert 'tone="muted">Name' in out
-        assert 'tone="muted">Slug' in out
-        assert '{String(item.name ?? "")}' in out
-        assert '{String(item.slug ?? "")}' in out
+        # Section fields render through glaze's DataList primitive
+        # (#30), one row per declared field.
+        assert "<DataList" in out
+        assert '"Name"' in out
+        assert '"Slug"' in out
+        assert 'String(item.name ?? "")' in out
+        assert 'String(item.slug ?? "")' in out
 
     def test_titleless_section_omits_heading(self) -> None:
         out = self._out([DetailSection(fields=["name"])])
@@ -143,8 +144,10 @@ class TestHeaderActions:
         )
         out = _files(cfg)["src/projects/ProjectsDetail.tsx"]
 
-        assert "DialogTrigger" in out
-        assert "ProjectsPublishAction" in out
+        # Detail header action buttons navigate to the action's
+        # own route (``/<key>/$id/<name>``) rather than opening a
+        # dialog -- actions are fully addressable surfaces now.
+        assert "/projects/$id/publish" in out
         assert "Publish" in out
 
     def test_unknown_action_name_silently_skipped(self) -> None:

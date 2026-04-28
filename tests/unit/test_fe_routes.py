@@ -61,6 +61,21 @@ class TestEmission:
         assert 'declare module "@tanstack/react-router"' in out
         assert "router: typeof router" in out
 
+    def test_router_wires_default_error_and_not_found(self) -> None:
+        # Errors bubbling out of any route render through a
+        # glaze-styled EmptyState rather than TSR's raw default
+        # so users see something readable.
+        out = _files(ProjectConfig())["src/router.tsx"]
+
+        assert "function RouterError" in out
+        assert "function RouterNotFound" in out
+        assert "defaultErrorComponent: RouterError" in out
+        assert "defaultNotFoundComponent: RouterNotFound" in out
+        # The root route also gets the same handler so the Shell
+        # chrome stays mounted when a child throws.
+        assert "errorComponent: RouterError" in out
+        assert "notFoundComponent: RouterNotFound" in out
+
 
 # ---------------------------------------------------------------------------
 # Resource routes
@@ -76,7 +91,9 @@ class TestResourceRoutes:
         )
         out = _files(cfg)["src/router.tsx"]
 
-        assert "projectsRoute" in out
+        # Each resource emits a list route plus optional sibling
+        # routes for create / detail / update / actions.
+        assert "projectsListRoute" in out
         assert 'path: "/projects"' in out
         assert "ProjectsList" in out
         assert 'import { ProjectsList } from "./projects/ProjectsList"' in out
@@ -90,7 +107,7 @@ class TestResourceRoutes:
         out = _files(cfg)["src/router.tsx"]
 
         assert "ProjectsList" not in out
-        assert "projectsRoute" not in out
+        assert "projectsListRoute" not in out
 
     def test_index_route_uses_first_resource_component(self) -> None:
         cfg = ProjectConfig(
@@ -101,11 +118,13 @@ class TestResourceRoutes:
         )
         out = _files(cfg)["src/router.tsx"]
 
-        # Index route renders the first resource's list so a fresh
-        # visit to "/" doesn't dump the user on a blank page.
+        # Index redirects to the first resource's list path so a
+        # fresh visit to "/" lands the user on a real page (and
+        # ``useSearch({ from: "/<key>" })`` inside the list page
+        # finds an active match).
         assert "indexRoute" in out
         assert 'path: "/"' in out
-        assert "component: ProjectsList" in out
+        assert 'redirect({ to: "/projects"' in out
 
     def test_route_tree_includes_every_route(self) -> None:
         cfg = ProjectConfig(
@@ -118,5 +137,5 @@ class TestResourceRoutes:
 
         assert "rootRoute.addChildren([" in out
         assert "indexRoute," in out
-        assert "projectsRoute," in out
-        assert "tasksRoute," in out
+        assert "projectsListRoute," in out
+        assert "tasksListRoute," in out

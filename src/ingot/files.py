@@ -58,7 +58,15 @@ from typing import TYPE_CHECKING, Any, cast
 import boto3
 from fastapi import HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import BigInteger, DateTime, String, delete, insert, update
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    String,
+    Uuid,
+    delete,
+    insert,
+    update,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
@@ -101,13 +109,17 @@ class FileMixin:
     PUT URL) but whose upload hasn't yet been confirmed.  Consumers
     typically clear or expire these rows on a schedule.
 
-    The mixin does *not* declare ``id``; consumers using pgcraft
-    pick a PK plugin on the concrete model
-    (``__plugins__ = [UUIDV4PKPlugin()]`` is the idiomatic choice
-    so the row id is safe to expose in URLs).  Plain SQLAlchemy
-    consumers can mix in :class:`FileMixin` and add their own
-    ``id`` column on the model class.
+    pgcraft consumers should use :class:`PGCraftFileMixin` instead
+    -- it omits ``id`` so the consumer's PK plugin (typically
+    ``UUIDV4PKPlugin``) owns the column without colliding.
     """
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    """Surrogate primary key.  UUIDv4 so it's safe to expose."""
 
     s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
     """Object key in the storage bucket.  Unique so a row maps to
@@ -147,6 +159,48 @@ class FileMixin:
     )
     """When the upload was confirmed.  ``None`` means pending --
     metadata exists but the blob may or may not be in S3."""
+
+
+class PGCraftFileMixin:
+    """Same column set as :class:`FileMixin`, but without ``id``.
+
+    Use this when the concrete model is a pgcraft factory class and
+    a PK plugin (typically :class:`pgcraft.plugins.pk.UUIDV4PKPlugin`)
+    owns the ``id`` column.  Declaring ``id`` directly on a mixin
+    here would collide with the plugin's column at table-build time
+    (``DuplicateColumnError`` on ``id``).
+
+    The :class:`uuid.UUID` annotation is left in place so the action
+    helpers in this module can treat ``model.id`` as typed at static-
+    analysis time; the value is filled in at runtime by the PK
+    plugin's column on the table the model is mapped to.
+    """
+
+    if TYPE_CHECKING:
+        # Type-only -- the PK plugin provides the actual column.
+        id: uuid.UUID
+
+    s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    content_type: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    size_bytes: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    original_filename: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.datetime.now(tz=datetime.UTC),
+    )
+    uploaded_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
 
 def bind_file_model(
@@ -198,10 +252,6 @@ def bind_file_model(
 
     """
     cls = type(name, (base, FileMixin), {"__tablename__": tablename})
-    # Add a UUIDv4 id column onto the concrete subclass so the
-    # plain-SQLAlchemy path stays a one-liner.  pgcraft consumers
-    # ignore this and declare ``__plugins__ = [UUIDV4PKPlugin()]``
-    # on a hand-written model class instead.
     return cast("type[FileMixin]", cls)
 
 

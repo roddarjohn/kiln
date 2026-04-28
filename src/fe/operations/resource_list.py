@@ -72,7 +72,8 @@ class _RowActionContext(TypedDict):
 
     name: str
     label: str
-    component: str  # the action form/dialog component name
+    component: str  # the action page component name
+    path: str  # ``/<key>/$id/<name>`` to navigate to
     when: str | None  # JS expression gating the row button
 
 
@@ -107,7 +108,7 @@ class ResourceList:
 
             pascal = _pascal(key)
             columns = _columns_for(resource.list.columns)
-            row_actions = _row_actions_for(resource.actions, pascal)
+            row_actions = _row_actions_for(resource.actions, key, pascal)
             filters = _filters_for(resource.list.filters)
             has_create_toolbar = (
                 "create" in resource.list.toolbar_actions
@@ -154,8 +155,12 @@ class ResourceList:
                     "page_size": resource.list.page_size,
                     "has_sortable": any(c["sortable"] for c in columns),
                     "row_click_detail": row_click_detail,
-                    "detail_component": (
-                        f"{pascal}Detail" if row_click_detail else None
+                    "list_path": f"/{key}",
+                    "create_path": (
+                        f"/{key}/new" if has_create_toolbar else None
+                    ),
+                    "detail_path": (
+                        f"/{key}/$id" if row_click_detail else None
                     ),
                     "sdk_imports": sorted(sdk_imports),
                 },
@@ -182,6 +187,7 @@ def _columns_for(columns: list[ColumnSpec]) -> list[_ColumnContext]:
 
 def _row_actions_for(
     actions: dict[str, ActionConfig],
+    key: str,
     pascal: str,
 ) -> list[_RowActionContext]:
     """Filter actions for those that surface as row buttons."""
@@ -196,6 +202,7 @@ def _row_actions_for(
                 "name": name,
                 "label": action.label,
                 "component": f"{pascal}{_pascal(name)}Action",
+                "path": f"/{key}/$id/{name}",
                 "when": action.row_action_when,
             },
         )

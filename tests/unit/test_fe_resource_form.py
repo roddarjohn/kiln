@@ -29,12 +29,19 @@ def _resource(  # noqa: PLR0913
     update_fields: list[str] | None = None,
     create_request_type: str | None = None,
     update_request_type: str | None = None,
+    get_fn: str | None = None,
 ) -> ResourceConfig:
+    # Update forms need ``get_fn`` to pre-populate fields.  Default
+    # it on so update tests don't have to wire it explicitly.
+    if update_fn is not None and get_fn is None:
+        get_fn = "getFn"
+
     return ResourceConfig(
         label=ResourceLabel(singular="Project", plural="Projects"),
         list_item_type="ProjectListItem",
         **({"create_fn": create_fn} if create_fn else {}),
         **({"update_fn": update_fn} if update_fn else {}),
+        **({"get_fn": get_fn} if get_fn else {}),
         **(
             {"create_request_type": create_request_type}
             if create_request_type
@@ -135,9 +142,11 @@ class TestCreateForm:
     def test_imports_glaze_form_pieces_and_sdk_fn(self) -> None:
         out = self._out()
 
+        # Forms are now full-page route components: PageHeader on
+        # top, Card body for the inputs, no Drawer wrapping.
         assert "TextField" in out
-        assert "DrawerBody" in out
-        assert "DrawerFooter" in out
+        assert "PageHeader" in out
+        assert "Card" in out
         assert "createProjectV1TrackerProjectsPost" in out
         assert 'from "../_generated/sdk.gen"' in out
 
@@ -156,27 +165,39 @@ class TestCreateForm:
         for field in ("name", "slug", "description"):
             assert f'label="{field.title()}"' in out
 
-    def test_field_state_uses_use_state(self) -> None:
+    def test_form_uses_useFormMutation_and_native_form(self) -> None:  # noqa: N802
         out = self._out()
 
-        assert "const [name, setName] =" in out
-        assert 'useState("")' in out
+        # Forms now ride glaze's useFormMutation + native <Form>
+        # (#32) -- no per-field useState boilerplate, the FormData
+        # is collected from named TextFields at submit time.
+        assert "useFormMutation" in out
+        assert "<Form" in out
+        assert "onSubmit={onSubmit}" in out
+        assert "validationErrors={validationErrors}" in out
+        assert "useState" not in out
+        # Each field is uncontrolled with a `name` for FormData.
+        assert 'name="name"' in out
 
     def test_mutation_invalidates_resource_key(self) -> None:
         out = self._out()
 
         assert 'invalidateQueries({ queryKey: ["projects"] })' in out
 
-    def test_success_toast_and_close(self) -> None:
+    def test_success_toast_and_navigates_back(self) -> None:
         out = self._out()
 
+        # On success the form toasts and navigates back to the
+        # list (or the detail for update); ``close`` props are
+        # gone with the drawer wrapper.
         assert 'toast.success("Project created.")' in out
-        assert "close()" in out
+        assert "back()" in out
 
-    def test_signature_takes_only_close_for_create(self) -> None:
+    def test_signature_takes_no_props(self) -> None:
         out = self._out()
 
-        assert "export function CreateProjectsForm({ close }: Props)" in out
+        # The form is a route component, no parent passes props.
+        assert "export function CreateProjectsForm()" in out
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +217,14 @@ class TestUpdateForm:
         )
         return _files(cfg)["src/projects/UpdateProjectsForm.tsx"]
 
-    def test_signature_takes_close_and_id(self) -> None:
+    def test_signature_takes_no_props_and_reads_id_from_route(self) -> None:
         out = self._out()
 
-        assert "export function UpdateProjectsForm({ close, id }: Props)" in out
+        # Update form is also a route component now; ``id`` comes
+        # from useParams against ``/<key>/$id/edit``.
+        assert "export function UpdateProjectsForm()" in out
+        assert "useParams" in out
+        assert 'from: "/projects/$id/edit"' in out
 
     def test_mutation_passes_path_id(self) -> None:
         out = self._out()

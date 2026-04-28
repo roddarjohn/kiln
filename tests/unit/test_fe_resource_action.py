@@ -91,16 +91,17 @@ class TestActionContent:
         out = self._out()
         assert "completeActionV1TrackerTasksIdCompletePost" in out
 
-    def test_imports_list_item_type_for_props(self) -> None:
+    def test_action_is_a_route_page(self) -> None:
+        # Action pages now read ``id`` from the URL ($id param)
+        # so they're addressable directly rather than rendered
+        # inside the list page's row dialog.
         out = self._out()
-        assert (
-            'import type { TaskListItem } from "../../_generated/types.gen"'
-            in out
-        )
+        assert "useParams" in out
+        assert 'from: "/tasks/$id/complete"' in out
 
-    def test_path_uses_item_id(self) -> None:
+    def test_path_uses_route_id(self) -> None:
         out = self._out()
-        assert "path: { id: String(item.id) }" in out
+        assert "path: { id }" in out
 
     def test_no_fields_skips_textfield(self) -> None:
         out = self._out()

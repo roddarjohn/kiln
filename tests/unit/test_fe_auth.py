@@ -120,6 +120,9 @@ class TestLoginPage:
     def test_imports_glaze_form_components(self) -> None:
         out = self._out()
 
+        # Hand-rolled login (LoginCard reverted until glaze ships
+        # an identifier-type override -- it hardcodes type="email"
+        # which breaks username-style auth, see task #38).
         assert "TextField" in out
         assert "Button" in out
         assert "Card" in out
@@ -135,8 +138,6 @@ class TestLoginPage:
     def test_default_credentials_fields_render_username_password(self) -> None:
         out = self._out()
 
-        # Default ``credentials_fields = ["username", "password"]``
-        # must produce two TextFields, one of which is type=password.
         assert 'label="Username"' in out
         assert 'label="Password"' in out
         assert 'type="password"' in out

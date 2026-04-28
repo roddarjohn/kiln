@@ -9,7 +9,6 @@ import {
   Card,
   CardBody,
   CardHeader,
-  Heading,
   Stack,
   Text,
   TextField,
@@ -58,53 +57,50 @@ export function Login() {
       } }
     >
       <div style={ { width: "100%", maxWidth: "24rem" } }>
-        <Stack gap="4">
-          <Heading level={1}>Sign in</Heading>
-          <Card>
-            <CardHeader
-              title="Sign in"
+        <Card>
+          <CardHeader
+            title="Sign in"
 {% if auth.login_hint %}
-              description={{ auth.login_hint | tojson }}
+            description={{ auth.login_hint | tojson }}
 {% endif %}
-            />
-            <CardBody>
-              <form
-                onSubmit={(e) => {
-                  void onSubmit(e);
-                }}
-              >
-                <Stack gap="3">
+          />
+          <CardBody>
+            <form
+              onSubmit={(e) => {
+                void onSubmit(e);
+              }}
+            >
+              <Stack gap="3">
 {% for field in auth.credentials_fields %}
-                  <TextField
-                    label={{ (field[:1].upper() + field[1:]) | tojson }}
+                <TextField
+                  label={{ (field[:1].upper() + field[1:]) | tojson }}
 {% if field == "password" %}
-                    type="password"
-                    autoComplete="current-password"
+                  type="password"
+                  autoComplete="current-password"
 {% else %}
-                    autoComplete={{ field | tojson }}
+                  autoComplete={{ field | tojson }}
 {% endif %}
-                    value={{ '{' }}{{ field }}{{ '}' }}
-                    onChange={set{{ field[:1].upper() + field[1:] }}}
-                    data-testid={{ ('login-' + field) | tojson }}
-                  />
+                  value={{ '{' }}{{ field }}{{ '}' }}
+                  onChange={set{{ field[:1].upper() + field[1:] }}}
+                  data-testid={{ ('login-' + field) | tojson }}
+                />
 {% endfor %}
-                  {error !== null ? (
-                    <Text size="sm" data-testid="login-error">
-                      {error}
-                    </Text>
-                  ) : null}
-                  <Button
-                    type="submit"
-                    pending={pending}
-                    data-testid="login-submit"
-                  >
-                    Sign in
-                  </Button>
-                </Stack>
-              </form>
-            </CardBody>
-          </Card>
-        </Stack>
+                {error !== null ? (
+                  <Text size="sm" data-testid="login-error">
+                    {error}
+                  </Text>
+                ) : null}
+                <Button
+                  type="submit"
+                  pending={pending}
+                  data-testid="login-submit"
+                >
+                  Sign in
+                </Button>
+              </Stack>
+            </form>
+          </CardBody>
+        </Card>
       </div>
     </main>
   );

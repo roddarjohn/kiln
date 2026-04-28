@@ -6,10 +6,15 @@
 {% if fields %}
 import { useState } from "react";
 {% endif %}
+import { useParams, useRouter } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
+  Card,
+  CardBody,
   Inline,
+  Link,
+  PageHeader,
   Stack,
 {% if confirm_text %}
   Text,
@@ -21,28 +26,32 @@ import {
 } from "@roddarjohn/glaze";
 
 import { {{ fn }} } from "../../_generated/sdk.gen";
-
-import type { {{ list_item_type }} } from "../../_generated/types.gen";
 {% if request_schema %}
 import type { {{ request_schema }} } from "../../_generated/types.gen";
 {% endif %}
 
-interface Props {
-  item: {{ list_item_type }};
-  close: () => void;
-}
-
-export function {{ component }}({ item, close }: Props) {
+export function {{ component }}() {
+  // The action page reads its target from the URL ``$id`` param;
+  // the inner mutation body is built from local state for any
+  // form fields the action declares.
+  const { id } = useParams({ from: {{ action_path | tojson }} });
+  const router = useRouter();
   const qc = useQueryClient();
 {% for field in fields %}
   const [{{ field.name }}, set{{ field.name[:1].upper() + field.name[1:] }}] =
     useState("");
 {% endfor %}
 
+  // Cancel and the breadcrumb both pop the browser history so
+  // the user lands wherever they came from (detail, list, etc.).
+  const back = () => {
+    router.history.back();
+  };
+
   const mut = useMutation({
     mutationFn: async () => {
       const res = await {{ fn }}({
-        path: { id: String(item.id) },
+        path: { id },
 {% if fields %}
         body: {
 {% for field in fields %}
@@ -59,7 +68,7 @@ export function {{ component }}({ item, close }: Props) {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: [{{ key | tojson }}] });
       toast.success({{ (label + 'd.') | tojson }});
-      close();
+      back();
     },
     onError: (err) => {
       toast.error(
@@ -69,32 +78,46 @@ export function {{ component }}({ item, close }: Props) {
   });
 
   return (
-    <Stack gap="3">
+    <Stack gap="4">
+      <PageHeader
+        breadcrumbs={
+          <Link variant="muted" onPress={back}>
+            &larr; Back
+          </Link>
+        }
+        title={{ label | tojson }}
+      />
+      <Card>
+        <CardBody>
+          <Stack gap="3">
 {% if confirm_text %}
-      <Text>{{ confirm_text }}</Text>
+            <Text>{{ confirm_text }}</Text>
 {% endif %}
 {% for field in fields %}
-      <TextField
-        label={{ field.label | tojson }}
-        value={{ '{' }}{{ field.name }}{{ '}' }}
-        onChange={set{{ field.name[:1].upper() + field.name[1:] }}}
-        data-testid={{ ('action-' + field.name) | tojson }}
-      />
+            <TextField
+              label={{ field.label | tojson }}
+              value={{ '{' }}{{ field.name }}{{ '}' }}
+              onChange={set{{ field.name[:1].upper() + field.name[1:] }}}
+              data-testid={{ ('action-' + field.name) | tojson }}
+            />
 {% endfor %}
-      <Inline gap="2">
-        <Button variant="secondary" onPress={close}>
-          Cancel
-        </Button>
-        <Button
-          pending={mut.isPending}
-          onPress={() => {
-            mut.mutate();
-          }}
-          data-testid={{ ('action-' + key + '-submit') | tojson }}
-        >
-          {{ label }}
-        </Button>
-      </Inline>
+            <Inline gap="2">
+              <Button variant="secondary" onPress={back}>
+                Cancel
+              </Button>
+              <Button
+                pending={mut.isPending}
+                onPress={() => {
+                  mut.mutate();
+                }}
+                data-testid={{ ('action-' + key + '-submit') | tojson }}
+              >
+                {{ label }}
+              </Button>
+            </Inline>
+          </Stack>
+        </CardBody>
+      </Card>
     </Stack>
   );
 }

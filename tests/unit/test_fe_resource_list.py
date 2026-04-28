@@ -180,15 +180,14 @@ class TestActions:
         )
         out = _files(cfg)["src/projects/ProjectsList.tsx"]
 
-        assert "DrawerTrigger" in out
-        assert "<Drawer" in out
-        assert "Create" in out
-        # The form component that the drawer renders is owned by
-        # the form op; the list page just imports it by name.
-        assert "<CreateProjectsForm" in out
-        assert (
-            'import { CreateProjectsForm } from "./CreateProjectsForm";' in out
-        )
+        # Create is now an independent route at ``/<key>/new``;
+        # the list page navigates there rather than rendering the
+        # form inline.
+        assert '"/projects/new"' in out
+        assert "New project" in out
+        # The form component lives at its own route; the list
+        # page no longer imports or renders it.
+        assert "CreateProjectsForm" not in out
 
     def test_create_toolbar_skipped_without_create_fn(self) -> None:
         cfg = ProjectConfig(
@@ -198,7 +197,7 @@ class TestActions:
         )
         out = _files(cfg)["src/projects/ProjectsList.tsx"]
 
-        assert "DrawerTrigger" not in out
+        assert '"/projects/new"' not in out
         assert "CreateProjectsForm" not in out
 
     def test_delete_row_renders_button_and_mutation(self) -> None:
@@ -234,8 +233,10 @@ class TestActions:
         )
         out = _files(cfg)["src/tasks/TasksList.tsx"]
 
-        assert "DialogTrigger" in out
-        assert "TasksCompleteAction" in out
+        # Row action buttons navigate to the action's own route
+        # (``/<key>/$id/<name>``); the action page itself is owned
+        # by the action op.
+        assert '"/tasks/$id/complete"' in out
         assert "!item.completed" in out
         # Conditional row action uses a ternary inside the Cell.
         assert "? (" in out
@@ -257,10 +258,10 @@ class TestActions:
         )
         out = _files(cfg)["src/tasks/TasksList.tsx"]
 
-        assert (
-            'import { TasksCompleteAction } from "./actions/'
-            "TasksCompleteAction" in out
-        )
+        # The list page navigates to the action route; the action
+        # component is no longer imported here.
+        assert "TasksCompleteAction" not in out
+        assert '"/tasks/$id/complete"' in out
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +303,7 @@ class TestRowClickDetail:
         out = _files(cfg)["src/projects/ProjectsList.tsx"]
 
         assert "ProjectsDetail" not in out
-        assert "useState" not in out
+        assert "search.detail" not in out
 
     def test_row_click_detail_without_detail_config_skipped(self) -> None:
         cfg = ProjectConfig(
@@ -332,12 +333,13 @@ class TestRowClickDetail:
         )
         out = _files(cfg)["src/projects/ProjectsList.tsx"]
 
-        assert 'import { ProjectsDetail } from "./ProjectsDetail"' in out
-        assert 'import { useState } from "react"' in out
-        assert "const [openId, setOpenId] = useState" in out
+        # Detail is its own route at ``/<key>/$id``; row clicks
+        # navigate to it (the list page no longer imports the
+        # detail component).
+        assert "useNavigate" in out
         assert "onRowAction" in out
-        assert "<Drawer" in out
-        assert "<ProjectsDetail" in out
+        assert '"/projects/$id"' in out
+        assert "ProjectsDetail" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -376,14 +378,17 @@ class TestFilters:
         out = _files(cfg)["src/projects/ProjectsList.tsx"]
 
         assert "FilterBar" not in out
-        assert "useFilters" not in out
+        assert "filterValues" not in out
         assert "filter:" not in out  # No filter key in body
 
     def test_text_filter_renders_textfield(self) -> None:
         out = self._out([FilterSpec(field="name", type="text")])
 
+        # FilterBar is controlled from URL search state -- values
+        # come from `search`, edits round-trip through navigate().
         assert "FilterBar" in out
-        assert "useFilters" in out
+        assert "filterValues" in out
+        assert "onFilterChange" in out
         assert "TextField" in out
         # Default op for text is "contains"
         assert '"contains"' in out
@@ -438,12 +443,12 @@ class TestFilters:
     def test_query_body_includes_filter_builder(self) -> None:
         out = self._out([FilterSpec(field="name", type="text")])
 
-        # The body now wires the build helper.
+        # The body wires the build helper against URL-driven values.
         assert "buildProjectsFilter" in out
-        assert "filterState.values" in out
+        assert "filterValues" in out
         # The query key includes the filter values so the query
         # refetches on filter changes.
-        assert "filterState.values," in out
+        assert "filterValues," in out
 
     def test_multiple_active_conditions_wrapped_in_and(self) -> None:
         out = self._out(
@@ -489,22 +494,22 @@ class TestPagination:
         out = self._out(None)
 
         assert "Pagination" not in out
-        assert "PAGE_SIZE" not in out
+        assert "useServerPagination" not in out
         assert "offset:" not in out
         assert "limit:" not in out
 
     def test_page_size_wires_pagination(self) -> None:
         out = self._out(20)
 
-        # Pagination component + page state.
+        # Pagination component + glaze useServerPagination hook.
         assert "Pagination" in out
-        assert "const [page, setPage] = useState(1)" in out
-        assert "PAGE_SIZE = 20" in out
-        # Body sends offset + limit.
-        assert "offset: (page - 1) * PAGE_SIZE" in out
-        assert "limit: PAGE_SIZE" in out
-        # Query key includes page so the data refetches.
-        assert "page," in out
+        assert "useServerPagination" in out
+        assert "pageSize: 20" in out
+        # Body sends offset + limit derived from the page state.
+        assert "offset: (pageState - 1) * 20" in out
+        assert "limit: 20" in out
+        # Query key includes the page state so data refetches.
+        assert "pageState," in out
 
     def test_pagination_uses_total_pages_from_response(self) -> None:
         out = self._out(20)
@@ -544,19 +549,22 @@ class TestSorting:
         )
 
         # Table receives sortDescriptor + onSortChange; sortable
-        # column gets allowsSorting; non-sortable does not.
+        # column gets allowsSorting; non-sortable does not.  Sort
+        # state lives in the URL (?sort=name&dir=asc) so the column
+        # ordering is shareable.
         assert "sortDescriptor={sortDescriptor}" in out
-        assert "onSortChange={setSortDescriptor}" in out
+        assert "onSortChange={" in out
+        assert "search.sort" in out
         assert "allowsSorting" in out
         # The body sort is built from the descriptor.
         assert "sort: sortDescriptor" in out
         assert "field: String(sortDescriptor.column)" in out
         assert '"descending"' in out  # ascending/descending mapping
-        # SortDescriptor type is imported -- glaze hasn't shipped
-        # a re-export yet (#27).
-        assert (
-            'import type { SortDescriptor } from "react-aria-components"' in out
-        )
+        # SortDescriptor comes from glaze's re-exports (#27); we
+        # never reach for react-aria-components directly.
+        assert "react-aria-components" not in out
+        assert "SortDescriptor" in out
+        assert 'from "@roddarjohn/glaze"' in out
 
     def test_sortable_only_applied_to_marked_columns(self) -> None:
         out = self._out(

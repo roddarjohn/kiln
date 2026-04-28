@@ -70,6 +70,12 @@ class ResourceAction:
                     {"name": f, "label": _humanize(f)} for f in action.fields
                 ]
 
+                # Cancel / success on an action page returns to
+                # the detail (when one exists) or the list.
+                has_detail = (
+                    resource.detail is not None and resource.get_fn is not None
+                )
+
                 yield StaticFile(
                     path=f"src/{key}/actions/{component}.tsx",
                     template="src/resource/Action.tsx.j2",
@@ -83,5 +89,9 @@ class ResourceAction:
                         "request_schema": action.request_schema,
                         "fields": fields,
                         "confirm_text": action.confirm_text,
+                        "action_path": f"/{key}/$id/{action_name}",
+                        "list_path": f"/{key}",
+                        "detail_path": f"/{key}/$id",
+                        "has_detail": has_detail,
                     },
                 )

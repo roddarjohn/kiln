@@ -57,6 +57,7 @@ class _ActionContext(TypedDict):
     name: str
     label: str
     component: str
+    path: str  # ``/<key>/$id/<name>`` to navigate to
 
 
 @operation("resource_detail", scope="project")
@@ -101,8 +102,15 @@ class ResourceDetail:
                         "name": name,
                         "label": action.label,
                         "component": (f"{pascal}{_pascal(name)}Action"),
+                        "path": f"/{key}/$id/{name}",
                     },
                 )
+
+            has_update = (
+                resource.update is not None
+                and resource.update_fn is not None
+                and resource.get_fn is not None
+            )
 
             yield StaticFile(
                 path=f"src/{key}/{pascal}Detail.tsx",
@@ -111,9 +119,14 @@ class ResourceDetail:
                     "key": key,
                     "pascal": pascal,
                     "label_singular": resource.label.singular,
+                    "label_plural": resource.label.plural,
                     "resource_type": resource.resource_type,
                     "get_fn": resource.get_fn,
                     "sections": sections,
                     "actions": actions,
+                    "list_path": f"/{key}",
+                    "detail_path": f"/{key}/$id",
+                    "update_path": (f"/{key}/$id/edit" if has_update else None),
+                    "has_update": has_update,
                 },
             )

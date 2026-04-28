@@ -50,6 +50,7 @@ class _NavEntry(TypedDict):
     label: str
     view: str
     component: str | None
+    icon: str | None  # lucide-react icon name
 
 
 def _pascal(key: str) -> str:
@@ -105,6 +106,7 @@ class Scaffold:
                         "component": (
                             view_meta["list_component"] if view_meta else None
                         ),
+                        "icon": item.icon,
                     },
                 )
 
@@ -131,6 +133,12 @@ class Scaffold:
 
         # ---- src/Shell.tsx ---------------------------------------
         if config.shell is not None:
+            # Collect the unique set of lucide-react icon names so
+            # the template can emit a single named-import line.
+            icon_names = sorted(
+                {item["icon"] for item in nav if item["icon"] is not None},
+            )
+
             yield StaticFile(
                 path="src/Shell.tsx",
                 template="src/Shell.tsx.j2",
@@ -143,6 +151,7 @@ class Scaffold:
                     ),
                     "auth": config.auth,
                     "resource_views": resource_views,
+                    "icon_names": icon_names,
                 },
             )
 

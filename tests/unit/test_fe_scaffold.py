@@ -219,7 +219,12 @@ class TestShellEmission:
 
         assert "useAuth" in shell
         assert "useSession" in shell
-        assert "Sign out" in shell
+        # The hand-rolled avatar+name+role+sign-out block is replaced
+        # by glaze's UserMenu primitive (#29).
+        assert "<UserMenu" in shell
+        assert "onSignOut" in shell
+        # `Sign out` literal disappears -- UserMenu owns the label.
+        assert "Sign out" not in shell
 
     def test_nav_items_use_router_navigation(self) -> None:
         # The active state is derived from the current location and
@@ -250,7 +255,10 @@ class TestShellEmission:
         assert "useState<View>" not in shell
         assert "useLocation" in shell
         assert "useRouter" in shell
-        assert 'router.navigate({ to: "/tasks" })' in shell
-        assert 'router.navigate({ to: "/projects" })' in shell
+        # router.navigate now resets search via ``search: {}`` so
+        # cross-resource clicks don't carry over filter/sort/etc.
+        assert 'to: "/tasks"' in shell
+        assert 'to: "/projects"' in shell
+        assert "search: {}" in shell
         assert 'location.pathname.startsWith("/tasks")' in shell
         assert 'location.pathname.startsWith("/projects")' in shell
