@@ -34,8 +34,8 @@ in S3-compatible storage.  This module ships three pieces:
 
 * Action functions -- :func:`request_upload`,
   :func:`complete_upload`, :func:`download`, and :func:`delete_file`.
-  These plug into kiln's
-  :class:`~kiln.operations.action.Action` operation: the consumer
+  These plug into be's
+  :class:`~be.operations.action.Action` operation: the consumer
   points ``resource.action`` entries at them directly (no
   per-resource wrapper module).  The :class:`FileMixin`-typed
   parameters (instance for object actions, class for collection
@@ -93,7 +93,7 @@ class FileMixin:
 
     The mixin is exposed mainly as a *type marker* -- the action
     functions in this module annotate their parameters with
-    ``FileMixin`` so the kiln introspector can match any concrete
+    ``FileMixin`` so the be introspector can match any concrete
     subclass via the supertype check.
 
     A row with ``uploaded_at is None`` represents a file the
@@ -187,7 +187,7 @@ def bind_file_model(
             subclass.  The returned class is mapped on
             ``base.metadata``.
         name: Class name for the generated type.  Affects the dotted
-            path the kiln config points at
+            path the be config points at
             (``model: "myapp.models.{name}"``).
         tablename: Database table name.  Must be unique within
             ``base.metadata``.

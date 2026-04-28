@@ -3,7 +3,7 @@
 Supports ``.json`` files directly and ``.jsonnet`` files via
 :mod:`foundry.jsonnet`, which adds prefix-based stdlib imports so
 targets can ship their own libsonnet helpers under a registered
-prefix (e.g. ``import 'kiln/auth/jwt.libsonnet'``).
+prefix (e.g. ``import 'be/auth/jwt.libsonnet'``).
 """
 
 from typing import TYPE_CHECKING
@@ -34,7 +34,7 @@ class FoundryConfig(BaseModel):
             string disables the prefix.  Targets that generate
             Python (or another language with package semantics)
             should override the default to something sensible
-            (kiln uses ``"_generated"``).
+            (be uses ``"_generated"``).
 
     """
 

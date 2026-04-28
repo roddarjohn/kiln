@@ -5,10 +5,12 @@ Usage
    :local:
    :depth: 2
 
-This page covers day-to-day usage of the ``foundry`` CLI as backed
-by the kiln target.  For a walkthrough of a brand-new project, see
-:doc:`getting_started`.  For the complete config schema, see
-:doc:`reference`.
+This page covers day-to-day usage of the ``foundry`` CLI.  Most of
+the page is centred on the ``be`` target since it has the deepest
+config surface; the ``be_root`` / ``fe`` / ``fe_root`` targets each
+get a short section near the end.  For a walkthrough of a brand-new
+project, see :doc:`getting_started`.  For the complete config schema,
+see :doc:`reference`.
 
 Install
 -------
@@ -17,8 +19,9 @@ Install
 
    pip install kiln-generator  # or: uv add kiln-generator
 
-Installing ``kiln-generator`` ships both the generic ``foundry`` CLI
-and the kiln target it discovers at startup.
+Installing ``kiln-generator`` ships the generic ``foundry`` CLI and
+all four targets it discovers at startup (``be``, ``be_root``,
+``fe``, ``fe_root``).  Run ``foundry targets list`` to verify.
 
 The CLI
 -------
@@ -28,18 +31,20 @@ The CLI
 
 .. code-block:: text
 
-   foundry generate --config PATH [--out DIR] [--target NAME] [--clean]
+   foundry generate --target NAME --config PATH [--out DIR] [--clean]
 
+``--target / -t``
+    Which registered target to use.  Required when more than one
+    target is installed (the default with ``kiln-generator``); may
+    be omitted when only one target is on the path.  Common values:
+    ``be``, ``be_root``, ``fe``, ``fe_root``.
 ``--config / -c`` *(required)*
     Path to the ``.json`` or ``.jsonnet`` config file.
 ``--out / -o`` *(optional)*
     Output root directory.  Defaults to the target's own policy --
-    kiln writes into the config's ``package_prefix`` value (e.g.
+    ``be`` writes into the config's ``package_prefix`` value (e.g.
     ``_generated``).  Set ``package_prefix: ""`` in the config to
     write directly into the current directory.
-``--target / -t`` *(optional)*
-    Which registered target to use.  Optional when exactly one target
-    is installed (``kiln``, when only kiln-generator is installed).
 ``--clean``
     Run ``foundry clean`` before generating.  Useful when you remove a
     resource from the config -- without ``--clean`` the previously
@@ -64,7 +69,7 @@ never deleted.
 Config format
 -------------
 
-kiln accepts ``.json`` and ``.jsonnet`` files.  Jsonnet is
+be accepts ``.json`` and ``.jsonnet`` files.  Jsonnet is
 recommended: imports, variables, and array concatenation make it much
 more ergonomic for sharing common patterns across resources.
 
@@ -208,7 +213,7 @@ inline by giving a field ``type: "nested"``:
      ],
    }
 
-kiln emits a scoped sub-schema (``ArticleResourceAuthorNested``) and
+be emits a scoped sub-schema (``ArticleResourceAuthorNested``) and
 a sub-serializer (``to_article_resource_author_nested``), and attaches
 a ``selectinload(Article.author)`` to the handler's ``select(...)`` so
 the relationship is eagerly loaded -- lazy access in async SQLAlchemy
@@ -233,11 +238,11 @@ Strategies mix across nesting levels, producing chains like
 outer ``select(...)``.  See :ref:`nested-fields` in the reference
 for all keys.
 
-The ``kiln/fields.libsonnet`` helper shortens the common shape:
+The ``be/fields.libsonnet`` helper shortens the common shape:
 
 .. code-block:: jsonnet
 
-   local fields = import "kiln/fields.libsonnet";
+   local fields = import "be/fields.libsonnet";
 
    fields: [
      fields.id(),
@@ -321,17 +326,17 @@ these by defining their own blocks.
 Jsonnet stdlib
 --------------
 
-kiln bundles a small Jsonnet stdlib that is importable from any config
-file without a path prefix (the ``kiln`` prefix resolves to the stdlib
+be bundles a small Jsonnet stdlib that is importable from any config
+file without a path prefix (the ``be`` prefix resolves to the stdlib
 directory shipped inside the package).
 
 See :doc:`reference` for the full stdlib list.  The most common:
 
-* ``kiln/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
-* ``kiln/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
-* ``kiln/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
+* ``be/auth/jwt.libsonnet`` -- ``auth.jwt(...)`` preset for JWT.
+* ``be/db/databases.libsonnet`` -- ``db.postgres(...)`` constructor.
+* ``be/fields.libsonnet`` -- ``fields.id()``, ``fields.timestamps()``,
   and ``fields.nested(name, model, fields, many=false, load="selectin")``.
-* ``kiln/resources/presets.libsonnet`` -- ``resource.action(...)`` and
+* ``be/resources/presets.libsonnet`` -- ``resource.action(...)`` and
   ``resource.files(...)`` for bundling action operations onto a
   resource.  See :ref:`file-uploads` for the file-upload flow.
 
@@ -340,7 +345,7 @@ See :doc:`reference` for the full stdlib list.  The most common:
 File uploads
 ------------
 
-kiln supports a presigned-URL upload flow on top of the existing
+be supports a presigned-URL upload flow on top of the existing
 ``action`` machinery -- no new operation type, just a SQLAlchemy mixin
 plus four ready-made action functions in :mod:`ingot.files`.
 
@@ -406,7 +411,7 @@ Point a resource at the bound model and call ``resource.files()``:
 
 .. code-block:: jsonnet
 
-   local resource = import "kiln/resources/presets.libsonnet";
+   local resource = import "be/resources/presets.libsonnet";
 
    {
      model: "myapp.models.File",
@@ -483,7 +488,7 @@ test per generated operation; run them with pytest as usual::
 API versioning
 --------------
 
-kiln has no built-in ``--version`` flag.  To maintain multiple API
+be has no built-in ``--version`` flag.  To maintain multiple API
 versions, run ``foundry generate`` against separate configs into separate
 output trees and mount each at a different prefix:
 
@@ -500,7 +505,99 @@ output trees and mount each at a different prefix:
    app.include_router(v1_router, prefix="/v1")
    app.include_router(v2_router, prefix="/v2")
 
-Extending kiln
+Other targets
+-------------
+
+``be_root`` -- backend bootstrap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``be_root`` is a one-shot scaffolder that emits the boilerplate a
+``be``-driven project needs once: ``main.py``, ``pyproject.toml``,
+``justfile``, ``.gitignore``, ``.python-version``, the starter
+``config/project.jsonnet``, and (when ``auth: true``) an
+``auth.py`` skeleton.  Drive it with a ``bootstrap.jsonnet`` like:
+
+.. code-block:: jsonnet
+
+   {
+     name: "myapp",
+     module: "myapp",
+     description: "FastAPI backend.",
+     opentelemetry: false,
+     auth: true,
+     psycopg: true,
+     pgcraft: false,
+     pgqueuer: false,
+     editable: false,
+   }
+
+Run::
+
+   foundry generate --target be_root --config bootstrap.jsonnet --out .
+
+Every emitted file is ``if_exists="skip"``, so re-running after
+editing the bootstrap config is non-destructive.  ``--force``
+clobbers everything; ``--force-paths a,b,c`` clobbers only the
+listed paths.
+
+``fe`` -- React / TypeScript codegen
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``fe`` target is a thin wrapper over
+`@hey-api/openapi-ts <https://heyapi.dev/>`_: it translates a
+kiln-side ``config/fe.jsonnet`` into ``openapi-ts.config.ts``, and
+the openapi-ts CLI (``yarn openapi-ts``) then produces the actual
+TypeScript SDK plus
+`@tanstack/react-query <https://tanstack.com/query>`_ hooks.  The
+config is small:
+
+.. code-block:: jsonnet
+
+   {
+     openapi_spec: "../be/openapi.json",
+     output_dir: "src/_generated",
+     client: "@hey-api/client-fetch",
+     react_query: true,
+   }
+
+Run::
+
+   foundry generate --target fe --config config/fe.jsonnet --out .
+   yarn openapi-ts
+
+The ``fe_root``-emitted ``justfile`` chains those two steps under
+``just generate``.
+
+``fe_root`` -- frontend bootstrap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``fe_root`` is the ``fe`` counterpart to ``be_root`` -- a one-shot
+scaffolder that emits a yarn / Vite / TypeScript / React project
+with React Query, openapi-ts, and (optionally) the
+`@roddarjohn/glaze <https://github.com/roddarjohn/glaze>`_
+component library wired up.  Drive it with:
+
+.. code-block:: jsonnet
+
+   {
+     name: "myapp-fe",
+     description: "React frontend.",
+     glaze: true,
+     editable: false,
+     openapi_spec: "../be/openapi.json",
+   }
+
+Run::
+
+   foundry generate --target fe_root --config bootstrap.jsonnet --out .
+
+Output: ``package.json``, ``justfile``, ``tsconfig.json``,
+``vite.config.ts``, ``index.html``, ``src/{main,App}.tsx``,
+``src/index.css``, ``.gitignore``, ``.nvmrc``, and the starter
+``config/fe.jsonnet``.  Same ``if_exists="skip"`` /
+``--force`` / ``--force-paths`` semantics as ``be_root``.
+
+Extending be
 --------------
 
 To add your own operations, swap renderers, or build an entirely new

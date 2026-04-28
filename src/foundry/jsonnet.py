@@ -3,8 +3,8 @@
 Jsonnet delegates ``import`` resolution to a host-supplied callback.
 This module provides a callback that interprets the first path
 segment of an import as a registered *stdlib prefix*: given
-``{"kiln": Path(".../jsonnet")}``, an import like
-``'kiln/auth/jwt.libsonnet'`` resolves under that directory.
+``{"be": Path(".../jsonnet")}``, an import like
+``'be/auth/jwt.libsonnet'`` resolves under that directory.
 Imports without a matching prefix fall through to the normal
 relative-to-importer resolution, so user configs can still
 ``import './shared.libsonnet'`` freely.
@@ -32,8 +32,8 @@ def evaluate(
     Args:
         path: Path to the ``.jsonnet`` file.
         stdlibs: Optional mapping of jsonnet import prefix to
-            stdlib directory.  ``{"kiln": Path(".../jsonnet")}``
-            makes ``import 'kiln/...'`` resolve under that
+            stdlib directory.  ``{"be": Path(".../jsonnet")}``
+            makes ``import 'be/...'`` resolve under that
             directory.
 
     Returns:

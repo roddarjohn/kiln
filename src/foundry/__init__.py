@@ -9,13 +9,13 @@ Target-agnostic primitives for building code generators:
 * :mod:`~foundry.outputs` -- :class:`~foundry.outputs.StaticFile`, the one build
   output that's target-neutral.  Python / FastAPI-specific
   outputs (``RouteHandler``, ``SchemaClass``, …) live in
-  :mod:`kiln.operations.outputs`.
+  :mod:`be.operations.outputs`.
 * :class:`~foundry.render.RenderRegistry` -- maps output types to
   renderer functions.
 * :class:`~foundry.render.BuildStore` -- accumulator the engine
   and operations read and mutate.
 
-``foundry`` knows nothing about FastAPI.  The :mod:`kiln` package
+``foundry`` knows nothing about FastAPI.  The :mod:`be` package
 layers a concrete FastAPI / SQLAlchemy generator on top of it.
 """
 

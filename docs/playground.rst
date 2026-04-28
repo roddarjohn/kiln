@@ -2,12 +2,13 @@ Playground
 ==========
 
 The ``playground/`` directory in the kiln repository is a runnable
-multi-app FastAPI project that demonstrates kiln's project mode.  It
-generates a blog API and an inventory API from Jsonnet configs, mounts
-them both under ``/v1/``, and serves them with uvicorn.
+multi-app FastAPI project that demonstrates the ``be`` target's
+project mode.  It generates a blog API and an inventory API from
+Jsonnet configs, mounts them both under ``/v1/``, and serves them
+with uvicorn.
 
-It is the fastest way to see kiln end-to-end without setting up your
-own project.
+It is the fastest way to see ``be`` end-to-end without setting up
+your own project.
 
 Structure
 ---------
@@ -74,7 +75,7 @@ All recipes are run from the ``playground/`` directory.
      - Description
    * - ``just generate``
      - ``just g``
-     - Run ``foundry generate`` against ``examples/project.jsonnet``.
+     - Run ``foundry generate --target be`` against ``examples/project.jsonnet``.
    * - ``just serve``
      - ``just s``
      - Start uvicorn with hot-reload.
@@ -96,8 +97,8 @@ shared auth and databases, then lists each app with its URL prefix:
 
 .. code-block:: jsonnet
 
-   local auth = import "kiln/auth/jwt.libsonnet";
-   local db   = import "kiln/db/databases.libsonnet";
+   local auth = import "be/auth/jwt.libsonnet";
+   local db   = import "be/db/databases.libsonnet";
 
    {
      auth: auth.jwt({ secret_env: "JWT_SECRET" }),
@@ -114,10 +115,10 @@ shared auth and databases, then lists each app with its URL prefix:
    }
 
 Each app config (``blog.jsonnet``, ``inventory.jsonnet``) is a
-self-contained kiln config with its own ``module``, ``resources``.
-Kiln merges the project-level ``auth`` and ``databases``
-into each app config before generating, so app configs do not need to
-redeclare them.
+self-contained ``be`` config with its own ``module``, ``resources``.
+The ``be`` target merges the project-level ``auth`` and
+``databases`` into each app config before generating, so app
+configs do not need to redeclare them.
 
 Apps
 ----
@@ -166,6 +167,6 @@ preserving the full change history.
        actor_email = Column(String(254), nullable=False)
        payload     = Column(Text, nullable=True)
 
-Kiln exposes it as a ``write_only`` resource on the ``analytics``
+``be`` exposes it as a ``write_only`` resource on the ``analytics``
 database, so all mutations go to the secondary pool while reads
 remain absent from the API entirely.

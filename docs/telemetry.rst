@@ -13,8 +13,7 @@ Add a ``telemetry`` block to your project config:
 
 .. code-block:: jsonnet
 
-   local kiln = import 'kiln/lib.libsonnet';
-   local telemetry = import 'kiln/telemetry/telemetry.libsonnet';
+   local telemetry = import 'be/telemetry/telemetry.libsonnet';
 
    {
      databases: [...],
@@ -27,10 +26,10 @@ Add a ``telemetry`` block to your project config:
    }
 
 ``service_name`` is required; everything else has a sensible default.
-The full schema lives in :class:`kiln.config.schema.TelemetryConfig`.
+The full schema lives in :class:`be.config.schema.TelemetryConfig`.
 
 After regenerating, install the pinned OTel package set via the
-kiln extra:
+``opentelemetry`` extra:
 
 .. code-block:: shell
 
@@ -107,12 +106,12 @@ What you get
 
 Internal handler spans carry low-cardinality attributes for filtering:
 
-* ``kiln.resource`` — e.g. ``"article"``
-* ``kiln.op`` — e.g. ``"get"`` for CRUD, ``"publish"`` for actions
+* ``be.resource`` — e.g. ``"article"``
+* ``be.op`` — e.g. ``"get"`` for CRUD, ``"publish"`` for actions
 
 Both CRUD ops and user-defined actions go through the same
-``@traced_handler`` decorator and the same ``kiln.op`` attribute — the
-*value* discriminates (kiln's CRUD names are a fixed small set;
+``@traced_handler`` decorator and the same ``be.op`` attribute — the
+*value* discriminates (be's CRUD names are a fixed small set;
 anything else is a user-defined action).
 
 Sampler defaults
@@ -185,8 +184,8 @@ The same field works per-operation:
    { name: 'list', trace: false }  // skip the spans for this op only
 
 The HTTP server span from ``FastAPIInstrumentor`` is unaffected by these
-overrides -- they only suppress kiln's internal handler/action span
-and its ``kiln.resource`` / ``kiln.op`` attributes.
+overrides -- they only suppress be's internal handler/action span
+and its ``be.resource`` / ``be.op`` attributes.
 
 PII and the auth router
 -----------------------
@@ -208,14 +207,14 @@ mask a real outage.
 Logging
 -------
 
-kiln does not generate logging calls in CRUD handlers -- *you* emit
+be does not generate logging calls in CRUD handlers -- *you* emit
 logs, and the two telemetry knobs below decide what happens to them.
 Both are off by default.
 
 Library assumption
 ^^^^^^^^^^^^^^^^^^
 
-kiln assumes the **stdlib** ``logging`` **module**.  Loguru and
+be assumes the **stdlib** ``logging`` **module**.  Loguru and
 structlog both interoperate with stdlib (loguru via
 ``InterceptHandler``, structlog via ``LoggerFactory(stdlib=True)``);
 set them up that way and the rest of this section applies unchanged.
@@ -357,7 +356,7 @@ Custom logs
 Use stdlib ``logging``.  With ``instrument_logging=True``, every
 record gets ``otelTraceID`` / ``otelSpanID`` injected; with
 ``logs=True``, every record also ships over OTLP via the handler
-kiln attaches to the root logger.  You don't need to import anything
+be attaches to the root logger.  You don't need to import anything
 OTel-specific:
 
 .. code-block:: python

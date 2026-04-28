@@ -80,7 +80,7 @@ def _resolve_target(name: str | None) -> Target:
     if not targets:
         msg = (
             "No target is registered under the foundry.targets "
-            "entry-point group.  Install a plugin (e.g. kiln) "
+            "entry-point group.  Install a plugin (e.g. be) "
             "that provides one."
         )
         raise CLIError(msg)
@@ -108,7 +108,7 @@ def _stdlibs() -> dict[str, Path]:
     """Collect jsonnet stdlib prefixes from every installed target.
 
     Every target's stdlib is available to every config, so an
-    installation with kiln + another target lets configs import
+    installation with be + another target lets configs import
     from both under their respective prefixes.
     """
     return {
@@ -181,7 +181,7 @@ def generate_cmd(  # noqa: PLR0913
                 "Treat every file the target produced as "
                 '``if_exists="overwrite"``.  Use with care: '
                 "this clobbers files the target marked as "
-                '``"skip"`` (e.g. kiln_root\'s bootstrap '
+                '``"skip"`` (e.g. be_root\'s bootstrap '
                 "files), discarding any post-generation edits."
             ),
         ),

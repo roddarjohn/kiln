@@ -23,7 +23,7 @@ Generated code imports from the owning submodule directly --
 intentionally empty.  This keeps the public surface organized by
 concern rather than as one flat namespace.
 
-Everything here is pure Python -- the kiln CLI knows to emit
+Everything here is pure Python -- the be CLI knows to emit
 imports pointing at these submodules instead of scaffolding a
 ``utils.py`` into the generated app.
 """

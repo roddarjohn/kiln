@@ -2,7 +2,7 @@
 
 Only :class:`~foundry.outputs.StaticFile` is truly target-neutral
 and lives here; Python / FastAPI / Pydantic output types live in
-:mod:`kiln.outputs` since a non-Python target wouldn't use them.
+:mod:`be.outputs` since a non-Python target wouldn't use them.
 """
 
 from dataclasses import dataclass, field
@@ -23,10 +23,10 @@ class StaticFile:
     Used for scaffold files (auth, db sessions), utils, and other
     files that don't need the assembler's multi-contributor merging.
 
-    ``if_exists`` defaults to ``"overwrite"`` (kiln's regenerated
+    ``if_exists`` defaults to ``"overwrite"`` (be's regenerated
     scaffold behaviour); ``"skip"`` makes
     :func:`foundry.output.write_files` leave existing files alone
-    -- right for one-shot bootstraps like kiln_root, where
+    -- right for one-shot bootstraps like be_root, where
     ``--force`` / ``--force-paths`` is the explicit opt-in to
     clobber.
     """
@@ -44,7 +44,7 @@ def _static_fragment(sf: StaticFile, _ctx: RenderCtx) -> Iterator[Fragment]:
     Lives in foundry (next to :class:`StaticFile`) rather than in
     a target package so every target gets the renderer the moment
     it imports :mod:`foundry.outputs` -- without this, a target
-    that doesn't transitively import kiln's renderer module would
+    that doesn't transitively import be's renderer module would
     fail with ``LookupError: No renderer for StaticFile`` the
     first time an op yields one.
     """

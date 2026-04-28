@@ -37,11 +37,11 @@ What operations typically do
 3. **Walk descendants' outputs** with :meth:`outputs_under` — e.g.
    a resource-scope ``after_children=True`` op augmenting every
    route handler under it (see
-   :class:`~kiln.operations.auth.Auth`).
+   :class:`~be.operations.auth.Auth`).
 4. **Reach outputs an ancestor emitted** with
    :meth:`outputs_under_ancestor` / :meth:`output_under_ancestor`
    — e.g. a nested modifier op amending its parent op's outputs
-   (see :class:`~kiln.operations.filter.Filter`).
+   (see :class:`~be.operations.filter.Filter`).
 
 Mutability
 ----------
@@ -51,7 +51,7 @@ renders.  A later op that wants to augment an earlier op's output
 doesn't copy — it mutates in place (append to a list, flip a flag
 on a dataclass, etc.).  Keeping the store a pile of mutable
 dataclasses is a deliberate contract — it's what lets augmenting
-ops (:class:`~kiln.operations.auth.Auth`, the list modifiers) stay
+ops (:class:`~be.operations.auth.Auth`, the list modifiers) stay
 small.
 
 Thread-safety
@@ -103,7 +103,7 @@ class BuildStore:
     - :meth:`output_under_ancestor` — singular form; raises if
       nothing matches.  For ops that expect exactly one target
       (e.g. a modifier op finding its parent op's
-      :class:`~kiln.operations.list.ListResult`).
+      :class:`~be.operations.list.ListResult`).
     - :meth:`entries` — raw ``(instance_id, op_name, items)`` tuples.
       The assembler uses this; ops rarely need to.
 

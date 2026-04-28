@@ -10,10 +10,46 @@ foundry CLI
 .. automodule:: foundry.cli
    :members:
 
-kiln target
+be target
 -----------
 
-.. automodule:: kiln.target
+.. automodule:: be.target
+   :members:
+
+be_root target
+--------------
+
+The schema (:class:`be_root.config.RootConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
+
+.. automodule:: be_root.target
+   :members:
+
+.. automodule:: be_root.operations
+   :members:
+
+fe target
+---------
+
+The schema (:class:`fe.config.ProjectConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
+
+.. automodule:: fe.target
+   :members:
+
+.. automodule:: fe.operations
+   :members:
+
+fe_root target
+--------------
+
+The schema (:class:`fe_root.config.RootConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
+
+.. automodule:: fe_root.target
+   :members:
+
+.. automodule:: fe_root.operations
    :members:
 
 foundry.config
@@ -40,46 +76,46 @@ foundry.assembler
 .. automodule:: foundry.assembler
    :members:
 
-kiln.operations
+be.operations
 ---------------
 
-.. automodule:: kiln.operations.renderers
+.. automodule:: be.operations.renderers
    :members:
 
-.. automodule:: kiln.operations.get
+.. automodule:: be.operations.get
    :members:
 
-.. automodule:: kiln.operations.list
+.. automodule:: be.operations.list
    :members:
 
-.. automodule:: kiln.operations.create
+.. automodule:: be.operations.create
    :members:
 
-.. automodule:: kiln.operations.update
+.. automodule:: be.operations.update
    :members:
 
-.. automodule:: kiln.operations.delete
+.. automodule:: be.operations.delete
    :members:
 
-.. automodule:: kiln.operations.filter
+.. automodule:: be.operations.filter
    :members:
 
-.. automodule:: kiln.operations.order
+.. automodule:: be.operations.order
    :members:
 
-.. automodule:: kiln.operations.paginate
+.. automodule:: be.operations.paginate
    :members:
 
-.. automodule:: kiln.operations.action
+.. automodule:: be.operations.action
    :members:
 
-.. automodule:: kiln.operations.auth
+.. automodule:: be.operations.auth
    :members:
 
-.. automodule:: kiln.operations.scaffold
+.. automodule:: be.operations.scaffold
    :members:
 
-.. automodule:: kiln.operations.routing
+.. automodule:: be.operations.routing
    :members:
 
 .. automodule:: ingot

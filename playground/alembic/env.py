@@ -1,4 +1,4 @@
-"""Alembic environment for the kiln playground.
+"""Alembic environment for the be playground.
 
 Imports all playground models so that Alembic autogenerate can detect
 every table defined across the blog and inventory modules.

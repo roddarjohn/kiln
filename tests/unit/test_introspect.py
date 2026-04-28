@@ -1,8 +1,8 @@
-"""Tests for kiln.operations._introspect."""
+"""Tests for be.operations._introspect."""
 
 import pytest
 
-from kiln.operations._introspect import introspect_action_fn
+from be.operations._introspect import introspect_action_fn
 
 _STUB = "tests.unit._action_stubs"
 

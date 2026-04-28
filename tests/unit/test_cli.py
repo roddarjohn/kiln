@@ -1,4 +1,4 @@
-"""Tests for the foundry CLI entry point, backed by the kiln target."""
+"""Tests for the foundry CLI entry point, backed by the be target."""
 
 import json
 from typing import TYPE_CHECKING
@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
+from be.target import target as kiln_target
 from foundry import GeneratedFile, write_files
 from foundry.cli import app, cli_main
 from foundry.errors import CLIError, ConfigError
-from kiln.target import target as kiln_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,14 +19,14 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def _kiln_only_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Constrain CLI target discovery to the kiln target.
+    """Constrain CLI target discovery to the be target.
 
-    The package now ships a second target (``kiln_root``), so
+    The package now ships a second target (``be_root``), so
     ``foundry generate`` without ``--target`` would otherwise fail
     these tests with "Multiple targets installed".  These tests
     are about CLI behaviour with one specific target wired in;
     target dispatch itself is covered by ``test_targets_list_*``
-    and ``test_kiln_root.py``.
+    and ``test_be_root.py``.
     """
     monkeypatch.setattr("foundry.cli.discover_targets", lambda: [kiln_target])
 
@@ -100,7 +100,7 @@ def _project_with(
 
 
 def _write_json_config(tmp_path: Path, data: dict) -> Path:
-    cfg = tmp_path / "kiln.json"
+    cfg = tmp_path / "be.json"
     cfg.write_text(json.dumps(data))
     return cfg
 
@@ -383,7 +383,7 @@ def test_validate_does_not_write_files(tmp_path: Path):
 def test_targets_list_shows_kiln():
     result = runner.invoke(app, ["targets", "list"])
     assert result.exit_code == 0
-    assert "kiln" in result.output
+    assert "be" in result.output
     assert "python" in result.output
 
 

@@ -1,0 +1,157 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+``init_telemetry`` builds and installs the configured providers,
+then wires the requested instrumentors.  Call once at startup --
+typically from your application module, after the FastAPI app is
+constructed and before it is mounted::
+
+    from fastapi import FastAPI
+    from {{ telemetry_module }} import init_telemetry
+
+    app = FastAPI()
+    init_telemetry(app)
+
+The function is decorated with :func:`ingot.utils.run_once`, so
+a second invocation (e.g. a test reload, or a second be tree
+imported into the same process) is a silent no-op rather than a
+duplicate provider install.
+
+Configuration is fixed at code-generation time (sampler, signal
+toggles, resource attributes); the OTLP endpoint and headers are
+read from the standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` and
+``OTEL_EXPORTER_OTLP_HEADERS`` environment variables by the OTel
+SDK at exporter construction, so the same artifact deploys
+unchanged across environments.
+
+Service name: ``{{ service_name }}``.
+{% if not exporter %}
+No exporter is wired explicitly -- the OTel SDK reads the
+``OTEL_EXPORTER_OTLP_*`` variables at runtime.
+{% endif %}
+{% endset %}
+{{ file_header("OpenTelemetry initialisation", extra=_extra) }}
+
+
+{% if logs %}
+import logging
+{% endif %}
+from typing import TYPE_CHECKING
+
+from opentelemetry import trace
+{% if metrics %}
+from opentelemetry import metrics as _metrics
+{% endif %}
+{% if logs %}
+from opentelemetry import _logs
+from opentelemetry.sdk._logs import LoggingHandler
+{% endif %}
+
+from ingot.telemetry import (
+    build_tracer_provider,
+{% if metrics %}
+    build_meter_provider,
+{% endif %}
+{% if logs %}
+    build_logger_provider,
+{% endif %}
+)
+from ingot.utils import run_once
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+
+_RESOURCE_ATTRIBUTES: dict[str, str] = {
+{% for key, value in resource_attributes.items() %}
+    "{{ key }}": "{{ value }}",
+{% endfor %}
+}
+
+
+@run_once
+def init_telemetry(app: FastAPI | None = None) -> None:
+    """Install OpenTelemetry providers and wire instrumentors.
+
+    Args:
+        app: The FastAPI application to instrument.  When ``None``,
+            HTTP instrumentation is skipped -- pass the app to get
+            request spans (the typical case).
+    """
+    tracer_provider = build_tracer_provider(
+        service_name="{{ service_name }}",
+{% if service_version %}
+        service_version="{{ service_version }}",
+{% endif %}
+        environment_env="{{ environment_env }}",
+        resource_attributes=_RESOURCE_ATTRIBUTES,
+        sampler="{{ sampler }}",
+{% if sampler_ratio is not none %}
+        sampler_ratio={{ sampler_ratio }},
+{% endif %}
+{% if exporter %}
+        exporter="{{ exporter }}",
+{% endif %}
+    )
+    trace.set_tracer_provider(tracer_provider)
+
+{% if metrics %}
+    meter_provider = build_meter_provider(
+        service_name="{{ service_name }}",
+{% if service_version %}
+        service_version="{{ service_version }}",
+{% endif %}
+        environment_env="{{ environment_env }}",
+        resource_attributes=_RESOURCE_ATTRIBUTES,
+    )
+    _metrics.set_meter_provider(meter_provider)
+
+{% endif %}
+{% if logs %}
+    logger_provider = build_logger_provider(
+        service_name="{{ service_name }}",
+{% if service_version %}
+        service_version="{{ service_version }}",
+{% endif %}
+        environment_env="{{ environment_env }}",
+        resource_attributes=_RESOURCE_ATTRIBUTES,
+    )
+    _logs.set_logger_provider(logger_provider)
+
+    # Bridge stdlib logging into the OTel logger provider so
+    # ``logging.getLogger().info(...)`` (and any framework that
+    # funnels through stdlib logging) ships records over OTLP.
+    # ``NOTSET`` defers level filtering to the loggers themselves;
+    # the user's ``logging.basicConfig(level=...)`` still wins.
+    _otel_log_handler = LoggingHandler(
+        level=logging.NOTSET,
+        logger_provider=logger_provider,
+    )
+    logging.getLogger().addHandler(_otel_log_handler)
+
+{% endif %}
+{% if instrument_fastapi %}
+    if app is not None:
+        from opentelemetry.instrumentation.fastapi import (
+            FastAPIInstrumentor,
+        )
+
+        FastAPIInstrumentor.instrument_app(app)
+{% endif %}
+{% if instrument_httpx %}
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    HTTPXClientInstrumentor().instrument()
+{% endif %}
+{% if instrument_requests %}
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+    RequestsInstrumentor().instrument()
+{% endif %}
+{% if instrument_logging %}
+    from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+    LoggingInstrumentor().instrument(set_logging_format=True)
+{% endif %}
+
+
+__all__ = ["init_telemetry"]
