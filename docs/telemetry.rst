@@ -29,7 +29,7 @@ Add a ``telemetry`` block to your project config:
 The full schema lives in :class:`be.config.schema.TelemetryConfig`.
 
 After regenerating, install the pinned OTel package set via the
-be extra:
+``opentelemetry`` extra:
 
 .. code-block:: shell
 
