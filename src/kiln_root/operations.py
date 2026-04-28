@@ -64,50 +64,86 @@ class RootScaffold:
         config = ctx.instance
         package_prefix = ctx.package_prefix or "_generated"
 
+        # ``kiln-generator`` carries optional extras matching the
+        # toggles on RootConfig.  The pyproject template wants a
+        # joined list (or an empty list when nothing is enabled,
+        # in which case it emits the bare ``"kiln-generator"``
+        # line).  Order is fixed for deterministic output.
+        kiln_extras = [
+            extra
+            for flag, extra in (
+                (config.opentelemetry, "opentelemetry"),
+                (config.files, "files"),
+            )
+            if flag
+        ]
+
         ctx_vars: dict[str, object] = {
             "name": config.name,
             "module": config.module,
             "description": config.description,
             "package_prefix": package_prefix,
+            "opentelemetry": config.opentelemetry,
+            "files": config.files,
+            "psycopg": config.psycopg,
+            "pgcraft": config.pgcraft,
+            "pgqueuer": config.pgqueuer,
+            "editable": config.editable,
+            "kiln_extras": kiln_extras,
         }
 
+        # Every bootstrap file is ``if_exists="skip"`` so ``just
+        # bootstrap`` (and any direct re-run of ``foundry generate
+        # --target kiln_root``) is non-destructive: users almost
+        # always edit these files post-bootstrap and a re-run that
+        # quietly resets pyproject.toml or main.py would be a
+        # nasty foot-gun.  ``--force`` / ``--force-paths`` on the
+        # CLI is the explicit opt-in to clobber.
         yield StaticFile(
             path="main.py",
             template="main.py.j2",
             context=ctx_vars,
+            if_exists="skip",
         )
         yield StaticFile(
             path="pyproject.toml",
             template="pyproject.toml.j2",
             context=ctx_vars,
+            if_exists="skip",
         )
         yield StaticFile(
             path="justfile",
             template="justfile.j2",
             context=ctx_vars,
+            if_exists="skip",
         )
         yield StaticFile(
             path=".gitignore",
             template="gitignore.j2",
             context={},
+            if_exists="skip",
         )
         yield StaticFile(
             path=".python-version",
             template="python-version.j2",
             context={},
+            if_exists="skip",
         )
         yield StaticFile(
             path="config/project.jsonnet",
             template="config/project.jsonnet.j2",
             context=ctx_vars,
+            if_exists="skip",
         )
         yield StaticFile(
             path=f"config/{config.module}.jsonnet",
             template="config/app.jsonnet.j2",
             context=ctx_vars,
+            if_exists="skip",
         )
         yield StaticFile(
             path=f"{config.module}/__init__.py",
             template="",
             context={},
+            if_exists="skip",
         )

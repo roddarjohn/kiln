@@ -50,6 +50,20 @@ def test_root_config_overrides_take_effect():
     assert cfg.description == "Demo bootstrap."
 
 
+def test_root_config_option_flags_default_off():
+    # Defaults stay opinionated -- nothing extra is wired in
+    # unless the user explicitly opts in.  Keeps the bare
+    # bootstrap minimal.
+    cfg = RootConfig()
+
+    assert cfg.opentelemetry is False
+    assert cfg.files is False
+    assert cfg.psycopg is False
+    assert cfg.pgcraft is False
+    assert cfg.pgqueuer is False
+    assert cfg.editable is False
+
+
 # -------------------------------------------------------------------
 # Target wiring
 # -------------------------------------------------------------------
@@ -140,6 +154,161 @@ def test_pyproject_carries_name_and_kiln_dep():
     # justfile points kiln at, otherwise lint walks into generated
     # code on every commit.
     assert 'exclude = ["_generated"]' in py
+
+
+# -------------------------------------------------------------------
+# Always-on dependencies and ruff config
+# -------------------------------------------------------------------
+
+
+def test_pyproject_always_includes_pyjwt_and_multipart():
+    # ``pyjwt`` and ``python-multipart`` are tiny but easy to
+    # forget; shipping them by default avoids a confusing missing-
+    # module the moment the user enables auth in project.jsonnet.
+    py = _build_files(RootConfig())["pyproject.toml"]
+
+    assert "pyjwt>=2.0" in py
+    assert "python-multipart>=0.0.22" in py
+
+
+def test_pyproject_always_includes_per_file_ignores():
+    # The per-file ignores match kiln's idiomatic output --
+    # without them ruff trips on standard SQLAlchemy table_args
+    # patterns and on kiln action signatures.  Shipping them
+    # default-on saves every consumer the same triage.
+    py = _build_files(RootConfig())["pyproject.toml"]
+
+    assert "[tool.ruff.lint.per-file-ignores]" in py
+    assert '"**/models/**"' in py
+    assert '"**/actions.py"' in py
+    assert '"tests/**"' in py
+
+
+# -------------------------------------------------------------------
+# opentelemetry flag
+# -------------------------------------------------------------------
+
+
+def test_opentelemetry_off_omits_telemetry_init():
+    files = _build_files(RootConfig())
+
+    py = files["pyproject.toml"]
+    main = files["main.py"]
+
+    # Bare ``"kiln-generator"`` rather than the extras form.
+    assert '"kiln-generator",' in py
+    assert "opentelemetry" not in py.lower()
+    assert "init_telemetry" not in main
+
+
+def test_opentelemetry_on_emits_extras_and_init():
+    files = _build_files(RootConfig(opentelemetry=True))
+
+    py = files["pyproject.toml"]
+    main = files["main.py"]
+
+    assert '"kiln-generator[opentelemetry]"' in py
+    assert "from _generated.telemetry import init_telemetry" in main
+    assert "init_telemetry(app)" in main
+
+
+# -------------------------------------------------------------------
+# files flag
+# -------------------------------------------------------------------
+
+
+def test_files_on_adds_files_extra():
+    py = _build_files(RootConfig(files=True))["pyproject.toml"]
+
+    assert '"kiln-generator[files]"' in py
+
+
+def test_opentelemetry_and_files_combine_into_one_extras_list():
+    # Two extras must end up on a single ``kiln-generator[a,b]``
+    # line -- pip / uv can't merge two separate kiln-generator
+    # entries into a coherent install.
+    py = _build_files(RootConfig(opentelemetry=True, files=True))[
+        "pyproject.toml"
+    ]
+
+    assert '"kiln-generator[opentelemetry,files]"' in py
+    # And only one kiln-generator line exists.
+    assert py.count('"kiln-generator') == 1
+
+
+# -------------------------------------------------------------------
+# psycopg / pgcraft flags
+# -------------------------------------------------------------------
+
+
+def test_psycopg_flag_adds_dep():
+    py_off = _build_files(RootConfig())["pyproject.toml"]
+    py_on = _build_files(RootConfig(psycopg=True))["pyproject.toml"]
+
+    assert "psycopg[binary]" not in py_off
+    assert '"psycopg[binary]>=3.2"' in py_on
+
+
+def test_pgcraft_flag_adds_dep():
+    py_off = _build_files(RootConfig())["pyproject.toml"]
+    py_on = _build_files(RootConfig(pgcraft=True))["pyproject.toml"]
+
+    assert '"pgcraft"' not in py_off
+    assert '"pgcraft"' in py_on
+
+
+# -------------------------------------------------------------------
+# editable flag
+# -------------------------------------------------------------------
+
+
+def test_editable_off_omits_uv_sources():
+    py = _build_files(RootConfig())["pyproject.toml"]
+
+    assert "[tool.uv.sources]" not in py
+
+
+def test_editable_on_pins_kiln_to_local_path():
+    py = _build_files(RootConfig(editable=True))["pyproject.toml"]
+
+    assert "[tool.uv.sources]" in py
+    assert 'kiln-generator = { path = "../kiln", editable = true }' in py
+
+
+def test_editable_with_pgcraft_pins_pgcraft_too():
+    py = _build_files(RootConfig(editable=True, pgcraft=True))["pyproject.toml"]
+
+    assert 'pgcraft = { path = "../pgcraft", editable = true }' in py
+
+
+def test_editable_without_pgcraft_omits_pgcraft_source():
+    # Editable=True but pgcraft=False shouldn't half-pin pgcraft
+    # at a path that may not exist on the user's machine.
+    py = _build_files(RootConfig(editable=True))["pyproject.toml"]
+
+    assert "pgcraft = { path" not in py
+
+
+# -------------------------------------------------------------------
+# pgqueuer flag (justfile)
+# -------------------------------------------------------------------
+
+
+def test_pgqueuer_off_omits_queue_recipes():
+    just = _build_files(RootConfig())["justfile"]
+
+    assert "queue-install:" not in just
+    assert "worker:" not in just
+
+
+def test_pgqueuer_on_emits_queue_recipes_using_module():
+    just = _build_files(RootConfig(module="tracker", pgqueuer=True))["justfile"]
+
+    assert "queue-install:" in just
+    assert "worker:" in just
+    # The worker recipe must point at the user's app module so
+    # ``just worker`` actually runs the right pgqueuer entrypoint.
+    assert "uv run pgq run tracker.queue.main:main" in just
 
 
 def test_justfile_includes_openapi_recipe():
@@ -309,3 +478,136 @@ def test_pipeline_handles_various_module_names(module_name: str):
 
     assert f"config/{module_name}.jsonnet" in files
     assert f"{module_name}/__init__.py" in files
+
+
+# -------------------------------------------------------------------
+# Re-bootstrap safety -- if_exists / --force / --force-paths
+# -------------------------------------------------------------------
+
+
+def test_every_kiln_root_file_declares_skip():
+    # The whole point of marking outputs ``"skip"`` is so a
+    # re-bootstrap doesn't blow away post-bootstrap edits.  If a
+    # template ever forgets the flag, this test catches it.
+    files = generate(RootConfig(module="demo"), root_target)
+
+    for f in files:
+        assert f.if_exists == "skip", (
+            f'{f.path!r} must be if_exists="skip" so re-running '
+            f"kiln_root doesn't overwrite user edits"
+        )
+
+
+def _run_bootstrap(
+    tmp_path: Path,
+    *extra_args: str,
+    config_text: str = '{ name: "demo", module: "demo" }',
+) -> object:
+    """Invoke the foundry CLI to bootstrap into *tmp_path*."""
+    from typer.testing import CliRunner
+
+    from foundry.cli import app
+
+    cfg = tmp_path / "bootstrap.jsonnet"
+    cfg.write_text(config_text)
+
+    return CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "--target",
+            "kiln_root",
+            "--config",
+            str(cfg),
+            "--out",
+            str(tmp_path),
+            *extra_args,
+        ],
+    )
+
+
+def test_re_bootstrap_preserves_post_bootstrap_edits(tmp_path: Path):
+    # Initial bootstrap.
+    first = _run_bootstrap(tmp_path)
+    assert first.exit_code == 0
+
+    # User customizes a generated file.
+    edited = '# user-edited pyproject\n[project]\nname = "renamed"\n'
+    (tmp_path / "pyproject.toml").write_text(edited)
+
+    # Re-bootstrap without --force: edits must survive.
+    second = _run_bootstrap(tmp_path)
+    assert second.exit_code == 0
+
+    assert (tmp_path / "pyproject.toml").read_text() == edited
+    assert "skipped" in second.output.lower()
+
+
+def test_re_bootstrap_with_force_overwrites_everything(tmp_path: Path):
+    _run_bootstrap(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("# user-edited")
+    (tmp_path / "main.py").write_text("# user-edited")
+
+    result = _run_bootstrap(tmp_path, "--force")
+    assert result.exit_code == 0
+
+    py = (tmp_path / "pyproject.toml").read_text()
+    main = (tmp_path / "main.py").read_text()
+    assert "AUTOGENERATED by kiln_root" in py
+    assert "AUTOGENERATED by kiln_root" in main
+
+
+def test_re_bootstrap_force_paths_targets_only_listed(tmp_path: Path):
+    _run_bootstrap(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("# user-pyproject")
+    (tmp_path / "main.py").write_text("# user-main")
+
+    result = _run_bootstrap(tmp_path, "--force-paths", "pyproject.toml")
+    assert result.exit_code == 0
+
+    # pyproject got reset; main.py wasn't on the force list, so
+    # the user's edit survives.
+    assert (
+        "AUTOGENERATED by kiln_root"
+        in (tmp_path / "pyproject.toml").read_text()
+    )
+    assert (tmp_path / "main.py").read_text() == "# user-main"
+
+
+def test_re_bootstrap_force_paths_accepts_comma_list(tmp_path: Path):
+    _run_bootstrap(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("# user-pyproject")
+    (tmp_path / "main.py").write_text("# user-main")
+    (tmp_path / ".gitignore").write_text("# user-gitignore")
+
+    result = _run_bootstrap(tmp_path, "--force-paths", "pyproject.toml,main.py")
+    assert result.exit_code == 0
+
+    assert (
+        "AUTOGENERATED by kiln_root"
+        in (tmp_path / "pyproject.toml").read_text()
+    )
+    assert "AUTOGENERATED by kiln_root" in (tmp_path / "main.py").read_text()
+    # .gitignore wasn't on the list -- still user's content.
+    assert (tmp_path / ".gitignore").read_text() == "# user-gitignore"
+
+
+def test_re_bootstrap_force_paths_repeated_flag(tmp_path: Path):
+    _run_bootstrap(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("# user-pyproject")
+    (tmp_path / "main.py").write_text("# user-main")
+
+    result = _run_bootstrap(
+        tmp_path,
+        "--force-paths",
+        "pyproject.toml",
+        "--force-paths",
+        "main.py",
+    )
+    assert result.exit_code == 0
+
+    assert (
+        "AUTOGENERATED by kiln_root"
+        in (tmp_path / "pyproject.toml").read_text()
+    )
+    assert "AUTOGENERATED by kiln_root" in (tmp_path / "main.py").read_text()

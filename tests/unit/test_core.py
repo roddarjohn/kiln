@@ -198,3 +198,124 @@ def test_write_files_overwrites(tmp_path):
     files = [GeneratedFile("a.py", "new")]
     write_files(files, tmp_path)
     assert (tmp_path / "a.py").read_text() == "new"
+
+
+# -------------------------------------------------------------------
+# write_files -- if_exists / --force / --force-paths semantics
+# -------------------------------------------------------------------
+
+
+def test_write_files_skip_leaves_existing_file_alone(tmp_path):
+    # The "skip" policy is what makes ``just bootstrap`` safe to
+    # re-run.  Hand-edited content on disk must survive.
+    (tmp_path / "pyproject.toml").write_text("user-edited")
+    files = [
+        GeneratedFile(
+            path="pyproject.toml",
+            content="from-template",
+            if_exists="skip",
+        ),
+    ]
+
+    written = write_files(files, tmp_path)
+
+    assert written == 0
+    assert (tmp_path / "pyproject.toml").read_text() == "user-edited"
+
+
+def test_write_files_skip_creates_when_missing(tmp_path):
+    # Skip means "skip if exists" -- a missing file must still be
+    # created so the bootstrap actually scaffolds on first run.
+    files = [
+        GeneratedFile(
+            path="pyproject.toml",
+            content="fresh",
+            if_exists="skip",
+        ),
+    ]
+
+    written = write_files(files, tmp_path)
+
+    assert written == 1
+    assert (tmp_path / "pyproject.toml").read_text() == "fresh"
+
+
+def test_write_files_force_overrides_skip(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("user-edited")
+    files = [
+        GeneratedFile(
+            path="pyproject.toml",
+            content="from-template",
+            if_exists="skip",
+        ),
+    ]
+
+    written = write_files(files, tmp_path, force=True)
+
+    assert written == 1
+    assert (tmp_path / "pyproject.toml").read_text() == "from-template"
+
+
+def test_write_files_force_paths_targets_only_listed(tmp_path):
+    # The whole point of --force-paths is surgical: clobber one
+    # file, leave the rest alone.
+    (tmp_path / "pyproject.toml").write_text("user-edited")
+    (tmp_path / "main.py").write_text("user-edited")
+    files = [
+        GeneratedFile(
+            path="pyproject.toml",
+            content="from-template",
+            if_exists="skip",
+        ),
+        GeneratedFile(
+            path="main.py",
+            content="from-template",
+            if_exists="skip",
+        ),
+    ]
+
+    written = write_files(files, tmp_path, force_paths=["pyproject.toml"])
+
+    assert written == 1
+    assert (tmp_path / "pyproject.toml").read_text() == "from-template"
+    assert (tmp_path / "main.py").read_text() == "user-edited"
+
+
+def test_write_files_force_paths_set_form(tmp_path):
+    # Accept any iterable of paths -- CLI passes a set, callers
+    # may pass a list.
+    (tmp_path / "a").write_text("old")
+    files = [GeneratedFile("a", "new", if_exists="skip")]
+
+    write_files(files, tmp_path, force_paths={"a"})
+
+    assert (tmp_path / "a").read_text() == "new"
+
+
+def test_write_files_force_paths_ignored_when_force_set(tmp_path):
+    # ``--force`` always wins; ``--force-paths`` is a finer-
+    # grained override of ``"skip"`` and isn't needed when
+    # everything is being overwritten anyway.
+    (tmp_path / "a").write_text("old-a")
+    (tmp_path / "b").write_text("old-b")
+    files = [
+        GeneratedFile("a", "new-a", if_exists="skip"),
+        GeneratedFile("b", "new-b", if_exists="skip"),
+    ]
+
+    written = write_files(files, tmp_path, force=True, force_paths=["a"])
+
+    assert written == 2
+    assert (tmp_path / "a").read_text() == "new-a"
+    assert (tmp_path / "b").read_text() == "new-b"
+
+
+def test_write_files_overwrite_files_unaffected_by_force_flags(tmp_path):
+    # The default ``"overwrite"`` policy is unrelated to the
+    # force machinery; clobbering existing content is its job.
+    (tmp_path / "routes.py").write_text("old")
+    files = [GeneratedFile("routes.py", "new", if_exists="overwrite")]
+
+    write_files(files, tmp_path)
+
+    assert (tmp_path / "routes.py").read_text() == "new"

@@ -26,6 +26,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from {{ package_prefix }}.routes import router
+{% if opentelemetry %}
+from {{ package_prefix }}.telemetry import init_telemetry
+{% endif %}
 
 app = FastAPI(
     title="{{ name }}",
@@ -33,4 +36,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
+{% if opentelemetry %}
+init_telemetry(app)
+{% endif %}
 app.include_router(router, prefix="/v1")

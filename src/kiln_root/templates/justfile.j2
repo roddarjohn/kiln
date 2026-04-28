@@ -46,6 +46,17 @@ alias f := fresh
 openapi:
     uv run python -c "import json, main; print(json.dumps(main.app.openapi(), indent=2))" > openapi.json
 
+{% if pgqueuer %}
+# Install the pgqueuer schema (one-shot, before first worker start).
+# DATABASE_URL must be a plain postgresql:// DSN (strip +asyncpg).
+queue-install:
+    uv run pgq install --pg-dsn "${DATABASE_URL/+asyncpg/}"
+
+# Run the pgqueuer worker for {{ module }} tasks.
+worker:
+    uv run pgq run {{ module }}.queue.main:main
+
+{% endif %}
 # Run linter and formatter checks
 lint:
     uv run --group dev ruff check . && uv run --group dev ruff format --check .

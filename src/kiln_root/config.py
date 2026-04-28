@@ -1,12 +1,13 @@
 """Pydantic schema for kiln_root configs.
 
-Intentionally minimal: kiln_root is a one-shot bootstrap, so the
-config only carries the few project-identity fields the templates
-need to interpolate.  Everything else (dependency versions, the
-shape of the generated ``project.jsonnet`` skeleton, the FastAPI
-app factory) is fixed in the templates -- users edit the rendered
-files directly afterwards rather than passing more knobs through
-the config.
+The schema is small but not bare: a few identity fields plus
+a handful of opt-in toggles for the optional bits real apps
+almost always need (OpenTelemetry init, files extra, psycopg
+sync engine, pgcraft, pgqueuer recipes, editable local installs).
+The defaults stay opinionated -- ``pyjwt`` and ``python-multipart``
+are always present, the per-file ruff ignore block is always
+emitted -- so a default-defaulted bootstrap drops you into a
+sensible FastAPI shape without a mountain of dead config.
 """
 
 from pydantic import Field
@@ -32,6 +33,35 @@ class RootConfig(FoundryConfig):
             ``pyproject.toml`` and the FastAPI app's
             ``description`` for parity with the generated OpenAPI
             spec.
+        opentelemetry: When ``True``, request the
+            ``kiln-generator[opentelemetry]`` extra in
+            ``pyproject.toml`` and emit the
+            ``init_telemetry(app)`` call in ``main.py``.  Pair
+            with a ``telemetry: telemetry.otel(...)`` block in
+            ``config/project.jsonnet`` once kiln scaffolds the
+            telemetry module on the first ``just generate``.
+        files: When ``True``, request the
+            ``kiln-generator[files]`` extra (boto3 + the
+            ``ingot.files`` runtime helpers) for projects that
+            expose file-upload endpoints.
+        psycopg: When ``True``, add ``psycopg[binary]`` to the
+            base dependency list.  Required by kiln's
+            sync-engine login path: the generated
+            ``POST /auth/token`` handler is a plain ``def`` and
+            can't ride the asyncpg pool.
+        pgcraft: When ``True``, add ``pgcraft`` to the base
+            dependency list.  Pulls in the migration / schema
+            tooling kiln integrates with.
+        pgqueuer: When ``True``, emit ``queue-install`` and
+            ``worker`` recipes in the generated ``justfile`` for
+            apps that run a pgqueuer-backed background-job
+            queue alongside the API.
+        editable: When ``True``, emit a ``[tool.uv.sources]``
+            block pinning ``kiln-generator`` (and ``pgcraft``,
+            when enabled) to editable sibling-repo installs at
+            ``../kiln`` / ``../pgcraft``.  Right for local
+            development against unreleased changes; flip off
+            when publishing.
 
     """
 
@@ -40,3 +70,9 @@ class RootConfig(FoundryConfig):
     description: str = Field(
         default="FastAPI app bootstrapped by kiln_root.",
     )
+    opentelemetry: bool = Field(default=False)
+    files: bool = Field(default=False)
+    psycopg: bool = Field(default=False)
+    pgcraft: bool = Field(default=False)
+    pgqueuer: bool = Field(default=False)
+    editable: bool = Field(default=False)

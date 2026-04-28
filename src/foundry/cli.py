@@ -148,7 +148,7 @@ def clean_cmd(
 
 
 @app.command("generate")
-def generate_cmd(
+def generate_cmd(  # noqa: PLR0913
     config: ConfigOption,
     out: OutOption = Path(),
     target_name: TargetOption = None,
@@ -173,6 +173,33 @@ def generate_cmd(
             ),
         ),
     ] = False,
+    force: Annotated[  # noqa: FBT002
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Treat every file the target produced as "
+                '``if_exists="overwrite"``.  Use with care: '
+                "this clobbers files the target marked as "
+                '``"skip"`` (e.g. kiln_root\'s bootstrap '
+                "files), discarding any post-generation edits."
+            ),
+        ),
+    ] = False,
+    force_paths: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--force-paths",
+            help=(
+                "Comma-separated list of output paths to "
+                "overwrite even when the target marked them "
+                '``"skip"``.  Repeat the flag or pass a '
+                "comma list (e.g. "
+                "``--force-paths pyproject.toml,main.py``).  "
+                "Ignored when ``--force`` is set."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Generate files from a config via the selected target."""
     if dry_run and clean:
@@ -193,8 +220,38 @@ def generate_cmd(
         typer.echo(f"Would generate {len(files)} file(s).")
         return
 
-    written = write_files(files, out)
-    typer.echo(f"Generated {written} file(s).")
+    forced = _split_force_paths(force_paths)
+    written = write_files(files, out, force=force, force_paths=forced)
+
+    if written == len(files):
+        typer.echo(f"Generated {written} file(s).")
+
+    else:
+        skipped = len(files) - written
+        typer.echo(
+            f"Generated {written} file(s); skipped {skipped} "
+            f"(already exist; pass --force or --force-paths to "
+            f"overwrite)."
+        )
+
+
+def _split_force_paths(values: list[str] | None) -> set[str]:
+    """Flatten a typer-collected ``--force-paths`` list to a set.
+
+    Typer hands each ``--force-paths`` invocation back as a list
+    item.  Each item may be a single path or a comma-separated
+    string -- both forms are documented as valid -- so the helper
+    splits-and-strips before deduping.
+    """
+    if not values:
+        return set()
+
+    return {
+        part.strip()
+        for value in values
+        for part in value.split(",")
+        if part.strip()
+    }
 
 
 @app.command("validate")
