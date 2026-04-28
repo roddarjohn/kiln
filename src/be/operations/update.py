@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import utils_imports
+from be.operations.renderers import gate_wiring, utils_imports
 from be.operations.types import (
     Field,
     FieldsOptions,
@@ -70,6 +70,18 @@ class Update:
             doc=f"Request body for updating a {model.pascal}.",
         )
 
+        gate_ctx, gate_imports = gate_wiring(
+            ctx.instance,
+            resource,
+            ctx.package_prefix,
+            is_object_scope=True,
+        )
+        # Gated update needs to fetch the row first so the guard
+        # can inspect resource state -- a one-shot UPDATE doesn't
+        # surface the row.  Pulled in unconditionally on the gated
+        # path; the ungated path keeps the single-statement form.
+        gate_extra_imports = [("sqlalchemy", "select")] if gate_ctx else []
+
         yield RouteHandler(
             method="PATCH",
             path=f"/{{{resource.pk}}}",
@@ -85,7 +97,13 @@ class Update:
             doc=f"Update a {model.pascal} by {resource.pk}.",
             request_schema=request_schema,
             body_template="fastapi/ops/update.py.j2",
-            extra_imports=[("sqlalchemy", "update"), *utils_imports()],
+            body_context=gate_ctx,
+            extra_imports=[
+                ("sqlalchemy", "update"),
+                *utils_imports(),
+                *gate_extra_imports,
+                *gate_imports,
+            ],
         )
 
         yield TestCase(

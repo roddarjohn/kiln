@@ -1,0 +1,9 @@
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+    obj = await get_object_from_query_or_404(
+        db,
+        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        detail="{{ model_name }} not found",
+    )
+    return await available_actions(obj, session, {{ object_specs_const }})
+{% endblock %}

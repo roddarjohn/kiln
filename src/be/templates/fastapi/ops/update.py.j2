@@ -1,5 +1,14 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
+{% if gate_specs_const|default(none) %}
+    obj = await get_object_from_query_or_404(
+        db,
+        select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
+        detail="{{ model_name }} not found",
+    )
+    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")(obj, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})

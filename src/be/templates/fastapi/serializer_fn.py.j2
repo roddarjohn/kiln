@@ -1,3 +1,25 @@
+{% if dumps_actions %}
+async def {{ function_name }}(
+    obj: {{ model_name }},
+    session: {{ session_type }},
+) -> {{ schema_name }}:
+    """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""
+    return {{ schema_name }}(
+{% for f in fields %}
+{% if f.nested_serializer and f.many %}
+        {{ f.name }}=[{{ f.nested_serializer }}(x) for x in obj.{{ f.name }}],
+{% elif f.nested_serializer %}
+        {{ f.name }}={{ f.nested_serializer }}(obj.{{ f.name }}),
+{% else %}
+        {{ f.name }}=obj.{{ f.name }},
+{% endif %}
+{% endfor %}
+        actions=[
+            *await available_actions(obj, session, {{ object_specs_const }}),
+            *await available_actions(None, session, {{ collection_specs_const }}),
+        ],
+    )
+{% else %}
 def {{ function_name }}(obj: {{ model_name }}) -> {{ schema_name }}:
     """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""
     return {{ schema_name }}(
@@ -11,3 +33,4 @@ def {{ function_name }}(obj: {{ model_name }}) -> {{ schema_name }}:
 {% endif %}
 {% endfor %}
     )
+{% endif %}

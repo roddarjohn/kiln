@@ -141,6 +141,42 @@ async def available_actions(
     ]
 
 
+def find_can(
+    specs: Iterable[ActionSpec],
+    name: str,
+) -> CanCallable:
+    """Return the guard for the action *name* in *specs*.
+
+    Generated handlers resolve their own row-level guard at
+    module-import time -- e.g. ``_CAN_LIST = find_can(...)`` --
+    so the per-request path is a single attribute lookup rather
+    than a tuple scan.
+
+    Args:
+        specs: An :class:`ActionSpec` tuple from the per-app
+            registry, typically the collection-scoped tuple for
+            row-level filters or the object-scoped tuple for
+            execution-time gates.
+        name: Operation name to look up (e.g. ``"list"``,
+            ``"publish"``).
+
+    Returns:
+        The bound :data:`CanCallable`.
+
+    Raises:
+        KeyError: If *name* is not present in *specs* -- the
+            generated code should never reach this branch since
+            the registry is built from the same operation list.
+
+    """
+    for spec in specs:
+        if spec.name == name:
+            return spec.can
+
+    msg = f"No action {name!r} in registry"
+    raise KeyError(msg)
+
+
 async def filter_visible(
     rows: Iterable[Any],
     session: Any,

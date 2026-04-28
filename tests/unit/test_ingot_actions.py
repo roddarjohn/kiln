@@ -2,12 +2,15 @@
 
 from dataclasses import dataclass
 
+import pytest
+
 from ingot.actions import (
     ActionRef,
     ActionSpec,
     always_true,
     available_actions,
     filter_visible,
+    find_can,
 )
 
 
@@ -122,3 +125,19 @@ async def test_filter_visible_with_always_true_returns_all():
     rows = [Article(id=1), Article(id=2)]
     survivors = await filter_visible(rows, Session(), always_true)
     assert survivors == rows
+
+
+def test_find_can_returns_matching_guard():
+    specs = (
+        ActionSpec(name="get", can=always_true, is_object_action=True),
+        ActionSpec(name="list", can=_can_published, is_object_action=False),
+    )
+    assert find_can(specs, "list") is _can_published
+    assert find_can(specs, "get") is always_true
+
+
+def test_find_can_raises_for_unknown_name():
+    specs = (ActionSpec(name="get", can=always_true, is_object_action=True),)
+
+    with pytest.raises(KeyError, match="'publish'"):
+        find_can(specs, "publish")

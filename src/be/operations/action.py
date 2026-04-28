@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from be.config.schema import PYTHON_TYPES
 from be.operations._introspect import introspect_action_fn
-from be.operations.renderers import utils_imports
+from be.operations.renderers import gate_wiring, utils_imports
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name
 from foundry.operation import operation
@@ -108,6 +108,13 @@ class Action:
         )
         return_type = "None" if info.returns_none else info.response_class
 
+        gate_ctx, gate_imports = gate_wiring(
+            ctx.instance,
+            resource,
+            ctx.package_prefix,
+            is_object_scope=info.is_object_action,
+        )
+
         yield RouteHandler(
             method="POST",
             path=path,
@@ -129,8 +136,9 @@ class Action:
                 "model_class_param_name": info.model_class_param_name,
                 "has_request_body": info.request_class is not None,
                 "returns_none": info.returns_none,
+                **gate_ctx,
             },
-            extra_imports=extra_imports,
+            extra_imports=[*extra_imports, *gate_imports],
         )
 
         yield TestCase(

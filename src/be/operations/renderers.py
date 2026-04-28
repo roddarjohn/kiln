@@ -39,7 +39,7 @@ from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from be.config.schema import ResourceConfig
+    from be.config.schema import OperationConfig, ResourceConfig
     from foundry.render import RenderCtx
 
 
@@ -61,23 +61,40 @@ class _ResourceInfo:
     pk_name: str
     pk_py_type: str
     has_auth: bool
+    session_schema: str | None
+    """Dotted path to the consumer's session Pydantic model
+    (e.g. ``"myapp.auth.Session"``), or ``None`` when auth is not
+    configured.  Used by the action-framework path to type the
+    serializer's ``session`` parameter."""
     session_module: str
     get_db_fn: str
     generate_tests: bool
+    include_actions_in_dump: bool
 
 
 def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     """Build a :class:`_ResourceInfo` from the renderer context.
 
     Walks ``ctx.store`` up from ``ctx.instance_id`` to the
-    enclosing resource.  Every renderer that calls this handles
-    an output produced at operation scope (below resource), so
-    :meth:`BuildStore.ancestor_of` always finds the resource.
+    enclosing resource.  Most callers handle an output produced
+    at operation scope (below resource), so :meth:`ancestor_of`
+    finds the resource.  Resource-scope ops (Permissions) yield
+    outputs stored at the resource id itself; the fallback uses
+    :meth:`BuildStore.instance_at` to recover the resource when
+    ``instance_id`` *is* the resource.
     """
-    resource = cast(
-        "ResourceConfig",
-        ctx.store.ancestor_of(ctx.instance_id, "resource"),
-    )
+    if ctx.store.scope_of(ctx.instance_id).name == "resource":
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.instance_at(ctx.instance_id),
+        )
+
+    else:
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+
     config = ctx.config
     package_prefix = ctx.package_prefix
 
@@ -92,6 +109,9 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     if not route_prefix:
         route_prefix = f"/{model.lower}s"
 
+    auth = getattr(config, "auth", None)
+    session_schema = getattr(auth, "session_schema", None) if auth else None
+
     return _ResourceInfo(
         model=model,
         model_module=model_module,
@@ -100,10 +120,14 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         route_prefix=route_prefix,
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[resource.pk_type],
-        has_auth=getattr(config, "auth", None) is not None,
+        has_auth=auth is not None,
+        session_schema=session_schema,
         session_module=db.session_module,
         get_db_fn=db.get_db_fn,
         generate_tests=getattr(resource, "generate_tests", False),
+        include_actions_in_dump=getattr(
+            resource, "include_actions_in_dump", False
+        ),
     )
 
 
@@ -168,6 +192,9 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
 
         elif py_type == "dict[str, Any]":
             imports.add_from("typing", "Any")
+
+        elif py_type == "list[ActionRef]":
+            imports.add_from("ingot.actions", "ActionRef")
 
     yield SnippetFragment(
         path=path,
@@ -380,6 +407,20 @@ def _serializer_fragment(
     )
     imports.add_from(schema_mod, ser.schema_name)
 
+    actions_context: dict[str, str] = {}
+
+    if ser.dumps_actions:
+        actions_context = _wire_dumps_actions(info, imports)
+        # Skip the synthetic ``actions`` field in the per-field
+        # render loop -- the template's actions branch builds it
+        # directly via ``available_actions(...)``.
+        rendered_fields = [
+            f for f in ser.fields if f.py_type != "list[ActionRef]"
+        ]
+
+    else:
+        rendered_fields = ser.fields
+
     yield FileFragment(
         path=ser_path,
         template="fastapi/serializer_outer.py.j2",
@@ -399,8 +440,10 @@ def _serializer_fragment(
                     "nested_serializer": f.nested_serializer,
                     "many": f.many,
                 }
-                for f in ser.fields
+                for f in rendered_fields
             ],
+            "dumps_actions": ser.dumps_actions,
+            **actions_context,
         },
         imports=imports,
     )
@@ -522,6 +565,124 @@ def _list_result_fragment(
 # -------------------------------------------------------------------
 # Shared helpers used by operation build() methods.
 # -------------------------------------------------------------------
+
+
+def _wire_dumps_actions(
+    info: _ResourceInfo,
+    imports: ImportCollector,
+) -> dict[str, str]:
+    """Register imports and return template context for an action dump.
+
+    The action-framework path turns the resource's top-level
+    serializer ``async``, threads ``session`` through, and folds
+    ``available_actions`` against the per-resource registry tuples
+    into the schema construction.  Both the runtime helper
+    (:func:`ingot.actions.available_actions`) and the generated
+    registry constants come from this single wiring point so the
+    serializer renderer stays free of action-specific knowledge.
+
+    Args:
+        info: Cached resource info for the current render.
+        imports: Collector to mutate; new entries land in the
+            serializer file's import block.
+
+    Returns:
+        Template context keys consumed by ``serializer_fn.py.j2``
+        on the action-dump branch:
+        ``object_specs_const`` and ``collection_specs_const``
+        (the registry constant names) plus ``session_type`` (the
+        bare class name used in the function signature).
+
+    Raises:
+        ValueError: If auth is not configured -- the action
+            framework relies on a session, so a resource that
+            opts in must also have a session schema.
+
+    """
+    if info.session_schema is None:
+        msg = (
+            "include_actions_in_dump=True requires auth to be "
+            "configured -- the serializer takes a session "
+            "parameter to evaluate guards"
+        )
+        raise ValueError(msg)
+
+    session_module, session_name = info.session_schema.rsplit(".", 1)
+    actions_module = prefix_import(info.package_prefix, info.app, "actions")
+    object_const = f"{info.model.raw.upper()}_OBJECT_ACTIONS"
+    collection_const = f"{info.model.raw.upper()}_COLLECTION_ACTIONS"
+
+    imports.add_from("ingot.actions", "available_actions")
+    imports.add_from(actions_module, object_const, collection_const)
+    imports.add_from(session_module, session_name)
+
+    return {
+        "object_specs_const": object_const,
+        "collection_specs_const": collection_const,
+        "session_type": session_name,
+    }
+
+
+def gate_wiring(
+    op: OperationConfig,
+    resource: ResourceConfig,
+    package_prefix: str,
+    *,
+    is_object_scope: bool,
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Wire execution-time gate imports + body context for one op.
+
+    Returns ``({}, [])`` when the op has no ``can`` callable
+    configured (no gate emitted).  When configured, returns a
+    body-context fragment and the import set the gate references:
+    :func:`ingot.actions.find_can`, FastAPI's
+    :class:`~fastapi.HTTPException` for the 403 raise, and the
+    per-resource registry constant from the per-app
+    ``actions.py``.  Built-in CRUD ops and the action op share
+    this so handler templates can render an identical gate
+    regardless of source op.
+
+    Args:
+        op: The operation config carrying the optional ``can``
+            dotted path.
+        resource: Enclosing resource config; used to derive the
+            registry constant name and import path.
+        package_prefix: The project's
+            :attr:`~foundry.config.FoundryConfig.package_prefix`,
+            forwarded to :func:`foundry.naming.prefix_import`.
+        is_object_scope: ``True`` for handlers operating on a
+            single instance (``get``, ``update``, ``delete``,
+            object actions), ``False`` for collection handlers
+            (``create``, collection actions).  Selects between
+            the ``_OBJECT_ACTIONS`` and ``_COLLECTION_ACTIONS``
+            tuples in the generated registry.
+
+    Returns:
+        ``(body_context, extra_imports)``.  Each is empty when
+        the op is ungated; otherwise the body context carries
+        ``gate_specs_const`` and ``gate_op_name`` (consumed by
+        each op's body template) and the import list contains
+        the three pairs above.
+
+    """
+    if op.can is None:
+        return {}, []
+
+    model_module, model = Name.from_dotted(resource.model)
+    parts = model_module.rsplit(".", 1)
+    app = parts[0] if len(parts) > 1 else model_module
+    actions_module = prefix_import(package_prefix, app, "actions")
+    suffix = "OBJECT_ACTIONS" if is_object_scope else "COLLECTION_ACTIONS"
+    const = f"{model.raw.upper()}_{suffix}"
+
+    return (
+        {"gate_specs_const": const, "gate_op_name": op.name},
+        [
+            ("ingot.actions", "find_can"),
+            ("fastapi", "HTTPException"),
+            (actions_module, const),
+        ],
+    )
 
 
 def utils_imports() -> list[tuple[str, str]]:

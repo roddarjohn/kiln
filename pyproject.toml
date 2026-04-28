@@ -88,6 +88,7 @@ tracing = "be.operations.tracing:Tracing"
 router = "be.operations.routing:Router"
 project_router = "be.operations.routing:ProjectRouter"
 actions = "be.operations.actions:Actions"
+permissions = "be.operations.permissions:Permissions"
 
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"

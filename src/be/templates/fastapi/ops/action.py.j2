@@ -8,12 +8,20 @@
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
+{% if gate_specs_const|default(none) %}
+    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")({{ model_param_name }}, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
 {% if returns_none %}
     await {{ fn_name }}({{ model_param_name }}, db=db{{ model_kwarg }}{{ body_kwarg }})
 {% else %}
     result = await {{ fn_name }}({{ model_param_name }}, db=db{{ model_kwarg }}{{ body_kwarg }})
 {% endif %}
 {% else %}
+{% if gate_specs_const|default(none) %}
+    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")(None, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
 {% if returns_none %}
     await {{ fn_name }}(db=db{{ model_kwarg }}{{ body_kwarg }})
 {% else %}

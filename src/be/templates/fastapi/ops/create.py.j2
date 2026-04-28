@@ -1,5 +1,9 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
+{% if gate_specs_const|default(none) %}
+    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")(None, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
     await db.execute(insert({{ model_name }}).values(**body.model_dump()))
     await db.commit()
 {% endblock %}

@@ -23,7 +23,7 @@ from be.operations.types import (
     TestCase,
     _construct_dump,
 )
-from foundry.naming import Name
+from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 
 if TYPE_CHECKING:
@@ -98,6 +98,7 @@ class List:
         )
         model_module, model = Name.from_dotted(resource.model)
         pk_name = getattr(resource, "pk", "id")
+        include_actions = resource.include_actions_in_dump
 
         dump = _construct_dump(
             model,
@@ -105,6 +106,7 @@ class List:
             options.fields,
             suffix="ListItem",
             stem="list_item",
+            include_actions=include_actions,
         )
         list_item = dump.main_schema
         serializer = dump.main_serializer
@@ -123,6 +125,40 @@ class List:
 
         response_model = f"list[{list_item.name}]"
 
+        body_context: dict[str, object] = {
+            "has_filter": False,
+            "has_sort": False,
+            "pagination_mode": None,
+            "default_sort_field": pk_name,
+            "default_sort_dir": "asc",
+            "max_page_size": 100,
+            "cursor_field": pk_name,
+            "load_options": dump.load_options,
+            "serializer_async": include_actions,
+            "include_actions": include_actions,
+        }
+
+        extra_imports: list[tuple[str, str]] = [
+            ("sqlalchemy", "select"),
+            *dump.load_imports,
+        ]
+
+        if include_actions:
+            actions_module = prefix_import(
+                ctx.package_prefix,
+                _app_module(resource.model),
+                "actions",
+            )
+            collection_const = f"{model.raw.upper()}_COLLECTION_ACTIONS"
+            extra_imports.extend(
+                [
+                    ("ingot.actions", "filter_visible"),
+                    ("ingot.actions", "find_can"),
+                    (actions_module, collection_const),
+                ]
+            )
+            body_context["collection_specs_const"] = collection_const
+
         handler = RouteHandler(
             method="POST",
             path="/search",
@@ -137,17 +173,8 @@ class List:
             request_schema=search_request_name,
             doc=f"List {model.pascal} records.",
             body_template="fastapi/ops/search.py.j2",
-            body_context={
-                "has_filter": False,
-                "has_sort": False,
-                "pagination_mode": None,
-                "default_sort_field": pk_name,
-                "default_sort_dir": "asc",
-                "max_page_size": 100,
-                "cursor_field": pk_name,
-                "load_options": dump.load_options,
-            },
-            extra_imports=[("sqlalchemy", "select"), *dump.load_imports],
+            body_context=body_context,
+            extra_imports=extra_imports,
         )
 
         test_case = TestCase(
@@ -202,3 +229,20 @@ def resource_model(ctx: BuildContext[ModifierConfig, ProjectConfig]) -> Name:
     _, model = Name.from_dotted(resource.model)
 
     return model
+
+
+def _app_module(model_path: str) -> str:
+    """Return the consumer's app package from a model dotted path.
+
+    For ``"blog.models.Article"`` returns ``"blog"``; mirrors the
+    derivation used by :func:`be.operations.renderers._resource_info`
+    so generated handlers and serializers import the action
+    registry from the same module.
+    """
+    model_module, _ = Name.from_dotted(model_path)
+    parts = model_module.rsplit(".", 1)
+
+    if len(parts) > 1:
+        return parts[0]
+
+    return model_module

@@ -19,6 +19,7 @@ from be.config.schema import (
     ResourceConfig,
     TelemetryConfig,
 )
+from be.operations.auth import Auth as AuthOp
 from be.operations.create import Create
 from be.operations.delete import Delete
 from be.operations.filter import Filter
@@ -1673,6 +1674,277 @@ class TestPaginate:
             if t.op_name == "list"
         )
         assert tc.is_list_response is False
+
+
+class TestPermissions:
+    """Tests for the resource-scope Permissions op."""
+
+    @staticmethod
+    def _ctx(resource: ResourceConfig) -> BuildContext:
+        store = BuildStore(scope_tree=SCOPE_TREE)
+        resource_id = "project.apps.0.resources.0"
+        store.register_instance(resource_id, resource)
+        return BuildContext(
+            config=MinimalConfig(),
+            scope=Scope(
+                name="resource", config_key="resources", parent=PROJECT
+            ),
+            instance=resource,
+            instance_id=resource_id,
+            store=store,
+        )
+
+    def test_when_false_skips(self):
+        from be.operations.permissions import Permissions
+
+        resource = ResourceConfig(model="app.models.Post")
+        assert Permissions().when(self._ctx(resource)) is False
+
+    def test_when_true_emits_two_handlers_and_two_test_cases(self):
+        from be.operations.permissions import Permissions
+
+        resource = ResourceConfig(
+            model="app.models.Post",
+            permissions_endpoint=True,
+        )
+        result = list(Permissions().build(self._ctx(resource), _Empty()))
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        cases = [r for r in result if isinstance(r, TestCase)]
+
+        assert [h.path for h in handlers] == [
+            "/{id}/permissions",
+            "/permissions",
+        ]
+        assert all(h.method == "GET" for h in handlers)
+        assert all(h.response_model == "list[ActionRef]" for h in handlers)
+        assert all(
+            h.response_schema_module == "ingot.actions" for h in handlers
+        )
+        assert [c.path for c in cases] == [
+            "/{id}/permissions",
+            "/permissions",
+        ]
+
+    def test_handlers_import_registry_and_runtime(self):
+        from be.operations.permissions import Permissions
+
+        resource = ResourceConfig(
+            model="app.models.Post",
+            permissions_endpoint=True,
+        )
+        result = list(Permissions().build(self._ctx(resource), _Empty()))
+        handlers = [r for r in result if isinstance(r, RouteHandler)]
+        object_handler, collection_handler = handlers
+
+        # Object handler imports the object spec; collection handler
+        # imports the collection spec.  Both share the runtime helper.
+        assert ("ingot.actions", "available_actions") in (
+            object_handler.extra_imports
+        )
+        assert ("ingot.actions", "ActionRef") in object_handler.extra_imports
+        assert any(
+            mod.endswith(".actions") and name == "POST_OBJECT_ACTIONS"
+            for mod, name in object_handler.extra_imports
+        )
+        assert any(
+            mod.endswith(".actions") and name == "POST_COLLECTION_ACTIONS"
+            for mod, name in collection_handler.extra_imports
+        )
+
+
+class TestAuthForcesSessionForActions:
+    """Auth threads ``session`` into handlers on dump-enabled resources.
+
+    The action framework references ``session`` in the generated
+    serializer regardless of per-op ``require_auth``; without
+    force-include, a resource with ``require_auth=False`` and
+    ``include_actions_in_dump=True`` would generate code that
+    references an undeclared parameter.
+    """
+
+    @staticmethod
+    def _config_with_auth() -> MinimalConfig:
+        return MinimalConfig(
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+            ),
+        )
+
+    def test_dump_resource_threads_session_even_without_require_auth(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            require_auth=False,
+            include_actions_in_dump=True,
+            operations=[OperationConfig(name="get")],
+        )
+        store = BuildStore(scope_tree=SCOPE_TREE)
+        resource_id = "project.apps.0.resources.0"
+        store.register_instance(resource_id, resource)
+        store.add(
+            resource_id,
+            "get",
+            RouteHandler(
+                method="GET",
+                path="/{id}",
+                function_name="get_user",
+                op_name="get",
+            ),
+        )
+        ctx = BuildContext(
+            config=self._config_with_auth(),
+            scope=Scope(
+                name="resource", config_key="resources", parent=PROJECT
+            ),
+            instance=resource,
+            instance_id=resource_id,
+            store=store,
+        )
+
+        list(AuthOp().build(ctx, _Empty()))
+
+        handler = store.outputs_under(resource_id, RouteHandler)[0]
+        assert any("Depends(get_session)" in dep for dep in handler.extra_deps)
+
+    def test_no_dump_no_force(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            require_auth=False,
+            operations=[OperationConfig(name="get")],
+        )
+        store = BuildStore(scope_tree=SCOPE_TREE)
+        resource_id = "project.apps.0.resources.0"
+        store.register_instance(resource_id, resource)
+        store.add(
+            resource_id,
+            "get",
+            RouteHandler(
+                method="GET",
+                path="/{id}",
+                function_name="get_user",
+                op_name="get",
+            ),
+        )
+        ctx = BuildContext(
+            config=self._config_with_auth(),
+            scope=Scope(
+                name="resource", config_key="resources", parent=PROJECT
+            ),
+            instance=resource,
+            instance_id=resource_id,
+            store=store,
+        )
+
+        list(AuthOp().build(ctx, _Empty()))
+
+        handler = store.outputs_under(resource_id, RouteHandler)[0]
+        assert handler.extra_deps == []
+
+
+class TestGetIncludesActions:
+    """Get with ``include_actions_in_dump=True`` wires the dump path."""
+
+    def test_schema_gets_actions_field(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            include_actions_in_dump=True,
+        )
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+
+        schema = next(
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.name == "UserResource"
+        )
+        action_fields = [f for f in schema.fields if f.name == "actions"]
+        assert len(action_fields) == 1
+        assert action_fields[0].py_type == "list[ActionRef]"
+
+    def test_serializer_dumps_actions(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            include_actions_in_dump=True,
+        )
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+
+        ser = next(r for r in result if isinstance(r, SerializerFn))
+        assert ser.dumps_actions is True
+
+    def test_handler_marks_serializer_async(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            include_actions_in_dump=True,
+        )
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["serializer_async"] is True
+
+
+class TestListIncludesActions:
+    """List with ``include_actions_in_dump=True`` wires dump + filter."""
+
+    @staticmethod
+    def _ctx(resource: ResourceConfig) -> BuildContext:
+        return _operation_ctx(resource, OperationConfig(name="list"))
+
+    def test_list_item_schema_gets_actions_field(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            include_actions_in_dump=True,
+        )
+        result = list(
+            List().build(self._ctx(resource), List.Options(fields=_FIELDS))
+        )
+
+        schema = next(
+            r
+            for r in result
+            if isinstance(r, SchemaClass) and r.name == "UserListItem"
+        )
+        action_fields = [f for f in schema.fields if f.name == "actions"]
+        assert len(action_fields) == 1
+        assert action_fields[0].py_type == "list[ActionRef]"
+
+    def test_handler_imports_filter_helpers_and_collection_specs(self):
+        resource = ResourceConfig(
+            model="app.models.User",
+            include_actions_in_dump=True,
+        )
+        result = list(
+            List().build(self._ctx(resource), List.Options(fields=_FIELDS))
+        )
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert ("ingot.actions", "filter_visible") in handler.extra_imports
+        assert ("ingot.actions", "find_can") in handler.extra_imports
+        assert any(
+            mod.endswith(".actions") and name == "USER_COLLECTION_ACTIONS"
+            for mod, name in handler.extra_imports
+        )
+        assert handler.body_context["include_actions"] is True
+        assert handler.body_context["serializer_async"] is True
+        assert (
+            handler.body_context["collection_specs_const"]
+            == "USER_COLLECTION_ACTIONS"
+        )
+
+    def test_no_action_imports_when_flag_off(self):
+        resource = ResourceConfig(model="app.models.User")
+        result = list(
+            List().build(self._ctx(resource), List.Options(fields=_FIELDS))
+        )
+
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert not any(
+            mod == "ingot.actions" for mod, _ in handler.extra_imports
+        )
+        assert handler.body_context.get("include_actions", False) is False
+        assert handler.body_context.get("serializer_async", False) is False
 
 
 class TestListExtensionsCompose:

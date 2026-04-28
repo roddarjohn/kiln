@@ -18,5 +18,13 @@
         detail="{{ model_name }} not found",
     )
 {% endif %}
+{% if gate_specs_const|default(none) %}
+    if not await find_can({{ gate_specs_const }}, "{{ gate_op_name }}")(obj, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
+{% if serializer_async|default(false) %}
+    return await {{ serializer_fn }}(obj, session)
+{% else %}
     return {{ serializer_fn }}(obj)
+{% endif %}
 {% endblock %}
