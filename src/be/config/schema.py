@@ -695,6 +695,58 @@ class ProjectConfig(FoundryConfig):
         default_factory=list,
     )
 
+    @model_validator(mode="after")
+    def _action_framework_requires_auth(self) -> ProjectConfig:
+        """Reject opt-ins to the action framework without auth.
+
+        The action framework's whole job is to gate by session --
+        ``can`` callables receive ``(resource, session)``, the dump
+        path threads ``session`` into the serializer, and the
+        permissions endpoints look it up via ``Depends(get_session)``.
+        With ``project.auth=None`` there is no session to forward,
+        and the generated code would reference an undeclared
+        parameter.  Failing at config-load time keeps the broken
+        path from ever reaching template rendering.
+        """
+        if self.auth is not None:
+            return self
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                if resource.include_actions_in_dump:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"include_actions_in_dump=True but the project "
+                        f"has no auth configured.  The action dump path "
+                        f"requires a session; configure project.auth or "
+                        f"drop the flag."
+                    )
+                    raise ValueError(msg)
+
+                if resource.permissions_endpoint:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"permissions_endpoint=True but the project "
+                        f"has no auth configured.  The /permissions "
+                        f"endpoints evaluate guards against a session; "
+                        f"configure project.auth or drop the flag."
+                    )
+                    raise ValueError(msg)
+
+                for op in resource.operations:
+                    if op.can is not None:
+                        msg = (
+                            f"Resource {resource.model!r} operation "
+                            f"{op.name!r} sets can={op.can!r} but the "
+                            f"project has no auth configured.  The "
+                            f"guard takes (resource, session); without "
+                            f"auth there is no session to pass.  "
+                            f"Configure project.auth or remove the can."
+                        )
+                        raise ValueError(msg)
+
+        return self
+
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
         """Return the :class:`DatabaseConfig` selected by *db_key*.
 

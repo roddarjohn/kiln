@@ -616,7 +616,16 @@ class TestActions:
             config=AppConfig(module=module, resources=resources),
             prefix="",
         )
+        # Auth is required by ProjectConfig's action-framework
+        # validator whenever any resource opts into the framework;
+        # the Actions op's own behavior is independent of auth, so
+        # we keep auth configured throughout the test suite.
         project = ProjectConfig(
+            auth=AuthConfig(
+                credentials_schema="myapp.auth.LoginCredentials",
+                session_schema="myapp.auth.Session",
+                validate_fn="myapp.auth.validate",
+            ),
             apps=[app],
             databases=[DatabaseConfig(key="primary", default=True)],
         )
