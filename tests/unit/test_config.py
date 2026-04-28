@@ -139,6 +139,84 @@ def test_project_config_resolve_database_unknown_key_raises():
         cfg.resolve_database("missing")
 
 
+def _project_with(
+    resource: ResourceConfig, **kwargs: object
+) -> dict[str, object]:
+    """Build the kwargs for a ProjectConfig with one resource."""
+    return {
+        "databases": [DatabaseConfig(key="primary", default=True)],
+        "apps": [
+            {
+                "config": {
+                    "module": "app",
+                    "resources": [resource.model_dump()],
+                },
+                "prefix": "",
+            },
+        ],
+        **kwargs,
+    }
+
+
+def test_project_config_dump_flag_without_auth_rejected():
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(
+        model="app.models.Post", include_actions_in_dump=True
+    )
+
+    with pytest.raises(ValidationError, match="include_actions_in_dump"):
+        ProjectConfig(**_project_with(resource))
+
+
+def test_project_config_permissions_endpoint_without_auth_rejected():
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(
+        model="app.models.Post", permissions_endpoint=True
+    )
+
+    with pytest.raises(ValidationError, match="permissions_endpoint"):
+        ProjectConfig(**_project_with(resource))
+
+
+def test_project_config_can_on_op_without_auth_rejected():
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(
+        model="app.models.Post",
+        operations=[
+            OperationConfig(name="get", can="app.guards.can_get_post"),
+        ],
+    )
+
+    with pytest.raises(ValidationError, match="can="):
+        ProjectConfig(**_project_with(resource))
+
+
+def test_project_config_action_framework_with_auth_validates():
+    """Same opt-ins succeed when auth is configured."""
+    resource = ResourceConfig(
+        model="app.models.Post",
+        include_actions_in_dump=True,
+        permissions_endpoint=True,
+        operations=[
+            OperationConfig(name="get", can="app.guards.can_get_post"),
+        ],
+    )
+    cfg = ProjectConfig(
+        **_project_with(
+            resource,
+            auth=AuthConfig(
+                credentials_schema="app.auth.LoginCredentials",
+                session_schema="app.auth.Session",
+                validate_fn="app.auth.validate",
+            ),
+        ),
+    )
+    assert cfg.auth is not None
+
+
 def test_resource_config_defaults():
     r = ResourceConfig(model="myapp.models.User")
     assert r.pk == "id"
