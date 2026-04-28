@@ -5,13 +5,15 @@ and lives here; Python / FastAPI / Pydantic output types live in
 :mod:`kiln.outputs` since a non-Python target wouldn't use them.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from foundry.spec import WriteMode
+from foundry.spec import WriteMode  # noqa: TC001 -- needs runtime
+# import: dataclass field default uses ``WriteMode`` annotation, and
+# sphinx-autodoc-typehints emits duplicate-object warnings when the
+# import sits behind ``TYPE_CHECKING`` + ``from __future__ import
+# annotations`` (see tests/unit/test_kiln_root tests for the
+# behaviour the field type drives).
 
 
 @dataclass

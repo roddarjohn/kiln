@@ -7,20 +7,19 @@ calls renderers after the build phase and then groups fragments
 by output path to produce final files.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from foundry.env import render_template
 from foundry.imports import ImportCollector
+from foundry.spec import WriteMode  # noqa: TC001 -- needs runtime
+# import: dataclass field default uses ``WriteMode`` annotation; see
+# foundry/outputs.py for the same trade-off.
 from foundry.store import BuildStore
 
 if TYPE_CHECKING:
     import jinja2
-
-    from foundry.spec import WriteMode
 
 
 @dataclass(frozen=True)

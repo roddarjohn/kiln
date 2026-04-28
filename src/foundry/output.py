@@ -46,7 +46,8 @@ def write_files(
         force: When ``True``, treat every file as
             ``"overwrite"`` regardless of its declared policy.
         force_paths: Optional collection of paths (relative to
-            *out_dir*, matching :attr:`GeneratedFile.path`) whose
+            *out_dir*, matching
+            :attr:`~foundry.spec.GeneratedFile.path`) whose
             ``"skip"`` declaration should be overridden to
             ``"overwrite"``.  Ignored when *force* is ``True``.
 
