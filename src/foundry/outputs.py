@@ -6,14 +6,7 @@ and lives here; Python / FastAPI / Pydantic output types live in
 """
 
 from dataclasses import dataclass, field
-from typing import Any
-
-from foundry.spec import WriteMode  # noqa: TC001 -- needs runtime
-# import: dataclass field default uses ``WriteMode`` annotation, and
-# sphinx-autodoc-typehints emits duplicate-object warnings when the
-# import sits behind ``TYPE_CHECKING`` + ``from __future__ import
-# annotations`` (see tests/unit/test_kiln_root tests for the
-# behaviour the field type drives).
+from typing import Any, Literal
 
 
 @dataclass
@@ -41,4 +34,4 @@ class StaticFile:
     path: str
     template: str
     context: dict[str, Any] = field(default_factory=dict)
-    if_exists: WriteMode = "overwrite"
+    if_exists: Literal["overwrite", "skip"] = "overwrite"

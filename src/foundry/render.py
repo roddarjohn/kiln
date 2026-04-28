@@ -9,13 +9,10 @@ by output path to produce final files.
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from foundry.env import render_template
 from foundry.imports import ImportCollector
-from foundry.spec import WriteMode  # noqa: TC001 -- needs runtime
-# import: dataclass field default uses ``WriteMode`` annotation; see
-# foundry/outputs.py for the same trade-off.
 from foundry.store import BuildStore
 
 if TYPE_CHECKING:
@@ -96,7 +93,7 @@ class FileFragment:
     template: str
     context: dict[str, Any] = field(default_factory=dict)
     imports: ImportCollector = field(default_factory=ImportCollector)
-    if_exists: WriteMode = "overwrite"
+    if_exists: Literal["overwrite", "skip"] = "overwrite"
 
     def __or__(self, other: FileFragment) -> FileFragment:
         """Merge two FileFragments targeting the same path.
@@ -123,7 +120,7 @@ class FileFragment:
                 )
                 raise ValueError(msg)
 
-        merged_if_exists: WriteMode = (
+        merged_if_exists: Literal["overwrite", "skip"] = (
             "overwrite"
             if "overwrite" in (self.if_exists, other.if_exists)
             else "skip"
