@@ -157,6 +157,10 @@ class ListConfig(BaseModel):
         row_actions: Built-in per-row buttons.  ``"delete"``
             renders a Delete button wired to the resource's
             ``delete_fn``.
+        row_click: What clicking a row does.  ``"detail"`` opens
+            a Drawer rendering the resource's Detail component
+            (requires ``detail`` + ``get_fn`` on the resource).
+            ``None`` (default) makes rows non-clickable.
 
     """
 
@@ -165,6 +169,7 @@ class ListConfig(BaseModel):
     columns: list[ColumnSpec] = Field(default_factory=list)
     toolbar_actions: list[Literal["create"]] = Field(default_factory=list)
     row_actions: list[Literal["delete"]] = Field(default_factory=list)
+    row_click: Literal["detail"] | None = Field(default=None)
 
 
 class FormConfig(BaseModel):
@@ -310,6 +315,7 @@ class ResourceConfig(BaseModel):
     create_request_type: str | None = Field(default=None)
     update_request_type: str | None = Field(default=None)
     list: ListConfig = Field(default_factory=ListConfig)
+    detail: DetailConfig | None = Field(default=None)
     create: FormConfig | None = Field(default=None)
     update: FormConfig | None = Field(default=None)
     actions: dict[str, ActionConfig] = Field(default_factory=dict)
