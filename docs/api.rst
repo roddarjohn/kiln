@@ -109,6 +109,12 @@ be.operations
 .. automodule:: be.operations.action
    :members:
 
+.. automodule:: be.operations.actions
+   :members:
+
+.. automodule:: be.operations.permissions
+   :members:
+
 .. automodule:: be.operations.auth
    :members:
 
