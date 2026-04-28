@@ -19,10 +19,10 @@ be target
 be_root target
 --------------
 
-.. automodule:: be_root.target
-   :members:
+The schema (:class:`be_root.config.RootConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
 
-.. automodule:: be_root.config
+.. automodule:: be_root.target
    :members:
 
 .. automodule:: be_root.operations
@@ -31,10 +31,10 @@ be_root target
 fe target
 ---------
 
-.. automodule:: fe.target
-   :members:
+The schema (:class:`fe.config.ProjectConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
 
-.. automodule:: fe.config
+.. automodule:: fe.target
    :members:
 
 .. automodule:: fe.operations
@@ -43,10 +43,10 @@ fe target
 fe_root target
 --------------
 
-.. automodule:: fe_root.target
-   :members:
+The schema (:class:`fe_root.config.RootConfig`) is documented in
+:doc:`reference`.  The wiring lives here:
 
-.. automodule:: fe_root.config
+.. automodule:: fe_root.target
    :members:
 
 .. automodule:: fe_root.operations
