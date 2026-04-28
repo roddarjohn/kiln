@@ -217,6 +217,49 @@ class ActionConfig(BaseModel):
     row_action_when: str | None = Field(default=None)
 
 
+class DetailSection(BaseModel):
+    """One section of a detail view.
+
+    A section is either a ``fields`` list (rendered as
+    label/value pairs from the resource type) or a custom
+    ``component`` import path that takes the resource as a prop.
+
+    Attributes:
+        title: Heading shown above the section.  Optional --
+            sections without a title render their content with
+            no heading.
+        fields: Field names on the resource type.  Mutually
+            exclusive with *component*.
+        component: TS import path (relative to ``src/``) of a
+            user-supplied component receiving the resource as
+            ``item``.  Use when the section needs richer
+            rendering than label/value pairs.
+
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None)
+    fields: list[str] = Field(default_factory=list)
+    component: str | None = Field(default=None)
+
+
+class DetailConfig(BaseModel):
+    """Detail-view configuration for a resource.
+
+    Attributes:
+        sections: Section definitions, top to bottom.
+        actions: Action keys (from ``ResourceConfig.actions``)
+            to render as buttons in the detail header.
+
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[DetailSection] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+
+
 class ResourceLabel(BaseModel):
     """Singular + plural display labels for a resource."""
 
