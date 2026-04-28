@@ -186,7 +186,6 @@ be_root config schema
 
 .. autoclass:: be_root.config.RootConfig
    :members:
-   :undoc-members:
 
 .. _fe-schema:
 
@@ -195,7 +194,6 @@ fe config schema
 
 .. autoclass:: fe.config.ProjectConfig
    :members:
-   :undoc-members:
 
 .. _fe_root-schema:
 
@@ -204,7 +202,6 @@ fe_root config schema
 
 .. autoclass:: fe_root.config.RootConfig
    :members:
-   :undoc-members:
 
 Built-in operations
 -------------------
