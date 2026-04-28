@@ -4,7 +4,12 @@
 // ============================================================
 
 {% if auth %}
-import { AuthProvider, ToastRegion, useAuth } from "@roddarjohn/glaze";
+import {
+  AuthProvider,
+  PageLoader,
+  ToastRegion,
+  useAuth,
+} from "@roddarjohn/glaze";
 {% else %}
 import { ToastRegion } from "@roddarjohn/glaze";
 {% endif %}
@@ -13,7 +18,6 @@ import { RouterProvider } from "@tanstack/react-router";
 import "./api/client";
 {% if auth %}
 import { login, logout, validate } from "./api/auth";
-import { Login } from "./auth/Login";
 {% endif %}
 import { router } from "./router";
 
@@ -35,7 +39,7 @@ export default function App(): ReactElement {
         login={login}
         logout={logout}
       >
-        <AuthGate />
+        <RouterWithAuth />
       </AuthProvider>
 {% else %}
       <RouterProvider router={router} />
@@ -46,24 +50,18 @@ export default function App(): ReactElement {
 }
 
 {% if auth %}
-function AuthGate(): ReactElement {
+/*
+ * Threads the live ``useAuth()`` value into the TSR router context
+ * so root-level ``beforeLoad`` hooks can gate access without
+ * touching React.  While auth is resolving we show a global
+ * PageLoader -- the ``RouterProvider`` doesn't mount until we know
+ * the user's status, which keeps ``beforeLoad`` simple.
+ */
+function RouterWithAuth(): ReactElement {
   const auth = useAuth();
   if (auth.status === "loading") {
-    return (
-      <main
-        style={ {
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-        } }
-      >
-        Loading…
-      </main>
-    );
+    return <PageLoader />;
   }
-  if (auth.status === "authenticated") {
-    return <RouterProvider router={router} />;
-  }
-  return <Login />;
+  return <RouterProvider router={router} context={{ auth }} />;
 }
 {% endif %}
