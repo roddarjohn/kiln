@@ -2,15 +2,16 @@
 
 A single :class:`RootScaffold` op runs at the project scope and
 yields one :class:`~foundry.outputs.StaticFile` per file in the
-template tree.  Because the ``kiln_root`` :class:`~foundry.target.Target`
-points its ``registry`` at :data:`REGISTRY` (and not at the shared
-default registry kiln uses), this op only fires when the user
-runs ``foundry generate --target kiln_root``.
+template tree.  The class is registered under the
+``kiln_root.operations`` entry-point group (see
+``pyproject.toml``); foundry walks that group at build time when
+the user runs ``foundry generate --target kiln_root``, keeping
+kiln_root's ops out of every other target's per-build registry.
 """
 
 from typing import TYPE_CHECKING
 
-from foundry.operation import OperationRegistry, operation
+from foundry.operation import operation
 from foundry.outputs import StaticFile
 
 if TYPE_CHECKING:
@@ -22,14 +23,7 @@ if TYPE_CHECKING:
     from kiln_root.config import RootConfig
 
 
-REGISTRY = OperationRegistry()
-"""Per-target registry the kiln_root :class:`~foundry.target.Target`
-hands to the engine.  Decorating with ``registry=REGISTRY`` keeps
-the kiln_root op out of kiln's default registry so the two targets
-never interfere."""
-
-
-@operation("root_scaffold", scope="project", registry=REGISTRY)
+@operation("root_scaffold", scope="project")
 class RootScaffold:
     """Emit the bootstrap files for a fresh kiln project.
 

@@ -24,7 +24,6 @@ from foundry.operation import (
     EmptyOptions,
     OperationEntry,
     OperationRegistry,
-    load_default_registry,
 )
 from foundry.scope import PROJECT, Scope, ScopeTree, discover_scopes
 from foundry.store import BuildStore
@@ -73,16 +72,17 @@ class Engine:
 
     Attributes:
         registry: :class:`~foundry.operation.OperationRegistry`
-            holding the ops to run.  Defaults to the populated
-            :data:`~foundry.operation.DEFAULT_REGISTRY`; tests
-            pass an isolated registry to keep their ops out of
-            the global one.
+            holding the ops to run.  Defaults to an empty
+            registry -- production callers always pass one
+            populated by
+            :func:`foundry.operation.load_registry`; tests pass
+            their own isolated registry.
         package_prefix: Dotted prefix for generated imports,
             forwarded to every :class:`BuildContext`.
 
     """
 
-    registry: OperationRegistry = field(default_factory=load_default_registry)
+    registry: OperationRegistry = field(default_factory=OperationRegistry)
     package_prefix: str = ""
 
     def build(self, config: BaseModel) -> BuildStore:
