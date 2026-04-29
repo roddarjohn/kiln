@@ -1,6 +1,6 @@
 """Rate-limit operation -- prepends ``@limiter.limit`` to handlers.
 
-Mirrors :class:`~be.operations.tracing.Tracing`: resource-scoped,
+Mirrors ``be.operations.tracing.Tracing``: resource-scoped,
 ``after_children=True``, emits nothing.  Walks every
 :class:`~be.operations.types.RouteHandler` produced under the
 resource and prepends a ``@limiter.limit("...")`` decorator string
@@ -38,7 +38,8 @@ class RateLimit:
     * Op's ``rate_limit`` when set (``False`` short-circuits, a
       string overrides).
     * Else the resource's ``rate_limit`` (same semantics).
-    * Else :attr:`RateLimitConfig.default_limit`, when configured.
+    * Else :attr:`~be.config.schema.RateLimitConfig.default_limit`,
+      when configured.
     * Else no decorator -- the handler is unlimited.
 
     No-op when ``ctx.config.rate_limit`` is ``None`` -- generated

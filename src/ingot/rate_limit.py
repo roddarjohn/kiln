@@ -22,7 +22,7 @@ The pieces:
   database the rest of the app talks to.
 
 * :func:`build_limiter` -- factory that constructs a slowapi
-  :class:`~slowapi.Limiter` and wires our :class:`PostgresStorage`
+  ``slowapi.Limiter`` and wires our :class:`PostgresStorage`
   in as its backing store, swapping out the placeholder
   ``memory://`` storage slowapi creates internally.
 
@@ -326,7 +326,7 @@ def build_limiter(
     headers_enabled: bool = True,
     engine: Engine | None = None,
 ) -> Limiter:
-    """Build a slowapi :class:`~slowapi.Limiter` backed by Postgres.
+    """Build a slowapi ``slowapi.Limiter`` backed by Postgres.
 
     The returned limiter has its ``_storage`` and ``_limiter``
     fields swapped out for our :class:`PostgresStorage` -- slowapi
@@ -354,7 +354,7 @@ def build_limiter(
             ``None`` and let the helper build one from *sync_url*.
 
     Returns:
-        A configured slowapi :class:`~slowapi.Limiter`.
+        A configured slowapi ``slowapi.Limiter``.
 
     """
     if engine is None:

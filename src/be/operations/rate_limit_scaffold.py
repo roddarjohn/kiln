@@ -8,7 +8,7 @@ the ``RateLimitExceeded`` handler, and the ``SlowAPIMiddleware``.
 
 Per-handler ``@limiter.limit(...)`` decoration lives in
 :mod:`be.operations.rate_limit` -- this op only emits the shared
-limiter module.  Mirrors :class:`be.operations.telemetry.TelemetryScaffold`.
+limiter module.  Mirrors ``be.operations.telemetry.TelemetryScaffold``.
 """
 
 from typing import TYPE_CHECKING
