@@ -324,6 +324,43 @@ class TelemetryConfig(BaseModel):
         return self
 
 
+class RateLimitConfig(BaseModel):
+    """Project-level rate-limiting config.
+
+    Storage is Postgres-backed via a consumer-defined SQLAlchemy
+    model that mixes in :class:`ingot.rate_limit.RateLimitBucketMixin`
+    -- the same idiom as :class:`ingot.files.FileMixin` (the consumer
+    owns the table, we own the columns).
+
+    Library is `slowapi <https://github.com/laurentS/slowapi>`__ with
+    a custom :class:`ingot.rate_limit.PostgresStorage` adapter for the
+    underlying ``limits`` library so users don't need Redis.
+    """
+
+    bucket_model: str
+    """Dotted import path to the consumer's bucket model, e.g.
+    ``"myapp.models.RateLimitBucket"``.  Must mix in
+    :class:`ingot.rate_limit.RateLimitBucketMixin`."""
+
+    default_limit: str | None = None
+    """Optional project-wide fallback applied to any op that doesn't
+    have its own ``rate_limit``.  Format follows the ``limits``
+    library: ``"100/minute"``, ``"5/second;1000/hour"``, etc.  When
+    ``None``, only ops with an explicit ``rate_limit`` are limited."""
+
+    key_func: str | None = None
+    """Dotted path to a sync function ``(request: Request) -> str``
+    used as the rate-limit key.  When ``None``, defaults to
+    :func:`ingot.rate_limit.default_key_func` (client IP)."""
+
+    db_key: str | None = None
+    """Which configured database stores the counters.  ``None``
+    selects the database marked ``default=True``."""
+
+    headers_enabled: bool = True
+    """Emit ``X-RateLimit-*`` response headers (slowapi default on)."""
+
+
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -509,6 +546,13 @@ class OperationConfig(BaseModel):
     from the project's :attr:`TelemetryConfig.span_per_handler` /
     :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
     skip span emission for noisy / hot-path operations."""
+    rate_limit: str | Literal[False] | None = None
+    """Per-operation rate-limit override.  ``None`` inherits from
+    the resource (which inherits from
+    :attr:`RateLimitConfig.default_limit`).  ``False`` disables
+    rate limiting on this op specifically.  A string (e.g.
+    ``"5/minute"``) sets a per-op limit using the ``limits``
+    library's syntax."""
     can: str | None = None
     """Dotted path to an async ``(resource, session) -> bool`` guard.
 
@@ -584,6 +628,13 @@ class ResourceConfig(BaseModel):
     :attr:`TelemetryConfig.span_per_action` toggles.  Set ``False``
     to skip per-handler spans for every op on this resource (the
     HTTP server span from ``FastAPIInstrumentor`` is unaffected)."""
+
+    rate_limit: str | Literal[False] | None = None
+    """Per-resource rate-limit override.  ``None`` inherits from
+    :attr:`RateLimitConfig.default_limit`.  ``False`` disables
+    rate limiting for every op on this resource.  A string (e.g.
+    ``"100/minute"``) applies that limit to every op that doesn't
+    set its own ``rate_limit``."""
 
     operations: Annotated[list[OperationConfig], Scoped(name="operation")] = (
         Field(default_factory=list)
@@ -690,10 +741,73 @@ class ProjectConfig(FoundryConfig):
     """OpenTelemetry configuration.  ``None`` (the default) means
     the generated app emits zero telemetry references; set to a
     :class:`TelemetryConfig` to opt in."""
+    rate_limit: RateLimitConfig | None = None
+    """Rate-limiting configuration.  ``None`` (the default) means the
+    generated app emits zero rate-limit references; set to a
+    :class:`RateLimitConfig` to opt in.  Per-resource and per-op
+    ``rate_limit`` overrides are only allowed when this is set."""
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,
     )
+
+    @model_validator(mode="after")
+    def _rate_limit_overrides_require_project_config(
+        self,
+    ) -> ProjectConfig:
+        """Reject per-resource/op ``rate_limit`` without project config.
+
+        A non-``None`` ``rate_limit`` on a resource or operation
+        references the limiter scaffolded by
+        :class:`~be.operations.rate_limit_scaffold.RateLimitScaffold`,
+        which only emits when ``project.rate_limit`` is set.  Failing
+        at config-load time keeps the broken path from ever reaching
+        template rendering.
+        """
+        if self.rate_limit is not None:
+            return self
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                if resource.rate_limit is not None:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"rate_limit={resource.rate_limit!r} but the "
+                        f"project has no rate_limit configured.  "
+                        f"Configure project.rate_limit or drop the "
+                        f"override."
+                    )
+                    raise ValueError(msg)
+
+                for op in resource.operations:
+                    if op.rate_limit is not None:
+                        msg = (
+                            f"Resource {resource.model!r} operation "
+                            f"{op.name!r} sets "
+                            f"rate_limit={op.rate_limit!r} but the "
+                            f"project has no rate_limit configured.  "
+                            f"Configure project.rate_limit or drop the "
+                            f"override."
+                        )
+                        raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def _rate_limit_db_key_resolves(self) -> ProjectConfig:
+        """``rate_limit.db_key`` must match a configured database.
+
+        ``None`` defers to :meth:`resolve_database`, which picks the
+        ``default=True`` entry; a string must name an existing
+        :attr:`~DatabaseConfig.key`.
+        """
+        if self.rate_limit is None:
+            return self
+
+        # ``resolve_database`` raises with a clear message when the
+        # key is missing or no default is set.
+        self.resolve_database(self.rate_limit.db_key)
+        return self
 
     @model_validator(mode="after")
     def _action_framework_requires_auth(self) -> ProjectConfig:
