@@ -34,7 +34,7 @@ export function {{ component }}() {
   // The action page reads its target from the URL ``$id`` param;
   // the inner mutation body is built from local state for any
   // form fields the action declares.
-  const { id } = useParams({ from: {{ action_path | tojson }} });
+  const { id } = useParams({ from: {{ action_route_id | tojson }} });
   const router = useRouter();
   const qc = useQueryClient();
 {% for field in fields %}

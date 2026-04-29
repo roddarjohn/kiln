@@ -134,6 +134,12 @@ class ResourceList:
             if resource.delete_fn is not None and has_delete_row:
                 sdk_imports.append(resource.delete_fn)
 
+            # When auth is configured the resource routes mount
+            # under a pathless ``_app`` layout route, so their IDs
+            # (and the ``from`` strings the React hooks need) gain
+            # the ``/_app`` prefix.
+            id_prefix = "/_app" if config.auth is not None else ""
+
             yield StaticFile(
                 path=f"src/{key}/{pascal}List.tsx",
                 template="src/resource/List.tsx.j2",
@@ -156,6 +162,7 @@ class ResourceList:
                     "has_sortable": any(c["sortable"] for c in columns),
                     "row_click_detail": row_click_detail,
                     "list_path": f"/{key}",
+                    "list_route_id": f"{id_prefix}/{key}",
                     "create_path": (
                         f"/{key}/new" if has_create_toolbar else None
                     ),

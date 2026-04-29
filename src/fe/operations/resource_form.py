@@ -57,6 +57,8 @@ class ResourceForm:
         """Yield form .tsx files for every configured form."""
         config = ctx.instance
 
+        id_prefix = "/_app" if config.auth is not None else ""
+
         for key, resource in config.resources.items():
             pascal = _pascal(key)
 
@@ -70,6 +72,7 @@ class ResourceForm:
                     get_fn=None,
                     request_type=resource.create_request_type,
                     form=resource.create,
+                    id_prefix=id_prefix,
                 )
 
             # Update needs ``get_fn`` to pre-populate the form;
@@ -89,6 +92,7 @@ class ResourceForm:
                     get_fn=resource.get_fn,
                     request_type=resource.update_request_type,
                     form=resource.update,
+                    id_prefix=id_prefix,
                 )
 
     def _form(  # noqa: PLR0913
@@ -102,6 +106,7 @@ class ResourceForm:
         get_fn: str | None,
         request_type: str | None,
         form: FormConfig,
+        id_prefix: str,
     ) -> StaticFile:
         """Build a single Create / Update form file."""
         # Routes for the form pages live alongside list / detail
@@ -129,5 +134,8 @@ class ResourceForm:
                 "list_path": list_path,
                 "detail_path": detail_path,
                 "form_path": form_path,
+                # Full TSR route id (with the auth-layout prefix
+                # when auth is on) -- used by useParams.
+                "form_route_id": f"{id_prefix}{form_path}",
             },
         )

@@ -3,6 +3,7 @@
 // Edits will be overwritten -- change config/fe.jsonnet instead.
 // ============================================================
 
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Button,
   Card,
@@ -24,6 +25,11 @@ import type {
 
 export function Login() {
   const auth = useAuth<{{ auth.session_type }}, {{ auth.credentials_type }}>();
+  const navigate = useNavigate();
+  // ``redirect`` is set by the root ``beforeLoad`` when an
+  // unauthenticated request bounces here, so a successful login
+  // can drop the user back where they were headed.
+  const search = useSearch({ from: "/login" });
 
   // ``useFormMutation`` reads field values from the native FormData
   // at submit time -- no per-field useState boilerplate.  Each
@@ -33,6 +39,13 @@ export function Login() {
     mutationFn: async (input) => {
       await auth.login(input as unknown as {{ auth.credentials_type }});
       return null;
+    },
+    onSuccess: () => {
+      const to =
+        typeof search.redirect === "string" && search.redirect.length > 0
+          ? search.redirect
+          : "/";
+      void navigate({ to, search: {} });
     },
   });
 

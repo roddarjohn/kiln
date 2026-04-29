@@ -112,6 +112,8 @@ class ResourceDetail:
                 and resource.get_fn is not None
             )
 
+            id_prefix = "/_app" if config.auth is not None else ""
+
             yield StaticFile(
                 path=f"src/{key}/{pascal}Detail.tsx",
                 template="src/resource/Detail.tsx.j2",
@@ -126,6 +128,7 @@ class ResourceDetail:
                     "actions": actions,
                     "list_path": f"/{key}",
                     "detail_path": f"/{key}/$id",
+                    "detail_route_id": f"{id_prefix}/{key}/$id",
                     "update_path": (f"/{key}/$id/edit" if has_update else None),
                     "has_update": has_update,
                     "title_field": resource.detail.title_field,

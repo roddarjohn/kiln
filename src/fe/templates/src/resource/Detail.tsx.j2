@@ -36,7 +36,7 @@ export function {{ pascal }}Detail() {
   // ``id`` comes from the route param ``/<key>/$id`` so the
   // detail page is deep-linkable.  All sibling pages (edit /
   // actions) live at sub-routes under the same ``$id`` prefix.
-  const { id } = useParams({ from: {{ detail_path | tojson }} });
+  const { id } = useParams({ from: {{ detail_route_id | tojson }} });
   const router = useRouter();
 {% if has_update or actions %}
   const navigate = useNavigate();

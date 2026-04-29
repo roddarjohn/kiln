@@ -35,7 +35,7 @@ import type { {{ request_type }} } from "../_generated/types.gen";
 
 export function {{ verb }}{{ pascal }}Form() {
 {% if verb == "Update" %}
-  const { id } = useParams({ from: {{ form_path | tojson }} });
+  const { id } = useParams({ from: {{ form_route_id | tojson }} });
 {% endif %}
   const router = useRouter();
   const qc = useQueryClient();

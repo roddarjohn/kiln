@@ -76,6 +76,8 @@ class ResourceAction:
                     resource.detail is not None and resource.get_fn is not None
                 )
 
+                id_prefix = "/_app" if config.auth is not None else ""
+
                 yield StaticFile(
                     path=f"src/{key}/actions/{component}.tsx",
                     template="src/resource/Action.tsx.j2",
@@ -90,6 +92,9 @@ class ResourceAction:
                         "fields": fields,
                         "confirm_text": action.confirm_text,
                         "action_path": f"/{key}/$id/{action_name}",
+                        "action_route_id": (
+                            f"{id_prefix}/{key}/$id/{action_name}"
+                        ),
                         "list_path": f"/{key}",
                         "detail_path": f"/{key}/$id",
                         "has_detail": has_detail,

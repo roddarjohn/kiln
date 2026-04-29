@@ -160,7 +160,7 @@ export function {{ pascal }}List() {
   // rather than rendering them inline.
   const navigate = useNavigate();
 {% if filters or has_sortable or page_size %}
-  const search = useSearch({ from: {{ list_path | tojson }} });
+  const search = useSearch({ from: {{ list_route_id | tojson }} });
 {% endif %}
 {% if has_delete_row %}
   const qc = useQueryClient();

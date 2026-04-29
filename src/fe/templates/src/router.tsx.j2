@@ -72,11 +72,21 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 });
 
 // Public route -- sits OUTSIDE the auth layout so the redirect
-// below never traps the user on /login itself.
+// below never traps the user on /login itself.  The optional
+// ``redirect`` search param carries the URL the user was trying
+// to reach so a successful login can return them there.
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   component: Login,
+  validateSearch: (search: Record<string, unknown>): {
+    redirect?: string;
+  } => ({
+    redirect:
+      typeof search.redirect === "string" && search.redirect.length > 0
+        ? search.redirect
+        : undefined,
+  }),
 });
 
 // Pathless layout: every authenticated route renders inside
