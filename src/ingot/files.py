@@ -107,11 +107,14 @@ class FileMixin:
     """
 
     if TYPE_CHECKING:
-        # Type-only -- the actual column comes from either
-        # ``bind_file_model`` (plain SA) or the consumer's PK plugin
-        # (pgcraft).  Declaring it as a mapped column here would
-        # collide with the latter at table-build time.
-        id: uuid.UUID
+        # Type-only -- the actual column comes from the consumer's
+        # pgcraft PK plugin.  Declaring it as a mapped column here
+        # at runtime would collide with the plugin's column at
+        # table-build time, so the column lives only in the type-
+        # checker's view.  ``Mapped[uuid.UUID]`` (rather than bare
+        # ``uuid.UUID``) keeps ``cls.id == file.id`` typed as a SQL
+        # expression in the action helpers, not a bool.
+        id: Mapped[uuid.UUID]
 
     s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
     """Object key in the storage bucket.  Unique so a row maps to
