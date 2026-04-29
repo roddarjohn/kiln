@@ -611,7 +611,8 @@ def _wire_action_dump(
         )
         raise ValueError(msg)
 
-    session_module, session_name = info.session_schema.rsplit(".", 1)
+    session_module, session_name_obj = Name.from_dotted(info.session_schema)
+    session_name = session_name_obj.raw
     actions_module = prefix_import(info.package_prefix, info.app, "actions")
     object_const = object_specs_const(info.model)
     collection_const = collection_specs_const(info.model)
