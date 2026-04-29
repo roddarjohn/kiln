@@ -1,26 +1,33 @@
-"""App-scope op that emits the per-app link registry module.
+"""Link-related codegen for resources with a ``link:`` config.
 
-Walks each :class:`~be.config.schema.ResourceConfig` in an app
-that declares a :class:`~be.config.schema.LinkConfig` and emits
-``{app_module}/links.py`` containing two dicts keyed by slug:
+Two operations live here:
 
-* ``LINKS`` — async ``(instance, session) -> {Model}Link`` builders
-  (one per resource).  Generated lambdas for shorthand entries
-  pull ``id`` / ``name`` straight off the model; user-supplied
-  ``link.builder`` dotted paths get imported as-is.
-* ``REF_RESOLVERS`` — async ``(ids, db, session) -> (items,
-  dropped)`` resolvers that fetch rows by id and run them through
-  the matching link builder.  Powers saved-view hydration.
+* :class:`LinkSchema` (resource scope) — emits ``{Model}Link``
+  into the resource's schemas file so cross-resource references
+  (search results, ``ref`` / ``self`` filter values, saved-view
+  items) get a typed Pydantic class with a ``Literal`` ``type``
+  discriminator.  Without this each link would collapse to the
+  same ``{type, id, name}`` dict in OpenAPI and the FE couldn't
+  narrow on the resource type.
 
-Each resource's link schema is generated separately by
-:class:`~be.operations.link_schema.LinkSchema` so the typed
-``{Model}Link`` Pydantic class lives in the resource's schemas
-file and the OpenAPI surface gets a proper discriminated type.
+* :class:`Links` (app scope, after-children) — emits
+  ``{app_module}/links.py`` with two registries keyed by slug:
+
+  * ``LINKS`` — async ``(instance, session) -> {Model}Link``
+    builders.  Generated lambdas for shorthand entries pull
+    ``id`` / ``name`` straight off the model; user-supplied
+    ``link.builder`` dotted paths get imported as-is.
+  * ``REF_RESOLVERS`` — async ``(ids, db, session) -> (items,
+    dropped)`` resolvers that fetch rows by id and run them
+    through the matching link builder.  Powers saved-view
+    hydration via :func:`ingot.saved_views.hydrate_view`.
 """
 
 from typing import TYPE_CHECKING, cast
 
-from be.operations._naming import app_module_for
+from be.config.schema import PYTHON_TYPES
+from be.operations._naming import app_module_for, sorted_imports
+from be.operations.types import SchemaClass
 from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -34,14 +41,57 @@ if TYPE_CHECKING:
     from foundry.engine import BuildContext
 
 
+@operation("link_schema", scope="resource")
+class LinkSchema:
+    """Emit ``{Model}Link`` for resources with a link config."""
+
+    def when(self, ctx: BuildContext[ResourceConfig, ProjectConfig]) -> bool:
+        """Run only when the resource declares a link config."""
+        return ctx.instance.link is not None
+
+    def build(
+        self,
+        ctx: BuildContext[ResourceConfig, ProjectConfig],
+        _options: BaseModel,
+    ) -> Iterable[object]:
+        """Yield one :class:`SchemaClass` for the resource's link.
+
+        The shape varies with :attr:`LinkConfig.kind`: ``name``
+        carries a single ``name`` field, ``id`` carries an ``id``
+        typed against ``pk_type``, and ``id_name`` carries both.
+        ``type`` is a ``Literal[<slug>]`` so the FE-side OpenAPI
+        client gets a discriminator narrowing.
+        """
+        resource = ctx.instance
+        link = resource.link
+
+        if link is None:  # pragma: no cover -- when() filters this
+            msg = "link_schema op fired without link config"
+            raise AssertionError(msg)
+
+        _, model = Name.from_dotted(resource.model)
+
+        yield SchemaClass(
+            name=f"{model.pascal}Link",
+            body_template="fastapi/schema_parts/link.py.j2",
+            body_context={
+                "schema_name": f"{model.pascal}Link",
+                "slug": model.lower,
+                "kind": link.kind,
+                "id_py_type": PYTHON_TYPES[resource.pk_type],
+            },
+            extra_imports=[("typing", "Literal")],
+        )
+
+
 @operation("links", scope="app", after_children=True)
 class Links:
-    """Generate ``{app_module}/links.py`` with per-resource builders.
+    """Generate ``{app_module}/links.py`` with the per-app registries.
 
     Runs in the post-children phase of the app scope so every
     resource's :class:`~be.config.schema.LinkConfig` is fully
-    visited before the registry is rendered.  Resources without a
-    link config are silently skipped.
+    visited before the registries are rendered.  Resources without
+    a link config are silently skipped.
     """
 
     def build(
@@ -96,9 +146,9 @@ class Links:
             template="fastapi/links.py.j2",
             context={
                 "module": module,
-                "model_imports": _sorted_imports(model_imports),
-                "link_schema_imports": _sorted_imports(link_schema_imports),
-                "builder_imports": _sorted_imports(builder_imports),
+                "model_imports": sorted_imports(model_imports),
+                "link_schema_imports": sorted_imports(link_schema_imports),
+                "builder_imports": sorted_imports(builder_imports),
                 "entries": entries,
             },
         )
@@ -175,10 +225,3 @@ def _build_entry(
         "pk_attr": pk_attr,
         "resolver_fn_name": resolver_fn_name,
     }
-
-
-def _sorted_imports(
-    bag: dict[str, set[str]],
-) -> list[tuple[str, list[str]]]:
-    """Sort the import bag deterministically: modules then names."""
-    return [(mod, sorted(names)) for mod, names in sorted(bag.items())]
