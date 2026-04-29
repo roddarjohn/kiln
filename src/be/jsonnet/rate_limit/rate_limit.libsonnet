@@ -8,10 +8,11 @@
 //     }),
 //   }
 //
-// Defaults mirror be.config.schema.RateLimitConfig: no project-wide
-// default limit (only ops with an explicit ``rate_limit`` are
-// limited), client-IP key function, default database, X-RateLimit
-// headers on.
+// Defaults mirror be.config.schema.RateLimitConfig: project-wide
+// 60/minute default limit (one hit per second on average),
+// client-IP key function, default database, X-RateLimit headers
+// on.  Pass ``default_limit: null`` to disable the project-wide
+// default and require per-op opt-in.
 //
 // The bucket model must mix in
 // ``ingot.rate_limit.RateLimitBucketMixin`` and live at the dotted

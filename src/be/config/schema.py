@@ -342,11 +342,15 @@ class RateLimitConfig(BaseModel):
     ``"myapp.models.RateLimitBucket"``.  Must mix in
     :class:`ingot.rate_limit.RateLimitBucketMixin`."""
 
-    default_limit: str | None = None
-    """Optional project-wide fallback applied to any op that doesn't
-    have its own ``rate_limit``.  Format follows the ``limits``
-    library: ``"100/minute"``, ``"5/second;1000/hour"``, etc.  When
-    ``None``, only ops with an explicit ``rate_limit`` are limited."""
+    default_limit: str | None = "60/minute"
+    """Project-wide fallback applied to any op that doesn't have its
+    own ``rate_limit``.  Format follows the ``limits`` library:
+    ``"100/minute"``, ``"5/second;1000/hour"``, etc.
+
+    Defaults to ``"60/minute"`` -- conservative enough to block
+    rapid abuse (one hit per second on average) without breaking
+    legitimate clients.  Set explicitly to ``None`` to disable the
+    project-wide default and require per-op opt-in."""
 
     key_func: str | None = None
     """Dotted path to a sync function ``(request: Request) -> str``
