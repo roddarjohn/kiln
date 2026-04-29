@@ -53,7 +53,7 @@ class Auth:
         op_auth = resolve_op_overrides(
             ctx.instance.operations,
             attr="require_auth",
-            inherited=ctx.instance.require_auth,
+            fallbacks=(ctx.instance.require_auth,),
         )
 
         # The action framework needs a session to evaluate guards.
@@ -82,6 +82,9 @@ class Auth:
             # ("action"); the concrete instance name is in
             # action_name.  For CRUD the two match.
             instance_name = test.action_name or test.op_name
-            test.requires_auth = op_auth.get(instance_name, False)
+            # Cascade can resolve to ``None`` when every level is
+            # ``None`` -- treat that as the same as ``False``
+            # (anonymous access) for the test fixture.
+            test.requires_auth = bool(op_auth.get(instance_name))
 
         return ()

@@ -65,22 +65,16 @@ class RateLimit:
         assert rate_limit_cfg is not None  # noqa: S101 -- guaranteed by when()
         resource = ctx.instance
 
-        # Resource-level ``False`` short-circuits every op on this
-        # resource regardless of project default or per-op settings.
-        if resource.rate_limit is False:
-            return ()
-
-        # Resolve resource → project default fallback once; pass it
-        # in as the ``inherited`` value for the per-op resolver.
-        resource_limit: str | None = (
-            resource.rate_limit
-            if isinstance(resource.rate_limit, str)
-            else rate_limit_cfg.default_limit
-        )
+        # Cascade: op.rate_limit → resource.rate_limit →
+        # project.rate_limit.default_limit.  ``False`` at any level
+        # short-circuits to ``None`` (no decorator emitted).
         op_limits = resolve_op_overrides(
             resource.operations,
             attr="rate_limit",
-            inherited=resource_limit,
+            fallbacks=(
+                resource.rate_limit,
+                rate_limit_cfg.default_limit,
+            ),
             disable=False,
         )
 

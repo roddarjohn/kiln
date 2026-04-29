@@ -545,11 +545,13 @@ class OperationConfig(BaseModel):
     """Per-operation auth override.  When ``None``, inherits the
     resource-level ``require_auth`` default."""
     trace: bool | None = None
-    """Per-operation telemetry override.  When ``None``, inherits
-    the resource-level ``trace`` default (which itself inherits
-    from the project's :attr:`TelemetryConfig.span_per_handler` /
-    :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
-    skip span emission for noisy / hot-path operations."""
+    """Per-operation telemetry override.  Cascades through
+    op → resource → project (via
+    :attr:`TelemetryConfig.span_per_handler` /
+    :attr:`TelemetryConfig.span_per_action`).  ``None`` defers to
+    the next level; ``True`` forces span emission for this op
+    even when the project toggle is off; ``False`` short-circuits
+    to "no span" regardless of inherited values."""
     rate_limit: str | Literal[False] | None = None
     """Per-operation rate-limit override.  ``None`` inherits from
     the resource (which inherits from

@@ -447,7 +447,10 @@ class TestRateLimitDecoration:
         handlers = _run(rate_limit=_PROJECT_RL, resource=resource)
         assert handlers[0].decorators == ['@limiter.limit("20/minute")']
 
-    def test_resource_false_short_circuits_all_ops(self):
+    def test_resource_false_short_circuits_inheriting_ops(self):
+        # Resource-level ``False`` kills ops that inherit (None);
+        # ops that explicitly override with a value win the
+        # cascade and are still decorated.
         resource = ResourceConfig(
             model="myapp.models.Post",
             rate_limit=False,
@@ -462,8 +465,12 @@ class TestRateLimitDecoration:
             handlers=[_crud_handler("get"), _crud_handler("list")],
         )
 
-        for handler in handlers:
-            assert handler.decorators == []
+        # ``get`` inherits → resource-level False kills it.
+        get = next(h for h in handlers if h.op_name == "get")
+        assert get.decorators == []
+        # ``list`` overrides explicitly → cascade picks it up.
+        lst = next(h for h in handlers if h.op_name == "list")
+        assert lst.decorators == ['@limiter.limit("5/minute")']
 
     def test_op_string_overrides_resource_and_project(self):
         resource = ResourceConfig(

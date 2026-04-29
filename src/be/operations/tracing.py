@@ -17,6 +17,7 @@ the body-template path.
 
 from typing import TYPE_CHECKING
 
+from be.operations._overrides import cascade
 from be.operations.types import RouteHandler
 from foundry.naming import Name
 from foundry.operation import operation
@@ -34,13 +35,17 @@ if TYPE_CHECKING:
 class Tracing:
     """Augment CRUD/action handlers with the tracing decorator.
 
-    Composes the project / resource / op gates:
+    Cascades the per-op trace decision through three levels via
+    :func:`~be.operations._overrides.cascade`:
 
+    * Operation: :attr:`OperationConfig.trace` (``False`` kills,
+      ``True`` forces on, ``None`` inherits).
+    * Resource: :attr:`ResourceConfig.trace` (same shape).
     * Project: ``telemetry.span_per_handler`` for CRUD,
       ``telemetry.span_per_action`` for actions.
-    * Resource: :attr:`ResourceConfig.trace` (``None`` inherits,
-      ``False`` disables for every op on this resource).
-    * Operation: :attr:`OperationConfig.trace` (same inheritance).
+
+    The first non-``None`` level wins; ``False`` at any level
+    short-circuits to "no span emitted".
 
     No-op when ``ctx.config.telemetry`` is ``None`` -- generated
     apps without telemetry produce zero references to OpenTelemetry.
@@ -64,17 +69,19 @@ class Tracing:
         assert telemetry is not None  # noqa: S101 -- guaranteed by when()
         resource = ctx.instance
 
-        if resource.trace is False:
-            return ()
-
+        # Project-level fallback varies by op type, so resolve per
+        # op via the cascade primitive directly rather than the
+        # bulk ``resolve_op_overrides`` helper.
         traced_ops = {
             op.name
             for op in resource.operations
-            if op.trace is not False
-            and (
+            if cascade(
+                op.trace,
+                resource.trace,
                 telemetry.span_per_action
                 if op.type == "action"
-                else telemetry.span_per_handler
+                else telemetry.span_per_handler,
+                disable=False,
             )
         }
         # Lowercase model class -- dashboards read ``article.get``
