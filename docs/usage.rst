@@ -590,12 +590,16 @@ structured fields, the FE assembles display strings:
    link: { kind: "id_name",
            builder: "myapp.labels.order_link" }
 
-Built-in kinds (in :mod:`ingot.links`):
+Each linked resource gets a per-resource ``{Model}Link``
+Pydantic class generated into its schemas file (e.g.
+``CustomerLink``, ``ProductLink``).  ``type`` is a
+``Literal[<slug>]`` so the FE-side OpenAPI client narrows on
+resource type:
 
-* ``name`` -> ``LinkName{name}`` -- label-only.
-* ``id`` -> ``LinkID{id}`` -- id-only.
-* ``id_name`` -> ``LinkIDName{id, name}`` -- the default for
-  most resources.
+* ``name`` -> ``{Model}Link{type, name}`` -- label-only.
+* ``id`` -> ``{Model}Link{type, id}`` -- id-only.
+* ``id_name`` -> ``{Model}Link{type, id, name}`` -- the default
+  for most resources.
 
 A custom builder is an ``async (instance, session) ->
 LinkSchema`` function (matching the ``can`` guard signature so
