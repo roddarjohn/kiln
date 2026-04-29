@@ -256,8 +256,12 @@ class TestRateLimitScaffoldOutputs:
         ctx = self._build(self._cfg(default_limit="200/minute"))[0].context
         assert ctx["default_limit"] == "200/minute"
 
-    def test_default_limit_none_when_unset(self):
+    def test_default_limit_uses_60_per_minute_when_unset(self):
         ctx = self._build(self._cfg())[0].context
+        assert ctx["default_limit"] == "60/minute"
+
+    def test_default_limit_can_be_explicitly_disabled(self):
+        ctx = self._build(self._cfg(default_limit=None))[0].context
         assert ctx["default_limit"] is None
 
     def test_headers_enabled_passthrough(self):
@@ -423,9 +427,13 @@ class TestRateLimitDecoration:
         assert handlers[0].decorators == ['@limiter.limit("100/minute")']
 
     def test_no_default_no_overrides_means_no_decorator(self):
+        # Explicitly opt out of the project-wide default by passing
+        # ``default_limit=None``; with no resource/op overrides
+        # there's nothing left to apply.
         handlers = _run(
             rate_limit=RateLimitConfig(
-                bucket_model="myapp.models.RateLimitBucket"
+                bucket_model="myapp.models.RateLimitBucket",
+                default_limit=None,
             ),
         )
         assert handlers[0].decorators == []
@@ -495,15 +503,17 @@ class TestRateLimitDecoration:
         assert ("fastapi", "Request") in handlers[0].extra_imports
 
     def test_op_with_no_default_skips_decoration(self):
-        # Some handlers may not appear in the resource.operations
-        # list (defensive); they should be skipped gracefully.
+        # When the project explicitly opts out of the default
+        # (``default_limit=None``) and no per-resource/op override
+        # is set, nothing should be decorated.
         resource = ResourceConfig(
             model="myapp.models.Post",
             operations=[OperationConfig(name="get")],
         )
         handlers = _run(
             rate_limit=RateLimitConfig(
-                bucket_model="myapp.models.RateLimitBucket"
+                bucket_model="myapp.models.RateLimitBucket",
+                default_limit=None,
             ),
             resource=resource,
         )
