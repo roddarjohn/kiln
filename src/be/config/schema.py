@@ -825,6 +825,17 @@ class ProjectConfig(FoundryConfig):
                     )
                     raise ValueError(msg)
 
+                if resource.saved_views:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"saved_views=True but the project has no "
+                        f"auth configured.  Saved views are scoped "
+                        f"per user and require a session for "
+                        f"`owner_id`; configure project.auth or "
+                        f"drop the flag."
+                    )
+                    raise ValueError(msg)
+
                 for op in resource.operations:
                     if op.can is not None:
                         msg = (

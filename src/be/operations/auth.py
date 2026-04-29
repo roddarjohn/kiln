@@ -60,14 +60,17 @@ class Auth:
         }
 
         # The action framework needs a session to evaluate guards.
-        # If include_actions_in_dump or permissions_endpoint is
-        # set, force-include the dep on every handler under this
-        # resource regardless of the per-op require_auth setting --
-        # otherwise the generated handler/serializer code would
-        # reference an undeclared ``session`` parameter.
+        # If include_actions_in_dump, permissions_endpoint, or
+        # saved_views is set, force-include the dep on every
+        # handler under this resource regardless of per-op
+        # require_auth -- otherwise the generated handler /
+        # serializer code would reference an undeclared
+        # ``session`` parameter.  saved_views in particular
+        # filters all reads / writes by ``session.user_id``.
         force_session = (
             ctx.instance.include_actions_in_dump
             or ctx.instance.permissions_endpoint
+            or ctx.instance.saved_views
         )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
