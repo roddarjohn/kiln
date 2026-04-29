@@ -20,7 +20,10 @@
     has_more = len(rows) > limit
     page = rows[:limit]
     builder = LINKS["{{ slug }}"]
-    items = [(await builder(obj, session)).model_dump() for obj in page]
+    # session passed as None for v1 — generated shorthand builders
+    # don't read it; consumers that need session-aware link logic
+    # will be threaded through once saved_views lands.
+    items = [(await builder(obj, None)).model_dump() for obj in page]
     next_cursor = str(start + limit) if has_more else None
     return {
         "results": items,
