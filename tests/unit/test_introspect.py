@@ -85,7 +85,7 @@ def test_introspect_missing_attr_raises():
 
 
 def test_introspect_invalid_dotted_path_raises():
-    with pytest.raises(ValueError, match="valid dotted path"):
+    with pytest.raises(ValueError, match="not a valid dotted import path"):
         introspect_action_fn("nomodule", f"{_STUB}.StubModel")
 
 

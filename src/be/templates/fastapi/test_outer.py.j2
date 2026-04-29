@@ -260,7 +260,7 @@ async def test_{{ fn_name }}_unauthorized(
 {% endif %}
 
 {% endfor %}
-{% if has_serializer_test %}
+{% if has_serializer_test|default(false) %}
 # ---------------------------------------------------------------------------
 # Serializer tests
 # ---------------------------------------------------------------------------
