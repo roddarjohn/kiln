@@ -43,10 +43,19 @@ class TestRateLimitConfigDefaults:
 
     def test_sensible_defaults(self):
         cfg = RateLimitConfig(bucket_model="myapp.models.RateLimitBucket")
-        assert cfg.default_limit is None
+        # 60/minute = one hit per second on average -- conservative
+        # enough to block rapid abuse without breaking real clients.
+        assert cfg.default_limit == "60/minute"
         assert cfg.key_func is None
         assert cfg.db_key is None
         assert cfg.headers_enabled is True
+
+    def test_default_limit_can_be_disabled_explicitly(self):
+        cfg = RateLimitConfig(
+            bucket_model="myapp.models.RateLimitBucket",
+            default_limit=None,
+        )
+        assert cfg.default_limit is None
 
 
 class TestProjectConfigRateLimit:
