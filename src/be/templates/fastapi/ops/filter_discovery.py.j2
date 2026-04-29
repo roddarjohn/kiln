@@ -22,6 +22,9 @@
                     "type": {{ _vs["type"] | tojson }},
 {% elif _vs["kind"] == "ref" %}
                     "type": {{ _vs["type"] | tojson }},
+{% if "endpoint" in _vs %}
+                    "endpoint": {{ _vs["endpoint"] | tojson }},
+{% endif %}
 {% endif %}
                 },
             },
