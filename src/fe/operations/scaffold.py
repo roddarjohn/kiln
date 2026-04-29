@@ -4,15 +4,19 @@ The scaffold op reads the whole :class:`~fe.config.ProjectConfig`
 and emits the small set of always-present plumbing files that
 glue everything else together:
 
-* ``src/App.tsx`` -- top-level orchestration.  Wraps the tree in
-  ``<AuthProvider>`` (when auth is configured), gates on auth
-  status, and renders ``<Shell />`` (when shell is configured) or
-  the resource pages directly.
-* ``src/Shell.tsx`` -- AppShell + sidebar nav (only when
-  ``shell`` is configured).  Switches between resource list
-  pages via local state -- explicit and easy to read; routing
-  comes in :mod:`fe.operations.routes` if/when needed.
-* ``src/api/client.ts`` -- configures the openapi-ts client to
+- ``src/App.tsx`` -- top-level orchestration.  Mounts
+  ``<AuthProvider>`` when auth is configured and threads the
+  live ``useAuth()`` value into the TSR ``RouterProvider`` as
+  context so route-level ``beforeLoad`` hooks can gate access.
+  No ``AuthGate`` -- auth redirection lives in
+  :mod:`fe.operations.routes` (``rootRoute.beforeLoad`` bounces
+  unauthenticated requests to ``/login``).
+- ``src/Shell.tsx`` -- AppShell + sidebar nav, mounted as the
+  authenticated layout's component.  Wraps the ``<Outlet>`` in
+  a ``<PageContent>`` plus a ``<Suspense>`` boundary so route
+  ``useSuspenseQuery`` calls render the glaze ``<PageLoader>``
+  fallback.
+- ``src/api/client.ts`` -- configures the openapi-ts client to
   attach the bearer token from the AuthProvider's storage.
   Always emitted (it's a one-line no-op when auth is absent).
 
