@@ -55,9 +55,10 @@ class LinkSchema:
         ctx: BuildContext[ResourceConfig, ProjectConfig],
         _options: BaseModel,
     ) -> Iterable[object]:
-        """Yield one :class:`SchemaClass` for the resource's link.
+        """Yield the resource's ``{Model}Link`` schema class.
 
-        The shape varies with :attr:`LinkConfig.kind`: ``name``
+        The shape varies with
+        :attr:`~be.config.schema.LinkConfig.kind`: ``name``
         carries a single ``name`` field, ``id`` carries an ``id``
         typed against ``pk_type``, and ``id_name`` carries both.
         ``type`` is a ``Literal[<slug>]`` so the FE-side OpenAPI

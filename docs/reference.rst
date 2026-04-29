@@ -487,8 +487,6 @@ Naming and imports
 
 .. autofunction:: foundry.naming.prefix_import
 
-.. autofunction:: foundry.naming.split_dotted_class
-
 .. autoclass:: foundry.imports.ImportCollector
    :members:
 

@@ -78,7 +78,7 @@ class Name:
             A ``(module, Name)`` tuple, e.g.
             ``("myapp.models", Name("Article"))``.  Callers that
             need the raw class-name string can read it from
-            :attr:`Name.raw`.
+            ``Name.raw``.
 
         Raises:
             ValueError: If *dotted_path* contains fewer than two
