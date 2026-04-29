@@ -150,3 +150,30 @@ class RootScaffold:
                 context={},
                 if_exists="skip",
             )
+
+        # Alembic only matters when pgcraft is in play -- without
+        # pgcraft, ``Base.metadata.create_all`` (or none at all)
+        # is enough.  With pgcraft, autogenerate is the only way
+        # to materialize the views, INSTEAD OF triggers, and
+        # functions the runtime queries.
+        if config.pgcraft:
+            yield StaticFile(
+                path="alembic.ini",
+                template="alembic.ini.j2",
+                context=ctx_vars,
+                if_exists="skip",
+            )
+            yield StaticFile(
+                path="migrations/env.py",
+                template="migrations/env.py.j2",
+                context=ctx_vars,
+                if_exists="skip",
+            )
+            yield StaticFile(
+                path="migrations/script.py.mako",
+                template="migrations/script.py.mako",
+                context={},
+                if_exists="skip",
+            )
+            # No empty versions/ dir scaffolded -- alembic creates it
+            # on the first ``alembic revision`` run.

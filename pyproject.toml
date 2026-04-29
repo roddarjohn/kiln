@@ -92,7 +92,14 @@ project_router = "be.operations.routing:ProjectRouter"
 root_scaffold = "be_root.operations:RootScaffold"
 
 [project.entry-points."fe.operations"]
-openapi_ts_config = "fe.operations:OpenApiTsConfig"
+openapi_ts_config = "fe.operations.openapi_ts:OpenApiTsConfig"
+scaffold = "fe.operations.scaffold:Scaffold"
+auth = "fe.operations.auth:Auth"
+resource_list = "fe.operations.resource_list:ResourceList"
+resource_form = "fe.operations.resource_form:ResourceForm"
+resource_action = "fe.operations.resource_action:ResourceAction"
+resource_detail = "fe.operations.resource_detail:ResourceDetail"
+routes = "fe.operations.routes:Routes"
 
 [project.entry-points."fe_root.operations"]
 root_scaffold = "fe_root.operations:RootScaffold"

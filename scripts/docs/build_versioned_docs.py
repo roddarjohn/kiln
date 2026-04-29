@@ -69,8 +69,10 @@ def _build_main() -> None:
     """Build docs from the current working tree as 'main'."""
     print("==> Building main")
     dest = OUTPUT / "main"
+
     if dest.exists():
         shutil.rmtree(dest)
+
     if not _build(ROOT / "docs", dest):
         print("ERROR: main build failed", file=sys.stderr)
         sys.exit(1)
@@ -87,6 +89,7 @@ def _build_tag(tag: str) -> str | None:
 
     print(f"==> Building {label}")
     tmpdir = tempfile.mkdtemp(prefix=f"kiln-docs-{label}-")
+
     try:
         subprocess.run(
             ["git", "worktree", "add", "--detach", tmpdir, tag],
@@ -95,20 +98,25 @@ def _build_tag(tag: str) -> str | None:
             check=True,
         )
         docs_dir = Path(tmpdir) / "docs"
+
         if not docs_dir.exists():
             print(f"    Skipping {label}: no docs/ directory")
             return None
+
         if not _build(docs_dir, dest):
             print(f"    Warning: build failed for {label}, skipping")
             return None
+
     except subprocess.CalledProcessError as exc:
         print(
             f"    Warning: could not checkout {label}: {exc}",
             file=sys.stderr,
         )
         return None
+
     else:
         return label
+
     finally:
         subprocess.run(
             ["git", "worktree", "remove", "--force", tmpdir],
@@ -127,11 +135,14 @@ def main() -> None:
     versions = ["main"]
 
     tags = _get_tags()
+
     if tags:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             futures = {pool.submit(_build_tag, tag): tag for tag in tags}
+
             for future in as_completed(futures):
                 label = future.result()
+
                 if label:
                     versions.append(label)
 

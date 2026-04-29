@@ -20,3 +20,11 @@ coverage.xml
 # Playground generated output
 playground/generated/
 playground/_generated/
+
+.playwright-mcp/
+
+# Top-level screenshots Playwright drops when ``filename: "x.png"``
+# is passed without a path -- throwaway validation artifacts.
+/*.png
+/*.jpg
+/*.jpeg

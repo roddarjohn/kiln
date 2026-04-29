@@ -94,6 +94,8 @@ nitpick_ignore = [
     ("py:class", "modifier"),
     # NamedTuple internals (private API).
     ("py:class", "foundry.operation.OperationEntry"),
+    # pgcraft has no published Sphinx inventory.
+    ("py:class", "pgcraft.plugins.pk.UUIDV4PKPlugin"),
 ]
 
 intersphinx_mapping = {
@@ -155,16 +157,22 @@ def _preresolve_type_guards(  # noqa: PLR0913
     ``process_docstring``, which fires *after* ``process_signature``.
     """
     module = inspect.getmodule(obj)
+
     if module is None or module.__name__ in _GUARD_RESOLVED:
         return
+
     _GUARD_RESOLVED.add(module.__name__)
+
     try:
         src = inspect.getsource(module)
+
     except (TypeError, OSError):
         return
+
     for body in _TYPE_GUARD_RE.findall(src):
         try:
             exec(textwrap.dedent(body), module.__dict__)  # noqa: S102
+
         except Exception:  # noqa: BLE001, S110
             pass
 

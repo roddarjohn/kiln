@@ -44,17 +44,25 @@
         next_cursor=next_cursor,
     )
 {% elif pagination_mode == "offset" %}
-    stmt, count_stmt, _ = apply_offset_pagination(
+    stmt, count_stmt, effective_limit = apply_offset_pagination(
         stmt,
         offset=body.offset,
         limit=body.limit,
         max_page_size={{ max_page_size }},
     )
     total = (await db.execute(count_stmt)).scalar_one()
+    # ceil(total / effective_limit), clamped at 0 when there
+    # are no rows so callers don't render a phantom "Page 1".
+    total_pages = (
+        (total + effective_limit - 1) // effective_limit
+        if total > 0
+        else 0
+    )
     result = await db.execute(stmt)
     return {{ model_name }}Page(
         items=[{{ serializer_fn }}(obj) for obj in result.scalars()],
         total=total,
+        total_pages=total_pages,
     )
 {% else %}
     result = await db.execute(stmt)

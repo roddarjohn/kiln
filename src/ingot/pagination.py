@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 if TYPE_CHECKING:
     from sqlalchemy import Select
@@ -72,5 +72,9 @@ def apply_offset_pagination(
     """
     effective_limit = min(limit, max_page_size)
     paginated_stmt = stmt.offset(offset).limit(effective_limit)
-    count_stmt = stmt.with_only_columns(func.count())
+    # Wrap in a subquery so we keep WHERE/ORDER/JOINs from *stmt*
+    # while replacing columns with count(*).  ``with_only_columns``
+    # alone drops the implicit FROM that ``select(Model)`` derives
+    # from the model column, leaving a FROM-less SELECT count(*).
+    count_stmt = select(func.count()).select_from(stmt.subquery())
     return paginated_stmt, count_stmt, effective_limit

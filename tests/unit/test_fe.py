@@ -74,11 +74,20 @@ def test_fe_target_declares_its_own_entry_point_group():
     assert fe_target.operations_entry_point != be_target.operations_entry_point
 
 
-def test_fe_entry_point_group_holds_only_openapi_ts_config():
+def test_fe_entry_point_group_holds_expected_ops():
     registry = load_registry("fe.operations")
     names = {entry.meta.name for entry in registry.entries}
 
-    assert names == {"openapi_ts_config"}
+    assert names == {
+        "openapi_ts_config",
+        "scaffold",
+        "auth",
+        "resource_list",
+        "resource_form",
+        "resource_action",
+        "resource_detail",
+        "routes",
+    }
 
 
 # -------------------------------------------------------------------
@@ -94,7 +103,12 @@ def _build_files(cfg: ProjectConfig) -> dict[str, str]:
 def test_emits_openapi_ts_config():
     files = _build_files(ProjectConfig())
 
-    assert set(files) == {"openapi-ts.config.ts"}
+    # Scaffold always emits api/client.ts and App.tsx; Shell.tsx
+    # is conditional on the shell config (absent here).
+    assert "openapi-ts.config.ts" in files
+    assert "src/api/client.ts" in files
+    assert "src/App.tsx" in files
+    assert "src/Shell.tsx" not in files
 
 
 # -------------------------------------------------------------------

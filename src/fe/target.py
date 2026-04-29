@@ -21,4 +21,5 @@ target = Target(
     schema=ProjectConfig,
     template_dir=_HERE / "templates",
     operations_entry_point="fe.operations",
+    jsonnet_stdlib_dir=_HERE / "jsonnet",
 )

@@ -3,9 +3,9 @@
 Each submodule groups related primitives:
 
 * :mod:`ingot.auth` -- JWT session auth (bearer + cookie transports).
-* :mod:`ingot.files` -- :class:`~ingot.files.FileMixin` +
-  :func:`~ingot.files.bind_file_model` factory + S3 client + four
-  ready-made action functions.  Requires the ``files`` extra
+* :mod:`ingot.files` -- :class:`~ingot.files.FileMixin` (pgcraft-
+  flavoured storage-column mixin) + S3 client + four ready-made
+  action functions.  Requires the ``files`` extra
   (``pip install 'kiln-generator[files]'``) for ``boto3``.
 * :mod:`ingot.filters` -- declarative filter expressions.
 * :mod:`ingot.ordering` -- sort-direction + apply-ordering helper.
@@ -18,7 +18,7 @@ Each submodule groups related primitives:
   (``get_object_from_query_or_404``, ``assert_rowcount``).
 
 Generated code imports from the owning submodule directly --
-``from ingot.files import bind_file_model``,
+``from ingot.files import FileMixin``,
 ``from ingot.auth import session_auth`` -- so the package root is
 intentionally empty.  This keeps the public surface organized by
 concern rather than as one flat namespace.

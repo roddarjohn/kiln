@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import inspect
+from sqlalchemy import Uuid, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 import ingot.files as files_mod
@@ -15,7 +15,6 @@ from ingot.files import (
     FileMixin,
     S3Storage,
     UploadRequest,
-    bind_file_model,
     complete_upload,
     default_storage,
     delete_file,
@@ -29,12 +28,28 @@ class _Base(DeclarativeBase):
 
 
 class _File(_Base, FileMixin):
+    """Concrete file model for unit tests.
+
+    ``FileMixin`` is pgcraft-flavoured (it doesn't declare ``id`` so a
+    PK plugin can own that column).  The unit tests don't exercise
+    the pgcraft factory pipeline, so we just supply a minimal ``id``
+    column inline -- the same shape a ``UUIDV4PKPlugin`` would
+    contribute -- so SQLAlchemy can map the class.
+    """
+
     __tablename__ = "_test_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
 
 
 class _Attachment(_Base, FileMixin):
     __tablename__ = "_test_attachments"
 
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
     owner_id: Mapped[uuid.UUID] = mapped_column()
 
 
@@ -47,8 +62,9 @@ def _columns(model: type) -> dict[str, object]:
 
 def test_mixin_supplies_expected_columns():
     cols = _columns(_File)
+    # The mixin supplies the storage columns; the consumer (or its
+    # pgcraft PK plugin) owns ``id``, so it isn't in this list.
     expected = {
-        "id",
         "s3_key",
         "content_type",
         "size_bytes",
@@ -59,9 +75,10 @@ def test_mixin_supplies_expected_columns():
     assert expected <= set(cols)
 
 
-def test_mixin_id_is_primary_key():
-    cols = _columns(_File)
-    assert cols["id"].primary_key is True
+def test_mixin_does_not_declare_id():
+    # ``id`` is intentionally absent so a pgcraft PK plugin can own
+    # it without colliding at table-build time.
+    assert "id" not in FileMixin.__dict__
 
 
 def test_mixin_s3_key_is_unique_and_not_null():
@@ -84,69 +101,10 @@ def test_mixin_created_at_is_not_null():
     assert cols["created_at"].nullable is False
 
 
-def test_mixin_id_default_is_uuid4_callable():
-    cols = _columns(_File)
-    # Calling the default produces a UUID -- proves uuid.uuid4 is wired
-    # in directly rather than a stamped-at-import constant.
-    value = cols["id"].default.arg(None)
-    assert isinstance(value, uuid.UUID)
-
-
 def test_mixin_composes_with_extra_columns():
     cols = _columns(_Attachment)
     assert "owner_id" in cols
     assert "s3_key" in cols
-
-
-# --- bind_file_model -------------------------------------------------
-
-
-def test_bind_file_model_creates_mapped_class():
-    class B(DeclarativeBase):
-        pass
-
-    bound = bind_file_model(B)
-
-    assert bound.__name__ == "File"
-    assert bound.__tablename__ == "files"
-    assert issubclass(bound, FileMixin)
-    assert issubclass(bound, B)
-    cols = _columns(bound)
-    assert {"id", "s3_key", "uploaded_at"} <= set(cols)
-
-
-def test_bind_file_model_registers_on_user_metadata():
-    class B(DeclarativeBase):
-        pass
-
-    bound = bind_file_model(B)
-
-    # Alembic discovery works because the table lives on the user's
-    # Base.metadata, not a separate one ingot owns.
-    assert "files" in B.metadata.tables
-    assert B.metadata.tables["files"] is bound.__table__
-
-
-def test_bind_file_model_supports_multiple_bindings():
-    class B(DeclarativeBase):
-        pass
-
-    attachment = bind_file_model(
-        B,
-        name="Attachment",
-        tablename="attachments",
-    )
-    profile_image = bind_file_model(
-        B,
-        name="ProfileImage",
-        tablename="profile_images",
-    )
-
-    assert attachment.__name__ == "Attachment"
-    assert attachment.__tablename__ == "attachments"
-    assert profile_image.__name__ == "ProfileImage"
-    assert profile_image.__tablename__ == "profile_images"
-    assert {"attachments", "profile_images"} <= set(B.metadata.tables)
 
 
 # --- S3Storage -------------------------------------------------------------

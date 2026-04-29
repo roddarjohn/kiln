@@ -1,4 +1,4 @@
-"""Project-scope operation that emits ``openapi-ts.config.ts``.
+"""Project-scope op that emits ``openapi-ts.config.ts``.
 
 A single :class:`OpenApiTsConfig` op runs at the project scope
 and yields one :class:`~foundry.outputs.StaticFile` -- the

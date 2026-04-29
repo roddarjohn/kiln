@@ -746,8 +746,13 @@ def test_extension_schema_page_keyset_vs_offset(registry):
     assert "items: list[PostListItem]" in keyset_out
     assert "next_cursor: str | None = None" in keyset_out
     assert "total: int" not in keyset_out
+    # total_pages is offset-only; keyset has no concept of "total".
+    assert "total_pages" not in keyset_out
 
     assert "total: int" in offset_out
+    # FE-friendly: BE computes the page count once instead of every
+    # consumer reinventing ceil(total / page_size).
+    assert "total_pages: int" in offset_out
     assert "next_cursor" not in offset_out
 
 
@@ -826,6 +831,10 @@ def test_search_body_template_renders_offset():
     )
     assert "apply_offset_pagination(" in rendered
     assert "total=total" in rendered
+    # The handler now also computes total_pages so FE consumers
+    # don't have to.  Empty page (total=0) yields total_pages=0.
+    assert "total_pages=total_pages" in rendered
+    assert "effective_limit" in rendered
     assert "apply_filters" not in rendered
     assert "apply_ordering" not in rendered
 

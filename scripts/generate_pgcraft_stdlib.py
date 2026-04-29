@@ -76,6 +76,7 @@ def _discover_plugins() -> dict[str, type]:
     from pgcraft.plugin import Plugin
 
     found: dict[str, type] = {}
+
     for pkg in (pgcraft.plugins, pgcraft.extensions):
         for _, modname, _ in pkgutil.walk_packages(
             path=pkg.__path__,
@@ -84,8 +85,10 @@ def _discover_plugins() -> dict[str, type]:
         ):
             try:
                 mod = importlib.import_module(modname)
+
             except Exception:  # noqa: BLE001
                 continue
+
             for name, obj in inspect.getmembers(mod, inspect.isclass):
                 if (
                     obj.__module__ == modname
@@ -93,6 +96,7 @@ def _discover_plugins() -> dict[str, type]:
                     and not name.startswith("_")
                 ):
                     found[f"{modname}.{name}"] = obj
+
     return found
 
 
@@ -103,12 +107,16 @@ def _configurable_params(cls: type) -> list[tuple[str, Any]]:
     """
     sig = inspect.signature(cls.__init__)
     result = []
+
     for name, param in sig.parameters.items():
         if name in _SKIP_PARAMS:
             continue
+
         if "Callable" in str(param.annotation):
             continue
+
         result.append((name, param.default))
+
     return result
 
 
@@ -116,19 +124,25 @@ def _to_jsonnet(value: Any) -> str:
     """Convert a Python default value to its Jsonnet literal."""
     if value is None:
         return "null"
+
     if isinstance(value, bool):
         return "true" if value else "false"
+
     if isinstance(value, str):
         return f'"{value}"'
+
     if isinstance(value, int | float):
         return str(value)
+
     if isinstance(value, list):
         if not value:
             return "[]"
+
         parts = ", ".join(
             f'"{x}"' if isinstance(x, str) else str(x) for x in value
         )
         return f"[{parts}]"
+
     return repr(value)
 
 
@@ -154,17 +168,22 @@ def _render_plugin_fn(fq_path: str, cls: type, alias: str) -> str:
         f'    path: "{fq_path}",',
         "    args: {",
     ]
+
     for name, _ in required:
         lines.append(f"      {name}: opts.{name},")
+
     for name, default in with_default:
         jd = _to_jsonnet(default)
         lines.append(f'      {name}: std.get(opts, "{name}", {jd}),')
+
     lines.append("    }")
+
     for name, _ in nullable:
         lines.append(
             f'    + (if "{name}" in opts'
             f" then {{ {name}: opts.{name} }} else {{}})"
         )
+
     lines.append("  },")
     return "\n".join(lines)
 
@@ -193,18 +212,23 @@ def generate() -> str:
 
     for fq_path, alias_info in _PLUGIN_ALIASES.items():
         cls = plugins.get(fq_path)
+
         if cls is None:
             continue
+
         if isinstance(alias_info, tuple):
             _, short = alias_info
             pk_lines.append(_render_pk_plugin(fq_path, short))
+
         else:
             alias = alias_info
             params = _configurable_params(cls)
+
             if params:
                 configurable_lines.append(
                     _render_plugin_fn(fq_path, cls, alias)
                 )
+
             else:
                 noarg_lines.append(_render_noarg_plugin(fq_path, cls, alias))
 
