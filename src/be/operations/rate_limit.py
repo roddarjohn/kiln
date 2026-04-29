@@ -16,8 +16,8 @@ need the request directly.
 
 from typing import TYPE_CHECKING
 
-from be.operations._overrides import resolve_op_overrides
 from be.operations.types import RouteHandler, RouteParam
+from foundry.cascade import cascade
 from foundry.naming import prefix_import
 from foundry.operation import operation
 
@@ -68,15 +68,15 @@ class RateLimit:
         # Cascade: op.rate_limit → resource.rate_limit →
         # project.rate_limit.default_limit.  ``False`` at any level
         # short-circuits to ``None`` (no decorator emitted).
-        op_limits = resolve_op_overrides(
-            resource.operations,
-            attr="rate_limit",
-            fallbacks=(
+        op_limits = {
+            op.name: cascade(
+                op.rate_limit,
                 resource.rate_limit,
                 rate_limit_cfg.default_limit,
-            ),
-            disable=False,
-        )
+                disable=False,
+            )
+            for op in resource.operations
+        }
 
         rate_limit_module = prefix_import(ctx.package_prefix, "rate_limit")
 

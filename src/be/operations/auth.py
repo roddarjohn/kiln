@@ -8,8 +8,8 @@ effective ``require_auth`` and flips
 
 from typing import TYPE_CHECKING
 
-from be.operations._overrides import resolve_op_overrides
 from be.operations.types import RouteHandler, TestCase
+from foundry.cascade import cascade
 from foundry.naming import prefix_import
 from foundry.operation import operation
 
@@ -50,11 +50,11 @@ class Auth:
         session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
-        op_auth = resolve_op_overrides(
-            ctx.instance.operations,
-            attr="require_auth",
-            fallbacks=(ctx.instance.require_auth,),
-        )
+        # Cascade: op.require_auth → resource.require_auth.
+        op_auth = {
+            op.name: cascade(op.require_auth, ctx.instance.require_auth)
+            for op in ctx.instance.operations
+        }
 
         # The action framework needs a session to evaluate guards.
         # If include_actions_in_dump or permissions_endpoint is
