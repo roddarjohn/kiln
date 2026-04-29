@@ -319,6 +319,65 @@ def test_operation_config_can_dotted_path():
     assert "can" not in oc.options
 
 
+def test_operation_config_hooks_default_to_none():
+    oc = OperationConfig(name="get")
+    assert oc.pre is None
+    assert oc.post is None
+
+
+def test_operation_config_hooks_on_create_allowed():
+    oc = OperationConfig(
+        name="create",
+        pre="myapp.hooks.before_create",
+        post="myapp.hooks.after_create",
+    )
+    assert oc.pre == "myapp.hooks.before_create"
+    assert oc.post == "myapp.hooks.after_create"
+    assert "pre" not in oc.options
+    assert "post" not in oc.options
+
+
+def test_operation_config_hooks_on_update_allowed():
+    oc = OperationConfig(
+        name="update",
+        pre="myapp.hooks.before_update",
+        post="myapp.hooks.after_update",
+    )
+    assert oc.pre == "myapp.hooks.before_update"
+    assert oc.post == "myapp.hooks.after_update"
+
+
+@pytest.mark.parametrize("op_name", ["get", "delete", "list"])
+def test_operation_config_hooks_rejected_on_read_only_ops(op_name):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+        OperationConfig(name=op_name, pre="myapp.hooks.h")
+
+    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+        OperationConfig(name=op_name, post="myapp.hooks.h")
+
+
+def test_operation_config_hooks_rejected_on_action_ops():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="not supported on action ops"):
+        OperationConfig(
+            name="publish",
+            type="action",
+            fn="myapp.actions.publish",
+            pre="myapp.hooks.h",
+        )
+
+    with pytest.raises(ValidationError, match="not supported on action ops"):
+        OperationConfig(
+            name="publish",
+            type="action",
+            fn="myapp.actions.publish",
+            post="myapp.hooks.h",
+        )
+
+
 def test_resource_config_action_flags_default_false():
     r = ResourceConfig(model="myapp.models.User")
     assert r.include_actions_in_dump is False
