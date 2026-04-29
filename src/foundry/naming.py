@@ -97,22 +97,34 @@ class Name:
         return module, cls(class_name)
 
     @staticmethod
-    def parent_path(dotted: str) -> str:
-        """Return *dotted*'s parent module path.
+    def parent_path(dotted: str, *, levels: int = 1) -> str:
+        """Return *dotted*'s ancestor module path.
 
-        Drops the trailing dot-separated segment.  When *dotted*
-        has no dot, returns it unchanged so callers can chain the
-        op without guarding for the no-dot case::
+        Drops the last *levels* dot-separated segments.  When the
+        path runs out of segments before *levels* are stripped, it
+        stops and returns whatever remains rather than producing
+        an empty string — so callers can chain the op without
+        guarding for short paths::
 
             >>> Name.parent_path("blog.models.Article")
             'blog.models'
-            >>> Name.parent_path("blog.models")
+            >>> Name.parent_path("blog.models.Article", levels=2)
             'blog'
-            >>> Name.parent_path("single")
+            >>> Name.parent_path("single", levels=2)
             'single'
+
+        ``levels=2`` is the common idiom for "app module from
+        model dotted path" -- ``"blog.models.Article" -> "blog"``.
         """
-        head, _, _ = dotted.rpartition(".")
-        return head or dotted
+        for _ in range(levels):
+            head, sep, _ = dotted.rpartition(".")
+
+            if not sep:
+                return dotted
+
+            dotted = head
+
+        return dotted
 
 
 def prefix_import(prefix: str, *parts: str) -> str:
