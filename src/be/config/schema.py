@@ -586,10 +586,15 @@ class SearchConfig(BaseModel):
 
 
 LinkKind = Literal["name", "id", "id_name"]
-"""Built-in link-schema kinds.  Each maps to a class in
-:mod:`ingot.links`: ``"name"`` → :class:`~ingot.links.LinkName`,
-``"id"`` → :class:`~ingot.links.LinkID`,
-``"id_name"`` → :class:`~ingot.links.LinkIDName`."""
+"""Built-in link-schema kinds.  Each generates a per-resource
+``{Model}Link`` Pydantic class in the resource's schemas file:
+
+* ``"name"`` → ``{Model}Link`` with ``type`` + ``name``.
+* ``"id"`` → ``{Model}Link`` with ``type`` + ``id``.
+* ``"id_name"`` → ``{Model}Link`` with ``type`` + ``id`` + ``name``.
+
+``type`` is always a ``Literal[<slug>]`` so the FE-side OpenAPI
+client narrows on resource type without a manual cast."""
 
 
 class LinkConfig(BaseModel):
