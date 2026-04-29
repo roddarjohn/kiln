@@ -15,15 +15,12 @@ A *file* is a binary blob (image, PDF, attachment) tracked by a
 metadata row in the consumer's database and a corresponding object
 in S3-compatible storage.  This module ships three pieces:
 
-* :class:`FileMixin` + :func:`bind_file_model` -- the mixin
-  supplies the columns every file row needs (``id``, ``s3_key``,
+* :class:`FileMixin` -- a pgcraft-compatible mixin supplying the
+  six storage columns every file row needs (``s3_key``,
   ``content_type``, ``size_bytes``, ``original_filename``,
-  ``created_at``, ``uploaded_at``); the factory builds a concrete
-  mapped class on the consumer's ``DeclarativeBase`` so the table
-  lives in their metadata (alembic discovery, FKs, multi-schema all
-  keep working).  Typical use is one ``File = bind_file_model(Base)``
-  per app; multi-table apps pass ``name=`` and ``tablename=`` for
-  additional bindings.
+  ``created_at``, ``uploaded_at``).  Consumers subclass it on a
+  pgcraft model and add a PK plugin (typically
+  ``UUIDV4PKPlugin``) for the ``id`` column.
 
 * :class:`S3Storage` -- a small wrapper around ``boto3`` that
   exposes the three operations a presigned-upload flow actually
@@ -42,10 +39,6 @@ in S3-compatible storage.  This module ships three pieces:
   actions) match any concrete subclass via the introspector's
   supertype check, so the same four functions serve every file
   resource.
-
-The split is deliberate: the mixin is pure SQLAlchemy and has no
-runtime dependency on AWS, so consumers who only want the metadata
-shape (e.g. for migrations) don't pay for the storage client.
 """
 
 import datetime
@@ -53,7 +46,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from fastapi import HTTPException, status
@@ -62,7 +55,6 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     String,
-    Uuid,
     delete,
     insert,
     update,
@@ -85,41 +77,41 @@ shows up in logs anyone reads.
 
 
 class FileMixin:
-    """SQLAlchemy mixin supplying the columns of a file record.
+    """pgcraft mixin supplying the storage columns of a file record.
 
-    Consumers should not subclass this directly -- call
-    :func:`bind_file_model` instead, which builds the concrete
-    mapped class on the consumer's ``Base`` for them:
+    Subclass on a pgcraft-mapped model alongside a PK plugin (the
+    plugin owns ``id``):
 
     .. code-block:: python
 
-        # myapp/models.py
-        from ingot.files import bind_file_model
-        from myapp.db import Base
+        from ingot.files import FileMixin
+        from pgcraft.factory import PGCraftSimple
+        from pgcraft.plugins.pk import UUIDV4PKPlugin
 
-        File = bind_file_model(Base)
+        class Attachment(Base, FileMixin):
+            __tablename__ = "attachments"
+            __table_args__ = {"schema": "public"}
+            __factory__ = PGCraftSimple
+            __plugins__ = [UUIDV4PKPlugin()]
 
-    The mixin is exposed mainly as a *type marker* -- the action
-    functions in this module annotate their parameters with
-    ``FileMixin`` so the be introspector can match any concrete
-    subclass via the supertype check.
+    The mixin deliberately doesn't declare ``id`` -- pgcraft's idiom
+    is that primary keys are plugin-owned, and declaring it on the
+    mixin would collide with the plugin's column at table-build time.
+    The ``TYPE_CHECKING`` annotation below keeps ``file.id`` typed
+    for the action helpers without committing to a column.
 
     A row with ``uploaded_at is None`` represents a file the
     server has reserved a key for (and handed the client a presigned
     PUT URL) but whose upload hasn't yet been confirmed.  Consumers
     typically clear or expire these rows on a schedule.
-
-    pgcraft consumers should use :class:`PGCraftFileMixin` instead
-    -- it omits ``id`` so the consumer's PK plugin (typically
-    ``UUIDV4PKPlugin``) owns the column without colliding.
     """
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    """Surrogate primary key.  UUIDv4 so it's safe to expose."""
+    if TYPE_CHECKING:
+        # Type-only -- the actual column comes from either
+        # ``bind_file_model`` (plain SA) or the consumer's PK plugin
+        # (pgcraft).  Declaring it as a mapped column here would
+        # collide with the latter at table-build time.
+        id: uuid.UUID
 
     s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
     """Object key in the storage bucket.  Unique so a row maps to
@@ -159,100 +151,6 @@ class FileMixin:
     )
     """When the upload was confirmed.  ``None`` means pending --
     metadata exists but the blob may or may not be in S3."""
-
-
-class PGCraftFileMixin:
-    """Same column set as :class:`FileMixin`, but without ``id``.
-
-    Use this when the concrete model is a pgcraft factory class and
-    a PK plugin (typically :class:`pgcraft.plugins.pk.UUIDV4PKPlugin`)
-    owns the ``id`` column.  Declaring ``id`` directly on a mixin
-    here would collide with the plugin's column at table-build time
-    (``DuplicateColumnError`` on ``id``).
-
-    The :class:`uuid.UUID` annotation is left in place so the action
-    helpers in this module can treat ``model.id`` as typed at static-
-    analysis time; the value is filled in at runtime by the PK
-    plugin's column on the table the model is mapped to.
-    """
-
-    if TYPE_CHECKING:
-        # Type-only -- the PK plugin provides the actual column.
-        id: uuid.UUID
-
-    s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
-    content_type: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-    size_bytes: Mapped[int | None] = mapped_column(
-        BigInteger,
-        nullable=True,
-    )
-    original_filename: Mapped[str | None] = mapped_column(
-        String(512),
-        nullable=True,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.datetime.now(tz=datetime.UTC),
-    )
-    uploaded_at: Mapped[datetime.datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-
-def bind_file_model(
-    base: type,
-    *,
-    name: str = "File",
-    tablename: str = "files",
-) -> type[FileMixin]:
-    """Build a concrete file model on the consumer's ``Base``.
-
-    Returns a freshly-constructed subclass of *base* and
-    :class:`FileMixin` named *name* with ``__tablename__`` set to
-    *tablename*.  The class is registered on ``base.metadata`` so
-    the consumer's alembic env (which already imports their models
-    module to populate ``target_metadata``) picks the table up
-    automatically -- no env.py changes required.
-
-    Typical use is one call per app:
-
-    .. code-block:: python
-
-        # myapp/models.py
-        from ingot.files import bind_file_model
-        from myapp.db import Base
-
-        File = bind_file_model(Base)
-
-    For multi-table apps, pass distinct *name* and *tablename* per
-    binding:
-
-    .. code-block:: python
-
-        ProfileImage = bind_file_model(
-            Base, name="ProfileImage", tablename="profile_images",
-        )
-
-    Args:
-        base: The consumer's :class:`sqlalchemy.orm.DeclarativeBase`
-            subclass.  The returned class is mapped on
-            ``base.metadata``.
-        name: Class name for the generated type.  Affects the dotted
-            path the be config points at
-            (``model: "myapp.models.{name}"``).
-        tablename: Database table name.  Must be unique within
-            ``base.metadata``.
-
-    Returns:
-        The newly-built mapped class.
-
-    """
-    cls = type(name, (base, FileMixin), {"__tablename__": tablename})
-    return cast("type[FileMixin]", cls)
 
 
 @dataclass
