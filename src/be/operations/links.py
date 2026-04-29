@@ -26,7 +26,6 @@ Two operations live here:
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations._naming import app_module_for
 from be.operations.types import SchemaClass
 from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
@@ -168,7 +167,7 @@ def _build_entry(
     link_schema_class = f"{model_name.pascal}Link"
     schema_module = prefix_import(
         package_prefix,
-        app_module_for(resource.model),
+        Name.parent_path(Name.parent_path(resource.model)),
         "schemas",
         slug,
     )

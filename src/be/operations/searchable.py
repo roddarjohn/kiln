@@ -19,7 +19,6 @@ through the parent list endpoint when richer search is needed.
 
 from typing import TYPE_CHECKING
 
-from be.operations._naming import app_module_for
 from be.operations.types import RouteHandler, RouteParam, TestCase
 from foundry.naming import Name, prefix_import
 from foundry.operation import operation
@@ -93,7 +92,7 @@ class Searchable:
 
         links_module = prefix_import(
             ctx.package_prefix,
-            app_module_for(resource.model),
+            Name.parent_path(Name.parent_path(resource.model)),
             "links",
         )
 

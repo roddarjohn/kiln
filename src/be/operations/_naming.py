@@ -25,9 +25,7 @@ def app_module_for(model_path: str) -> str:
     module (serializers, schemas, action registry) routes through
     this helper.
     """
-    model_module, _ = Name.from_dotted(model_path)
-    parts = model_module.rsplit(".", 1)
-    return parts[0] if len(parts) > 1 else model_module
+    return Name.parent_path(Name.parent_path(model_path))
 
 
 def object_specs_const(model: Name) -> str:

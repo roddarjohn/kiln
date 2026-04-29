@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
 from be.operations._naming import (
-    app_module_for,
     collection_specs_const,
     object_specs_const,
 )
@@ -105,7 +104,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
-    app = app_module_for(model_dotted)
+    app = Name.parent_path(Name.parent_path(model_dotted))
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
@@ -647,7 +646,9 @@ def gate_wiring(
 
     _, model = Name.from_dotted(resource.model)
     actions_module = prefix_import(
-        package_prefix, app_module_for(resource.model), "actions"
+        package_prefix,
+        Name.parent_path(Name.parent_path(resource.model)),
+        "actions",
     )
     const = (
         object_specs_const(model)

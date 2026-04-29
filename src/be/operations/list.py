@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from be.config.schema import FieldSpec  # noqa: TC001
 from be.operations._naming import (
-    app_module_for,
     collection_specs_const,
 )
 from be.operations.types import (
@@ -176,7 +175,7 @@ class List:
         if include_actions:
             actions_module = prefix_import(
                 ctx.package_prefix,
-                app_module_for(resource.model),
+                Name.parent_path(Name.parent_path(resource.model)),
                 "actions",
             )
             collection_const = collection_specs_const(model)
