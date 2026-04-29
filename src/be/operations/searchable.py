@@ -41,7 +41,8 @@ class Searchable:
     when unset, :meth:`when` returns ``False`` and nothing is
     emitted.  The cross-resource validator on
     :class:`~be.config.schema.ProjectConfig` guarantees
-    :attr:`ResourceConfig.link` is set whenever this op fires.
+    :attr:`~be.config.schema.ResourceConfig.link` is set
+    whenever this op fires.
     """
 
     def when(self, ctx: BuildContext[ResourceConfig, ProjectConfig]) -> bool:
