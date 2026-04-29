@@ -76,38 +76,25 @@ class Name:
 
         Returns:
             A ``(module, Name)`` tuple, e.g.
-            ``("myapp.models", Name("Article"))``.
+            ``("myapp.models", Name("Article"))``.  Callers that
+            need the raw class-name string can read it from
+            :attr:`Name.raw`.
+
+        Raises:
+            ValueError: If *dotted_path* contains fewer than two
+                parts.
 
         """
-        module, class_name = split_dotted_class(dotted_path)
+        if "." not in dotted_path:
+            msg = (
+                f"'{dotted_path}' is not a valid dotted import path. "
+                f"Expected 'module.ClassName', "
+                f"e.g. 'myapp.models.Article'."
+            )
+            raise ValueError(msg)
+
+        module, _, class_name = dotted_path.rpartition(".")
         return module, cls(class_name)
-
-
-def split_dotted_class(dotted_path: str) -> tuple[str, str]:
-    """Split a dotted import path into ``(module, class_name)``.
-
-    Args:
-        dotted_path: A fully-qualified class path such as
-            ``"myapp.models.Article"``.
-
-    Returns:
-        A ``(module, class_name)`` tuple, e.g.
-        ``("myapp.models", "Article")``.
-
-    Raises:
-        ValueError: If *dotted_path* contains fewer than two parts.
-
-    """
-    if "." not in dotted_path:
-        msg = (
-            f"'{dotted_path}' is not a valid dotted import path. "
-            f"Expected 'module.ClassName', "
-            f"e.g. 'myapp.models.Article'."
-        )
-        raise ValueError(msg)
-
-    module, _, class_name = dotted_path.rpartition(".")
-    return module, class_name
 
 
 def prefix_import(prefix: str, *parts: str) -> str:

@@ -130,7 +130,8 @@ def _filter_payload(
     values: dict[str, object] = {"kind": field.values}
 
     if field.values == "enum":
-        values["enum_class"] = (field.enum or "").rsplit(".", 1)[-1]
+        _, enum_name = Name.from_dotted(field.enum or "")
+        values["enum_class"] = enum_name.raw
         values["endpoint"] = f"{resource_prefix}/_values/{field.name}"
 
     elif field.values == "free_text":
@@ -171,9 +172,9 @@ def _resource_prefix(resource: ResourceConfig) -> str:
     if resource.route_prefix is not None:
         return resource.route_prefix
 
-    _, _, class_name = resource.model.rpartition(".")
+    _, model = Name.from_dotted(resource.model)
 
-    return f"/{class_name.lower()}s"
+    return f"/{model.lower}s"
 
 
 def _resolve_ref_endpoint(project: ProjectConfig, ref_slug: str) -> str | None:
@@ -187,9 +188,9 @@ def _resolve_ref_endpoint(project: ProjectConfig, ref_slug: str) -> str | None:
     """
     for app in project.apps:
         for resource in app.config.resources:
-            _, _, class_name = resource.model.rpartition(".")
+            _, model = Name.from_dotted(resource.model)
 
-            if class_name.lower() == ref_slug:
+            if model.lower == ref_slug:
                 return f"{_resource_prefix(resource)}/_values"
 
     return None
@@ -242,8 +243,8 @@ def _emit_discovery(
 
     for field in structured:
         if field.values == "enum" and field.enum:
-            module, _, cls_name = field.enum.rpartition(".")
-            enum_imports.append((module, cls_name))
+            enum_module, enum_name = Name.from_dotted(field.enum)
+            enum_imports.append((enum_module, enum_name.raw))
 
     yield RouteHandler(
         method="GET",
@@ -323,7 +324,8 @@ def _emit_value_providers(
 
     for field in structured:
         if field.values == "enum":
-            module, _, cls_name = (field.enum or "").rpartition(".")
+            module, cls_name_obj = Name.from_dotted(field.enum or "")
+            cls_name = cls_name_obj.raw
             yield RouteHandler(
                 method="POST",
                 path=f"/_values/{field.name}",

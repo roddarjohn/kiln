@@ -31,7 +31,7 @@ from be.config.schema import (
     FieldType,
     LoaderStrategy,
 )
-from foundry.naming import Name, split_dotted_class
+from foundry.naming import Name
 
 _LOADER_FN: dict[LoaderStrategy, str] = {
     "selectin": "selectinload",
@@ -261,9 +261,9 @@ def _field_dicts(
 
         if f.is_enum:
             enum_dotted = cast("str", f.enum)
-            enum_module, enum_class = split_dotted_class(enum_dotted)
-            enum_imports.append((enum_module, enum_class))
-            out.append(Field(name=f.name, py_type=enum_class))
+            enum_module, enum_name = Name.from_dotted(enum_dotted)
+            enum_imports.append((enum_module, enum_name.raw))
+            out.append(Field(name=f.name, py_type=enum_name.raw))
             continue
 
         out.append(
@@ -403,9 +403,9 @@ def _expand_field_specs(
     for fs in specs:
         if fs.is_enum:
             enum_dotted = cast("str", fs.enum)
-            enum_module, enum_class = split_dotted_class(enum_dotted)
-            enum_imports.append((enum_module, enum_class))
-            fields.append(Field(name=fs.name, py_type=enum_class))
+            enum_module, enum_name = Name.from_dotted(enum_dotted)
+            enum_imports.append((enum_module, enum_name.raw))
+            fields.append(Field(name=fs.name, py_type=enum_name.raw))
             continue
 
         if not fs.is_nested:
@@ -437,8 +437,8 @@ def _expand_field_specs(
 
         nested_schema_name = f"{child_class_prefix}Nested"
         nested_fn_name = f"{child_fn_prefix}_nested"
-        related_module, related_class = split_dotted_class(fs_model)
-        related_pascal = Name(related_class).pascal
+        related_module, related_name = Name.from_dotted(fs_model)
+        related_pascal = related_name.pascal
 
         nested_schema = SchemaClass(
             name=nested_schema_name,
@@ -513,8 +513,8 @@ def _build_load_chains(
 
         head = f"{loader_fn}({parent_pascal}.{fs.name})"
 
-        related_module, related_class = split_dotted_class(fs_model)
-        related_pascal = Name(related_class).pascal
+        related_module, related_name = Name.from_dotted(fs_model)
+        related_pascal = related_name.pascal
 
         has_nested_child = any(child.is_nested for child in fs_fields)
 

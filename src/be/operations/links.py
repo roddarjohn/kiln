@@ -180,15 +180,17 @@ def _build_entry(
     resolver_fn_name = f"_resolve_{slug}_refs"
 
     if link.builder is not None:
-        builder_module, _, builder_name = link.builder.rpartition(".")
+        try:
+            builder_module, builder_name_obj = Name.from_dotted(link.builder)
 
-        if not builder_module or not builder_name:
+        except ValueError as exc:
             msg = (
                 f"link.builder for {resource.model!r} must be a "
                 f"dotted path (got {link.builder!r})"
             )
-            raise ValueError(msg)
+            raise ValueError(msg) from exc
 
+        builder_name = builder_name_obj.raw
         imports.add_from(builder_module, builder_name)
         return {
             "slug": slug,
