@@ -16,6 +16,7 @@ need the request directly.
 
 from typing import TYPE_CHECKING
 
+from be.operations._overrides import resolve_op_overrides
 from be.operations.types import RouteHandler, RouteParam
 from foundry.naming import prefix_import
 from foundry.operation import operation
@@ -69,26 +70,19 @@ class RateLimit:
         if resource.rate_limit is False:
             return ()
 
-        resource_limit: str | None
-
-        if isinstance(resource.rate_limit, str):
-            resource_limit = resource.rate_limit
-
-        else:
-            # ``None`` falls through to the project default.
-            resource_limit = rate_limit_cfg.default_limit
-
-        op_limits: dict[str, str | None] = {}
-
-        for op in resource.operations:
-            if op.rate_limit is False:
-                op_limits[op.name] = None
-
-            elif isinstance(op.rate_limit, str):
-                op_limits[op.name] = op.rate_limit
-
-            else:
-                op_limits[op.name] = resource_limit
+        # Resolve resource → project default fallback once; pass it
+        # in as the ``inherited`` value for the per-op resolver.
+        resource_limit: str | None = (
+            resource.rate_limit
+            if isinstance(resource.rate_limit, str)
+            else rate_limit_cfg.default_limit
+        )
+        op_limits = resolve_op_overrides(
+            resource.operations,
+            attr="rate_limit",
+            inherited=resource_limit,
+            disable=False,
+        )
 
         rate_limit_module = prefix_import(ctx.package_prefix, "rate_limit")
 
@@ -103,13 +97,11 @@ class RateLimit:
             # slowapi reads the limit metadata off the request at
             # runtime, so the parameter has to be on the signature
             # even when the handler body never references it.
-            # Renderer dedupes ``params`` by name and
-            # :class:`~foundry.imports.ImportCollector` dedupes
-            # imports, so we can blindly insert here without
-            # checking whether the handler already declares them.
-            handler.params.insert(
-                0,
+            # ``add_param`` is a no-op when one is already present;
+            # ``ImportCollector`` dedupes the import at emit time.
+            handler.add_param(
                 RouteParam(name="request", annotation="Request"),
+                prepend=True,
             )
             handler.extra_imports.append(("fastapi", "Request"))
 

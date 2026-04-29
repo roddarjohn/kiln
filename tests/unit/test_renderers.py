@@ -610,7 +610,7 @@ def test_handler_fragment_datetime_pk(registry):
         serializer_fn="to_post_resource",
         return_type="PostResource",
     )
-    handler.params.append(RouteParam(name="id", annotation="datetime"))
+    handler.add_param(RouteParam(name="id", annotation="datetime"))
     fragments = registry.render(handler, _rctx(_resource(pk_type="datetime")))
     block = _unioned_imports(fragments).format("python")
     assert "from datetime import datetime" in block
