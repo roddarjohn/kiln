@@ -144,7 +144,7 @@ class Routes:
                         "name": name,
                         "path": f"/{key}/$id/{name}",
                         "component": component,
-                        "module": f"./{key}/actions/{component}",
+                        "module": f"./actions/{component}",
                     },
                 )
 
@@ -163,27 +163,30 @@ class Routes:
                     "pascal": pascal,
                     "list_path": f"/{key}",
                     "list_component": f"{pascal}List",
-                    "list_module": f"./{key}/{pascal}List",
+                    # Modules are imported from the per-resource
+                    # ``routes.tsx`` (sibling of the surface files),
+                    # so paths are relative to ``src/<key>/``.
+                    "list_module": f"./{pascal}List",
                     "detail_path": (f"/{key}/$id" if has_detail else None),
                     "detail_component": (
                         f"{pascal}Detail" if has_detail else None
                     ),
                     "detail_module": (
-                        f"./{key}/{pascal}Detail" if has_detail else None
+                        f"./{pascal}Detail" if has_detail else None
                     ),
                     "create_path": (f"/{key}/new" if has_create else None),
                     "create_component": (
                         f"Create{pascal}Form" if has_create else None
                     ),
                     "create_module": (
-                        f"./{key}/Create{pascal}Form" if has_create else None
+                        f"./Create{pascal}Form" if has_create else None
                     ),
                     "update_path": (f"/{key}/$id/edit" if has_update else None),
                     "update_component": (
                         f"Update{pascal}Form" if has_update else None
                     ),
                     "update_module": (
-                        f"./{key}/Update{pascal}Form" if has_update else None
+                        f"./Update{pascal}Form" if has_update else None
                     ),
                     "action_routes": action_routes,
                     "has_pagination": resource.list.page_size is not None,
@@ -238,7 +241,8 @@ class Routes:
                     "route": route,
                     "needs_string": route["has_sortable"]
                     or any(
-                        f["type"] in {"text", "select"} for f in route["filters"]
+                        f["type"] in {"text", "select"}
+                        for f in route["filters"]
                     ),
                     "needs_number": route["has_pagination"],
                     "needs_bool": any(

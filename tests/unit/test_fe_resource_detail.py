@@ -84,9 +84,11 @@ class TestSections:
     def test_fetches_via_get_fn(self) -> None:
         out = self._out([DetailSection(fields=["name"])])
 
-        assert "getProjectV1TrackerProjectsIdGet" in out
-        assert "useQuery" in out
-        assert 'queryKey: ["projects", "get", id]' in out
+        # Detail rides the openapi-ts ``*Options`` helper through
+        # ``useSuspenseQuery`` so loading is owned by the route's
+        # pendingComponent and queryKey/throwOnError are auto-wired.
+        assert "getProjectV1TrackerProjectsIdGetOptions" in out
+        assert "useSuspenseQuery" in out
 
     def test_fields_render_label_value_pairs(self) -> None:
         out = self._out(
@@ -122,10 +124,12 @@ class TestSections:
     def test_uses_resource_type_via_query_data(self) -> None:
         out = self._out([DetailSection(fields=["name"])])
 
-        # The resource type isn't imported by name -- the React-Query
-        # hook infers it from get_fn -- but the get_fn import is.
-        assert "getProjectV1TrackerProjectsIdGet" in out
-        assert 'from "../_generated/sdk.gen"' in out
+        # The resource type isn't imported by name -- the
+        # ``*Options`` helper carries the inferred shape -- but the
+        # helper itself is imported from the openapi-ts react-query
+        # bundle.
+        assert "getProjectV1TrackerProjectsIdGetOptions" in out
+        assert 'from "../_generated/@tanstack/react-query.gen"' in out
 
 
 # ---------------------------------------------------------------------------

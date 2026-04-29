@@ -129,14 +129,16 @@ class TestAppWithAuth:
         out = _files(self._cfg())
         app = out["src/App.tsx"]
 
-        # Three branches: loading, authenticated -> RouterProvider,
-        # else Login.  The Shell component is the root route so it
-        # only mounts inside the router tree, not directly here.
+        # Auth gating moved into TSR (#47): App threads ``useAuth()``
+        # into ``RouterProvider`` context and shows a PageLoader
+        # while auth resolves.  Login is now a TSR route, not an
+        # App-level branch.
         assert 'auth.status === "loading"' in app
-        assert 'auth.status === "authenticated"' in app
-        assert "<RouterProvider router={router} />" in app
-        assert "<Login />" in app
-        assert "<Shell />" not in app  # Shell only mounts via the router
+        assert "<PageLoader" in app
+        assert "context={{ auth }}" in app or "context={ { auth } }" in app
+        assert "<RouterProvider" in app
+        # Shell still mounts inside the router tree, not here.
+        assert "<Shell />" not in app
 
 
 # ---------------------------------------------------------------------------

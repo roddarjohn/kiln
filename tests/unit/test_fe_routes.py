@@ -89,14 +89,23 @@ class TestResourceRoutes:
                 "projects": _resource(list_fn="listFn"),
             },
         )
-        out = _files(cfg)["src/router.tsx"]
+        files = _files(cfg)
+        router = files["src/router.tsx"]
+        sub = files["src/projects/routes.tsx"]
 
-        # Each resource emits a list route plus optional sibling
-        # routes for create / detail / update / actions.
-        assert "projectsListRoute" in out
-        assert 'path: "/projects"' in out
-        assert "ProjectsList" in out
-        assert 'import { ProjectsList } from "./projects/ProjectsList"' in out
+        # router.tsx is a thin composer: it imports the resource's
+        # ``make*Routes`` factory and mounts the returned subtree.
+        assert "makeProjectsRoutes" in router
+        assert (
+            'import { makeProjectsRoutes } from "./projects/routes"' in router
+        )
+        # The actual routes (and their components) live in the
+        # per-resource sub-app.
+        assert 'path: "/projects"' in sub
+        assert (
+            'import { ProjectsList } from "./projects/ProjectsList"' in sub
+            or 'import { ProjectsList } from "./ProjectsList"' in sub
+        )
 
     def test_resource_without_list_fn_skipped(self) -> None:
         cfg = ProjectConfig(
@@ -104,10 +113,11 @@ class TestResourceRoutes:
                 "projects": _resource(),  # no list_fn
             },
         )
-        out = _files(cfg)["src/router.tsx"]
+        files = _files(cfg)
+        router = files["src/router.tsx"]
 
-        assert "ProjectsList" not in out
-        assert "projectsListRoute" not in out
+        assert "makeProjectsRoutes" not in router
+        assert "src/projects/routes.tsx" not in files
 
     def test_index_route_uses_first_resource_component(self) -> None:
         cfg = ProjectConfig(
@@ -135,7 +145,9 @@ class TestResourceRoutes:
         )
         out = _files(cfg)["src/router.tsx"]
 
-        assert "rootRoute.addChildren([" in out
+        # The tree mounts every per-resource sub-app's spread
+        # of routes under the appLayoutRoute.
+        assert "addChildren([" in out
         assert "indexRoute," in out
-        assert "projectsListRoute," in out
-        assert "tasksListRoute," in out
+        assert "...projectsRoutes," in out
+        assert "...tasksRoutes," in out

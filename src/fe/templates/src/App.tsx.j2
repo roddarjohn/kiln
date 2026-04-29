@@ -62,6 +62,6 @@ function RouterWithAuth(): ReactElement {
   if (auth.status === "loading") {
     return <PageLoader />;
   }
-  return <RouterProvider router={router} context={{ auth }} />;
+  return <RouterProvider router={router} context={ { auth } } />;
 }
 {% endif %}
