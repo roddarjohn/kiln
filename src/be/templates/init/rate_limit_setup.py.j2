@@ -1,0 +1,90 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+``init_rate_limiter`` installs the slowapi limiter on the FastAPI
+app -- limiter state, the ``RateLimitExceeded`` exception handler,
+and the ``SlowAPIMiddleware`` (so per-route ``@limiter.limit(...)``
+decorators are evaluated automatically).  Call once at startup,
+typically alongside ``init_telemetry``::
+
+    from fastapi import FastAPI
+    from {{ rate_limit_module }} import init_rate_limiter
+
+    app = FastAPI()
+    init_rate_limiter(app)
+
+The function is decorated with :func:`ingot.utils.run_once` so a
+second invocation is a silent no-op rather than a duplicate
+middleware install.
+
+The storage backend is :class:`ingot.rate_limit.PostgresStorage`
+pointed at the consumer's ``{{ bucket_class }}`` model
+(``{{ bucket_module }}.{{ bucket_class }}``).  slowapi's
+enforcement path is synchronous, so we open a *sync* engine
+against the same Postgres database the rest of the app uses --
+the ``+asyncpg`` driver tag is stripped from the DSN before it
+reaches ``create_engine``.
+
+The DSN is read from the ``{{ url_env }}`` environment variable at
+import time -- the same variable the ``{{ db_key }}_session``
+module already consumes.
+{% endset %}
+{{ file_header("Rate-limit initialisation", extra=_extra) }}
+
+
+import os
+from typing import TYPE_CHECKING
+
+from {{ bucket_module }} import {{ bucket_class }}
+from {{ key_func_module }} import {{ key_func_name }}
+
+from ingot.rate_limit import build_limiter
+from ingot.utils import run_once
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+
+def _sync_dsn() -> str:
+    """Return a sync Postgres DSN derived from ``{{ url_env }}``.
+
+    The async session module reads the same variable expecting an
+    asyncpg-flavoured URL; ``create_engine`` (sync) doesn't accept
+    that, so we strip the driver tag here.
+    """
+    raw = os.environ.get(
+        "{{ url_env }}", "postgresql+asyncpg://localhost/dev"
+    )
+    return raw.replace("+asyncpg", "")
+
+
+limiter = build_limiter(
+    model={{ bucket_class }},
+    sync_url=_sync_dsn(),
+    key_func={{ key_func_name }},
+{% if default_limit %}
+    default_limits=("{{ default_limit }}",),
+{% endif %}
+    headers_enabled={{ headers_enabled }},
+)
+"""Project-wide slowapi limiter.  Generated route handlers import
+this object and decorate themselves with ``@limiter.limit(...)``."""
+
+
+@run_once
+def init_rate_limiter(app: "FastAPI") -> None:
+    """Wire ``limiter`` into *app*.
+
+    Args:
+        app: The FastAPI application.
+    """
+    app.state.limiter = limiter
+    app.add_exception_handler(
+        RateLimitExceeded, _rate_limit_exceeded_handler
+    )
+    app.add_middleware(SlowAPIMiddleware)
+
+
+__all__ = ["init_rate_limiter", "limiter"]

@@ -346,6 +346,47 @@ class TelemetryConfig(BaseModel):
         return self
 
 
+class RateLimitConfig(BaseModel):
+    """Project-level rate-limiting config.
+
+    Storage is Postgres-backed via a consumer-defined SQLAlchemy
+    model that mixes in :class:`ingot.rate_limit.RateLimitBucketMixin`
+    -- the same idiom as :class:`ingot.files.FileMixin` (the consumer
+    owns the table, we own the columns).
+
+    Library is `slowapi <https://github.com/laurentS/slowapi>`__ with
+    a custom :class:`ingot.rate_limit.PostgresStorage` adapter for the
+    underlying ``limits`` library so users don't need Redis.
+    """
+
+    bucket_model: str
+    """Dotted import path to the consumer's bucket model, e.g.
+    ``"myapp.models.RateLimitBucket"``.  Must mix in
+    :class:`ingot.rate_limit.RateLimitBucketMixin`."""
+
+    default_limit: str | None = "60/minute"
+    """Project-wide fallback applied to any op that doesn't have its
+    own ``rate_limit``.  Format follows the ``limits`` library:
+    ``"100/minute"``, ``"5/second;1000/hour"``, etc.
+
+    Defaults to ``"60/minute"`` -- conservative enough to block
+    rapid abuse (one hit per second on average) without breaking
+    legitimate clients.  Set explicitly to ``None`` to disable the
+    project-wide default and require per-op opt-in."""
+
+    key_func: str | None = None
+    """Dotted path to a sync function ``(request: Request) -> str``
+    used as the rate-limit key.  When ``None``, defaults to
+    :func:`ingot.rate_limit.default_key_func` (client IP)."""
+
+    db_key: str | None = None
+    """Which configured database stores the counters.  ``None``
+    selects the database marked ``default=True``."""
+
+    headers_enabled: bool = True
+    """Emit ``X-RateLimit-*`` response headers (slowapi default on)."""
+
+
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -581,11 +622,20 @@ class OperationConfig(BaseModel):
     """Per-operation auth override.  When ``None``, inherits the
     resource-level ``require_auth`` default."""
     trace: bool | None = None
-    """Per-operation telemetry override.  When ``None``, inherits
-    the resource-level ``trace`` default (which itself inherits
-    from the project's :attr:`TelemetryConfig.span_per_handler` /
-    :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
-    skip span emission for noisy / hot-path operations."""
+    """Per-operation telemetry override.  Cascades through
+    op → resource → project (via
+    :attr:`TelemetryConfig.span_per_handler` /
+    :attr:`TelemetryConfig.span_per_action`).  ``None`` defers to
+    the next level; ``True`` forces span emission for this op
+    even when the project toggle is off; ``False`` short-circuits
+    to "no span" regardless of inherited values."""
+    rate_limit: str | Literal[False] | None = None
+    """Per-operation rate-limit override.  ``None`` inherits from
+    the resource (which inherits from
+    :attr:`RateLimitConfig.default_limit`).  ``False`` disables
+    rate limiting on this op specifically.  A string (e.g.
+    ``"5/minute"``) sets a per-op limit using the ``limits``
+    library's syntax."""
     serializer: str | None = None
     """Dotted path to a custom async serializer for read-op
     responses, e.g. ``"myapp.serializers.dump_view_hydrated"``.
@@ -604,7 +654,6 @@ class OperationConfig(BaseModel):
     ``{Model}ListItem``) are still emitted so request schemas and
     other ops on the resource keep working.
     """
-
     can: str | None = None
     """Dotted path to an async ``(resource, session) -> bool`` guard.
 
@@ -622,6 +671,23 @@ class OperationConfig(BaseModel):
     additionally used as the row-level visibility filter on the
     list endpoint, so it sees each candidate row in turn.
     """
+    pre: str | None = None
+    """Dotted path to an async ``(body, *, db) -> body`` hook
+    invoked between request parsing and the SQL write.  The
+    return value replaces the parsed body for the rest of the
+    handler, so a hook can normalise, enrich, or stamp defaults
+    onto the request.  Only meaningful on ``create`` and
+    ``update`` (the ops with a request body); rejected on every
+    other op including custom ``action`` ops, which already
+    invoke a user-supplied function and can do their own
+    preprocessing inline."""
+    post: str | None = None
+    """Dotted path to an async ``(obj, body, *, db) -> None``
+    hook invoked after ``db.commit()``.  Receives the
+    just-written model row and the (possibly pre-processed)
+    request body so the consumer can fan out side effects
+    (cache invalidation, audit log, downstream notification).
+    Same op restrictions as :attr:`pre`."""
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
@@ -633,6 +699,45 @@ class OperationConfig(BaseModel):
     def options(self) -> dict[str, Any]:
         """Operation-specific options (all extra fields)."""
         return self.model_extra or {}
+
+    @model_validator(mode="after")
+    def _hooks_only_on_write_ops(self) -> OperationConfig:
+        """Reject ``pre`` / ``post`` on ops that don't support them.
+
+        The hooks wrap a parsed request body and a freshly
+        written row, so they're only meaningful on the built-in
+        write ops (``create``, ``update``).  ``get`` / ``delete``
+        / ``list`` have no body to pre-process and ``action``
+        already calls a user-supplied function -- adding a
+        second hook layer would just duplicate that path.
+        """
+        if self.pre is None and self.post is None:
+            return self
+
+        if self.type == "action":
+            msg = (
+                f"Operation {self.name!r}: pre/post hooks are not "
+                f"supported on action ops -- the action's own fn "
+                f"is the user-defined entry point."
+            )
+            raise ValueError(msg)
+
+        if self.name not in _HOOK_SUPPORTED_OPS:
+            allowed = ", ".join(sorted(_HOOK_SUPPORTED_OPS))
+            msg = (
+                f"Operation {self.name!r}: pre/post hooks are only "
+                f"supported on {allowed}."
+            )
+            raise ValueError(msg)
+
+        return self
+
+
+_HOOK_SUPPORTED_OPS: frozenset[str] = frozenset({"create", "update"})
+"""Op names that accept :attr:`OperationConfig.pre` /
+:attr:`OperationConfig.post` hooks.  Extending this set means the
+matching op's ``build()`` and Jinja template must wire the hook
+calls (see ``be.operations.create`` / ``be.operations.update``)."""
 
 
 class SearchConfig(BaseModel):
@@ -764,6 +869,13 @@ class ResourceConfig(BaseModel):
     :attr:`TelemetryConfig.span_per_action` toggles.  Set ``False``
     to skip per-handler spans for every op on this resource (the
     HTTP server span from ``FastAPIInstrumentor`` is unaffected)."""
+
+    rate_limit: str | Literal[False] | None = None
+    """Per-resource rate-limit override.  ``None`` inherits from
+    :attr:`RateLimitConfig.default_limit`.  ``False`` disables
+    rate limiting for every op on this resource.  A string (e.g.
+    ``"100/minute"``) applies that limit to every op that doesn't
+    set its own ``rate_limit``."""
 
     operations: Annotated[list[OperationConfig], Scoped(name="operation")] = (
         Field(default_factory=list)
@@ -904,10 +1016,73 @@ class ProjectConfig(FoundryConfig):
     """OpenTelemetry configuration.  ``None`` (the default) means
     the generated app emits zero telemetry references; set to a
     :class:`TelemetryConfig` to opt in."""
+    rate_limit: RateLimitConfig | None = None
+    """Rate-limiting configuration.  ``None`` (the default) means the
+    generated app emits zero rate-limit references; set to a
+    :class:`RateLimitConfig` to opt in.  Per-resource and per-op
+    ``rate_limit`` overrides are only allowed when this is set."""
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,
     )
+
+    @model_validator(mode="after")
+    def _rate_limit_overrides_require_project_config(
+        self,
+    ) -> ProjectConfig:
+        """Reject per-resource/op ``rate_limit`` without project config.
+
+        A non-``None`` ``rate_limit`` on a resource or operation
+        references the limiter scaffolded by
+        :class:`~be.operations.rate_limit_scaffold.RateLimitScaffold`,
+        which only emits when ``project.rate_limit`` is set.  Failing
+        at config-load time keeps the broken path from ever reaching
+        template rendering.
+        """
+        if self.rate_limit is not None:
+            return self
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                if resource.rate_limit is not None:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"rate_limit={resource.rate_limit!r} but the "
+                        f"project has no rate_limit configured.  "
+                        f"Configure project.rate_limit or drop the "
+                        f"override."
+                    )
+                    raise ValueError(msg)
+
+                for op in resource.operations:
+                    if op.rate_limit is not None:
+                        msg = (
+                            f"Resource {resource.model!r} operation "
+                            f"{op.name!r} sets "
+                            f"rate_limit={op.rate_limit!r} but the "
+                            f"project has no rate_limit configured.  "
+                            f"Configure project.rate_limit or drop the "
+                            f"override."
+                        )
+                        raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def _rate_limit_db_key_resolves(self) -> ProjectConfig:
+        """``rate_limit.db_key`` must match a configured database.
+
+        ``None`` defers to :meth:`resolve_database`, which picks the
+        ``default=True`` entry; a string must name an existing
+        :attr:`~DatabaseConfig.key`.
+        """
+        if self.rate_limit is None:
+            return self
+
+        # ``resolve_database`` raises with a clear message when the
+        # key is missing or no default is set.
+        self.resolve_database(self.rate_limit.db_key)
+        return self
 
     @model_validator(mode="after")
     def _action_framework_requires_auth(self) -> ProjectConfig:

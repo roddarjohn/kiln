@@ -50,6 +50,13 @@ opentelemetry = [
 #     pip install 'kiln-generator[opentelemetry,opentelemetry-grpc]'
 opentelemetry-grpc = ["opentelemetry-exporter-otlp-proto-grpc==1.41.1"]
 files = ["boto3>=1.34"]
+# ``kiln-generator[rate-limit]`` installs the slowapi + limits stack
+# that ``ingot.rate_limit`` imports.  Generated apps with rate
+# limiting on need this set; apps without rate limiting never
+# import ``ingot.rate_limit`` and don't need it.  The Postgres
+# storage backend lives in ``ingot.rate_limit`` itself, so no
+# Redis/Memcached deps are pulled in here.
+rate-limit = ["slowapi>=0.1.9", "limits>=3.13"]
 
 [project.urls]
 Homepage = "https://github.com/roddarjohn/kiln"
@@ -74,6 +81,8 @@ fe_root = "fe_root.target:target"
 scaffold = "be.operations.scaffold:Scaffold"
 auth_scaffold = "be.operations.scaffold:AuthScaffold"
 telemetry_scaffold = "be.operations.telemetry:TelemetryScaffold"
+rate_limit_scaffold = "be.operations.rate_limit_scaffold:RateLimitScaffold"
+rate_limit = "be.operations.rate_limit:RateLimit"
 get = "be.operations.get:Get"
 list = "be.operations.list:List"
 filter = "be.operations.filter:Filter"
@@ -138,6 +147,10 @@ dev = [
   # Ingot's files extra ships boto3 as optional; CI installs it
   # here so the full test suite can run without an explicit --extra.
   "boto3>=1.34",
+  # Rate-limit stack mirrored from the ``rate-limit`` extra so the
+  # dev test suite can import ``ingot.rate_limit`` and slowapi.
+  "slowapi>=0.1.9",
+  "limits>=3.13",
 ]
 playground = [
   "fastapi>=0.115",

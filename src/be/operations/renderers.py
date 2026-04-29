@@ -665,6 +665,44 @@ def gate_wiring(
     )
 
 
+def hooks_wiring(
+    op: OperationConfig,
+) -> tuple[dict[str, object], list[tuple[str, str]]]:
+    """Wire imports + body context for an op's ``pre`` / ``post`` hooks.
+
+    Returns ``({}, [])`` when the op declares neither hook.  The
+    template references the hooks by their bare callable name
+    (``pre_hook_call`` / ``post_hook_call``); this function
+    splits the dotted path and registers the import so the bare
+    name resolves at runtime.
+    """
+    ctx: dict[str, object] = {}
+    imports: list[tuple[str, str]] = []
+
+    for slot, dotted in (
+        ("pre_hook_call", op.pre),
+        ("post_hook_call", op.post),
+    ):
+        if dotted is None:
+            continue
+
+        try:
+            module, attr_name = Name.from_dotted(dotted)
+
+        except ValueError as exc:
+            msg = (
+                f"Operation {op.name!r}: {slot.removesuffix('_call')!r} "
+                f"must be a dotted path (got {dotted!r})"
+            )
+            raise ValueError(msg) from exc
+
+        attr = attr_name.raw
+        ctx[slot] = attr
+        imports.append((module, attr))
+
+    return ctx, imports
+
+
 FETCH_OR_404_IMPORT: tuple[str, str] = (
     "ingot.utils",
     "get_object_from_query_or_404",

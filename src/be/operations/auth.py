@@ -9,6 +9,7 @@ effective ``require_auth`` and flips
 from typing import TYPE_CHECKING
 
 from be.operations.types import RouteHandler, TestCase
+from foundry.cascade import cascade
 from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 
@@ -52,13 +53,9 @@ class Auth:
         session_name = session_name_obj.raw
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
-        resource_default = ctx.instance.require_auth
-        op_auth: dict[str, bool] = {
-            op.name: (
-                op.require_auth
-                if op.require_auth is not None
-                else resource_default
-            )
+        # Cascade: op.require_auth → resource.require_auth.
+        op_auth = {
+            op.name: cascade(op.require_auth, ctx.instance.require_auth)
             for op in ctx.instance.operations
         }
 
@@ -93,6 +90,9 @@ class Auth:
             # ("action"); the concrete instance name is in
             # action_name.  For CRUD the two match.
             instance_name = test.action_name or test.op_name
-            test.requires_auth = op_auth.get(instance_name, False)
+            # Cascade can resolve to ``None`` when every level is
+            # ``None`` -- treat that as the same as ``False``
+            # (anonymous access) for the test fixture.
+            test.requires_auth = bool(op_auth.get(instance_name))
 
         return ()

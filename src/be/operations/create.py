@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, cast
 
-from be.operations.renderers import gate_wiring
+from be.operations.renderers import gate_wiring, hooks_wiring
 from be.operations.types import (
     FieldsOptions,
     RouteHandler,
@@ -73,6 +73,7 @@ class Create:
             ctx.package_prefix,
             is_object_scope=False,
         )
+        hook_ctx, hook_imports = hooks_wiring(ctx.instance)
 
         yield RouteHandler(
             method="POST",
@@ -84,8 +85,12 @@ class Create:
             doc=f"Create a new {model.pascal}.",
             request_schema=request_schema,
             body_template="fastapi/ops/create.py.j2",
-            body_context=gate_ctx,
-            extra_imports=[("sqlalchemy", "insert"), *gate_imports],
+            body_context={**gate_ctx, **hook_ctx},
+            extra_imports=[
+                ("sqlalchemy", "insert"),
+                *gate_imports,
+                *hook_imports,
+            ],
         )
 
         yield TestCase(
