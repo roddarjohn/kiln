@@ -1,22 +1,21 @@
 """End-to-end coverage of link / searchable / ref / saved-view emission.
 
-Exercises step 2 (link schemas, resource search endpoint, ref
-filter targeting) and step 3 (saved-view CRUD) of the filtering
-plan.  Builds two resources that reference each other through a
-``ref`` filter and through saved views, runs the generator, and
+Exercises link configs, the resource-level search endpoint, ref
+filter targeting, and saved views configured as a regular kiln
+resource that uses the new ``serializer:`` hook for hydration.
+Builds three resources — Customer, Product, and SavedView — and
 asserts that:
 
-* Each resource's link config produces an entry in the per-app
-  ``links.py`` registry.
-* ``searchable: true`` produces a ``POST /_values`` route.
+* Each linked resource produces an entry in the per-app
+  ``links.py`` registry, plus a matching ``REF_RESOLVERS`` entry
+  capable of fetching rows by id.
+* ``searchable: True`` produces a ``POST /_values`` route.
 * A ``ref`` filter on one resource points at the *other*
   resource's resource-level ``_values`` URL in the discovery
   payload.
-* ``saved_views: true`` produces five CRUD routes (list, create,
-  get, update, delete) plus the right imports from
-  ``ingot.saved_views``.
-* Auth wiring: saved-views handlers receive the session
-  parameter via the ``force_session`` path on the auth op.
+* A regular CRUD resource carrying ``serializer:`` on its read
+  ops swaps in the user's serializer (called with
+  ``(obj, session, db)``) and drops ``response_model``.
 """
 
 from __future__ import annotations
@@ -57,6 +56,13 @@ _CUSTOMER_FIELDS = [
 ]
 
 
+_SAVED_VIEW_FIELDS = [
+    {"name": "id", "type": "str"},
+    {"name": "resource_type", "type": "str"},
+    {"name": "name", "type": "str"},
+]
+
+
 def _customer() -> ResourceConfig:
     return ResourceConfig(
         model="inventory.models.Customer",
@@ -70,13 +76,11 @@ def _customer() -> ResourceConfig:
 
 
 def _product() -> ResourceConfig:
-    """Product references Customer via a ref filter and has saved
-    views; Customer is implicitly required to have a link by the
-    cross-resource validator."""
+    """Product references Customer via a ref filter; Customer
+    therefore needs a link by the cross-resource validator."""
     return ResourceConfig(
         model="inventory.models.Product",
         route_prefix="/products",
-        saved_views=True,
         link=LinkConfig(kind="id_name", name="name"),
         operations=[
             OperationConfig(
@@ -100,9 +104,61 @@ def _product() -> ResourceConfig:
     )
 
 
+def _saved_view() -> ResourceConfig:
+    """SavedView is a normal CRUD resource — kiln has no special
+    case for it.  The user wires up:
+
+    * Per-user scoping via ``can`` guards (existing #60 surface).
+    * Resource-type filtering via the structured filter machinery.
+    * Hydration via a custom ``serializer:`` on read ops, which
+      points at user code that calls
+      :func:`ingot.saved_views.hydrate_view`.
+    """
+    return ResourceConfig(
+        model="inventory.models.SavedView",
+        pk="id",
+        pk_type="str",
+        route_prefix="/saved-views",
+        require_auth=True,
+        operations=[
+            OperationConfig(
+                name="get",
+                fields=_SAVED_VIEW_FIELDS,
+                serializer="inventory.serializers.dump_view_hydrated",
+                can="inventory.guards.is_view_owner",
+            ),
+            OperationConfig(
+                name="list",
+                fields=_SAVED_VIEW_FIELDS,
+                serializer="inventory.serializers.dump_view_hydrated",
+                modifiers=[
+                    {
+                        "type": "filter",
+                        "fields": ["resource_type"],
+                    },
+                ],
+                can="inventory.guards.is_view_owner",
+            ),
+            OperationConfig(
+                name="create",
+                fields=[{"name": "name", "type": "str"}],
+            ),
+            OperationConfig(
+                name="update",
+                fields=[{"name": "name", "type": "str"}],
+                can="inventory.guards.is_view_owner",
+            ),
+            OperationConfig(
+                name="delete",
+                can="inventory.guards.is_view_owner",
+            ),
+        ],
+    )
+
+
 @pytest.fixture
 def files() -> dict[str, str]:
-    """Run the generator over a project with both resources."""
+    """Run the generator over a project with all three resources."""
     config = ProjectConfig(
         auth=AuthConfig(
             credentials_schema="myapp.auth.LoginCredentials",
@@ -114,7 +170,7 @@ def files() -> dict[str, str]:
             App(
                 config=AppConfig(
                     module="inventory",
-                    resources=[_customer(), _product()],
+                    resources=[_customer(), _product(), _saved_view()],
                 ),
                 prefix="/inventory",
             ),
@@ -139,17 +195,21 @@ def test_every_generated_python_file_parses(files: dict[str, str]) -> None:
 
 
 def test_links_registry_emitted(files: dict[str, str]) -> None:
-    """Both resources show up in inventory/links.py."""
+    """Linked resources show up in inventory/links.py with builders
+    *and* ref resolvers."""
     links = files["inventory/links.py"]
 
     assert "from ingot.links import LinkIDName" in links
-    assert "from inventory.models import Customer, Product" in links
-    # Generated builders for shorthand entries.
+    assert "from inventory.models import" in links
+    # Generated link builders for shorthand entries.
     assert "async def _link_customer(" in links
     assert "async def _link_product(" in links
-    # LINKS dict at the bottom maps slugs to builders.
+    # Per-resource ref resolvers used by saved-view hydration.
+    assert "async def _resolve_customer_refs(" in links
+    assert "async def _resolve_product_refs(" in links
+    # Both registries at the bottom of the module.
     assert '"customer": _link_customer' in links
-    assert '"product": _link_product' in links
+    assert '"customer": _resolve_customer_refs' in links
 
 
 def test_searchable_emits_resource_values_route(
@@ -172,36 +232,36 @@ def test_ref_filter_points_at_target_values_endpoint(
     """Product's customer_id filter targets /customers/_values."""
     routes = files["inventory/routes/product.py"]
 
-    # Discovery payload carries the target resource's _values URL.
     assert '"endpoint": "/customers/_values"' in routes
     assert '"type": "customer"' in routes
     assert '"kind": "ref"' in routes
 
 
-def test_saved_views_routes_emitted(files: dict[str, str]) -> None:
-    """All five CRUD routes show up on the product router."""
-    routes = files["inventory/routes/product.py"]
-
-    assert '@router.get("/views"' in routes
-    assert '@router.post("/views"' in routes
-    assert '@router.get("/views/{view_id}"' in routes
-    assert '@router.patch("/views/{view_id}"' in routes
-    assert '@router.delete("/views/{view_id}"' in routes
-    # Per-user scoping by session.user_id.
-    assert "session.user_id" in routes
-    # Resource-type discriminator on the shared SavedView table.
-    assert 'SavedView.resource_type == "product"' in routes
-
-
-def test_saved_views_handlers_receive_session(
+def test_custom_serializer_replaces_auto_dump(
     files: dict[str, str],
 ) -> None:
-    """Auth's force_session path threads the session dep onto every
-    saved-view handler regardless of per-op require_auth."""
-    routes = files["inventory/routes/product.py"]
+    """SavedView's get/list ops call the user's serializer with
+    (obj, session, db) and drop response_model."""
+    routes = files["inventory/routes/saved_view.py"]
 
-    # Every saved-view handler needs the session for owner_id.
-    saved_views_section = routes[routes.index("def saved_views_product_") :]
-    assert "session: Annotated[Session, Depends(get_session)]" in (
-        saved_views_section
+    # Custom serializer imported by its dotted path, not from the
+    # auto-generated serializers module.
+    assert "from inventory.serializers import dump_view_hydrated" in routes
+    # The route body calls the custom serializer with three args.
+    assert "await dump_view_hydrated(obj, session, db)" in routes
+    # response_model not set on either read route — the user's
+    # function returns dict[str, Any], not the auto schema.
+    assert '@router.get("/{id}")\n' in routes, (
+        "GET should not carry a response_model kwarg"
     )
+
+
+def test_auto_serializer_still_works_when_not_overridden(
+    files: dict[str, str],
+) -> None:
+    """Resources that *don't* set ``serializer:`` keep the
+    auto-generated dump path."""
+    customer_routes = files["inventory/routes/customer.py"]
+
+    # The auto-generated list_item serializer is imported normally.
+    assert "to_customer_list_item" in customer_routes
