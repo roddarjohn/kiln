@@ -1,7 +1,8 @@
 """Tests for the inheritance cascade primitives."""
 
 from be.config.schema import OperationConfig
-from be.operations._overrides import cascade, resolve_op_overrides
+from be.operations._overrides import resolve_op_overrides
+from foundry.cascade import cascade
 
 
 def _ops(**name_to_value: object) -> list[OperationConfig]:

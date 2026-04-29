@@ -17,8 +17,8 @@ the body-template path.
 
 from typing import TYPE_CHECKING
 
-from be.operations._overrides import cascade
 from be.operations.types import RouteHandler
+from foundry.cascade import cascade
 from foundry.naming import Name
 from foundry.operation import operation
 
