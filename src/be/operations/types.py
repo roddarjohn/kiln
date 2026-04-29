@@ -147,6 +147,12 @@ class RouteHandler:
     response_model: str | None = None
     response_schema_module: str | None = None
     serializer_fn: str | None = None
+    serializer_fn_module: str | None = None
+    """Override module for the import of :attr:`serializer_fn`.
+    ``None`` resolves to the generated serializers module
+    (auto-generated dumps); set to the consumer's module when
+    :attr:`OperationConfig.serializer` points at a user-supplied
+    function."""
     status_code: int | None = None
     return_type: str | None = None
     body_lines: list[str] = field(default_factory=list)

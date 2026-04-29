@@ -1,15 +1,22 @@
 """Generated link registry for app `{{ module }}`.
 
 Maps each opted-in resource's slug (lowercase model class name)
-to an async builder ``(instance, session) -> LinkSchema``.  The
-``_values`` and saved-view dump endpoints look up builders here
-to hydrate cross-resource references without hard-coding their
-labels.
+to an async builder ``(instance, session) -> LinkSchema`` and
+to a ref resolver ``(ids, db, session) -> (items, dropped)``.
+
+* The ``LINKS`` mapping powers ``_values`` endpoints and any
+  user code that wants the resource's link shape.
+* The ``REF_RESOLVERS`` mapping powers saved-view hydration and
+  any user-supplied serializer that resolves stored ref ids
+  through :func:`ingot.saved_views.hydrate_view`.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ingot.links import {{ link_class_names | join(", ") }}
 
@@ -43,11 +50,56 @@ async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ 
     )
 {% endif %}
 {% endif %}
+
+
+async def {{ entry.resolver_fn_name }}(
+    ids: list[Any],
+    db: AsyncSession,
+    session: Any,
+) -> tuple[list[dict[str, Any]], int]:
+    """Fetch {{ entry.model_class }} rows by id and run them
+    through ``{{ entry.fn_name }}``.
+
+    Returns ``(items, dropped)``: ``items`` are
+    ``model_dump()``-ed link instances ordered to match *ids*;
+    ``dropped`` counts ids that didn't resolve to a row (deleted,
+    hidden, or never existed).
+    """
+    if not ids:
+        return [], 0
+
+    stmt = select({{ entry.model_class }}).where(
+        {{ entry.model_class }}.{{ entry.pk_attr }}.in_(ids),
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    by_id = {getattr(row, "{{ entry.pk_attr }}"): row for row in rows}
+
+    items: list[dict[str, Any]] = []
+    dropped = 0
+
+    for raw_id in ids:
+        row = by_id.get(raw_id)
+
+        if row is None:
+            dropped += 1
+            continue
+
+        link = await {{ entry.fn_name }}(row, session)
+        items.append(link.model_dump())
+
+    return items, dropped
 {% endfor %}
 
 
 LINKS: dict[str, Any] = {
 {% for entry in entries %}
     "{{ entry.slug }}": {{ entry.fn_name }},
+{% endfor %}
+}
+
+
+REF_RESOLVERS: dict[str, Any] = {
+{% for entry in entries %}
+    "{{ entry.slug }}": {{ entry.resolver_fn_name }},
 {% endfor %}
 }

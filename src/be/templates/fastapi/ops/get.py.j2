@@ -20,7 +20,9 @@
     )
 {% endif %}
 {{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+    return await {{ serializer_fn }}(obj, session, db)
+{% elif serializer_async|default(false) %}
     return await {{ serializer_fn }}(obj, session)
 {% else %}
     return {{ serializer_fn }}(obj)

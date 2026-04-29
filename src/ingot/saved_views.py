@@ -1,38 +1,34 @@
-"""Per-user saved views: model + payload schemas.
+"""Per-user saved views: mixin + payload schemas + hydration.
 
 A *saved view* is a named filter+sort state stored on behalf of a
-single user.  The shared ``SavedView`` SQLAlchemy table carries
-all resources' views with a ``resource_type`` discriminator
-column; the codegen emits one CRUD surface per opted-in resource
-that scopes both reads and writes to ``resource_type=<slug>`` and
-``owner_id=<session.user_id>``.
+single user.  Mirrors the :class:`ingot.files.FileMixin` idiom:
+the consumer subclasses :class:`SavedViewMixin` on their own
+``DeclarativeBase`` and points each opted-in resource's
+:attr:`~be.config.schema.SavedViewsConfig.model` at it.
 
-Stored payloads keep raw filter values only — including raw ids
-for ``ref`` values.  Label hydration for those ids is the FE's
-responsibility in v1: it calls the target resource's
-``POST /_values`` endpoint to resolve them.  A future iteration
-can add BE-side hydration once the per-id lookup story exists
-(today's ``_values`` endpoints search by ``q``, not by ``id``).
+A single mixed-in model serves every opted-in resource;
+``resource_type`` discriminates rows so the codegen-generated
+CRUD scopes reads and writes per resource.
+
+Stored payloads keep raw filter values, including raw ids on
+``ref`` values.  Read paths run those ids through
+:func:`hydrate_view`, which looks each ref type up in the per-app
+``REF_RESOLVERS`` mapping (also generated alongside ``LINKS``)
+and returns hydrated ``items`` with a ``dropped`` count for stale
+or invisible refs.
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import JSON, DateTime, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class SavedViewBase(DeclarativeBase):
-    """Declarative base for the shared ``saved_views`` table.
-
-    Lives alongside the consumer's own models in their database.
-    Consumers running migrations on this table should target this
-    base's metadata explicitly.
-    """
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _now_utc() -> datetime:
@@ -40,21 +36,66 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-class SavedView(SavedViewBase):
-    """One saved view record for one user on one resource type."""
+class SavedViewMixin:
+    """SQLAlchemy mixin supplying the columns of a saved-view row.
 
-    __tablename__ = "saved_views"
+    Subclass on a ``DeclarativeBase``-derived class:
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    .. code-block:: python
+
+        from ingot.saved_views import SavedViewMixin
+
+        class SavedView(Base, SavedViewMixin):
+            __tablename__ = "saved_views"
+
+    Then point each opted-in resource at the model:
+
+    .. code-block:: jsonnet
+
+        {
+          model: "myapp.models.Product",
+          saved_views: { model: "myapp.models.SavedView" },
+          link: { kind: "id_name", name: "name" },
+          // ...
+        }
+
+    The mixin owns no primary key — declare ``id`` on the consumer
+    class (typically a UUID column) so the consumer's PK
+    convention wins.  Indexes on ``resource_type`` and ``owner_id``
+    are recommended; both columns drive every read filter.
+    """
+
+    if TYPE_CHECKING:
+        # Type-only — concrete column lives on the consumer class.
+        # Kept here so generated code can rely on ``view.id`` being
+        # typed without committing to a column the consumer may
+        # name differently.
+        id: Mapped[Any]
+
     resource_type: Mapped[str] = mapped_column(String(64), index=True)
+    """Slug of the parent resource (lowercase model class name).
+    Drives the ``WHERE resource_type = ...`` clause every saved-view
+    read / write inserts so views never bleed across resources."""
+
     owner_id: Mapped[str] = mapped_column(String(64), index=True)
+    """Stringified user id.  Saved views are per-user; the
+    generated routes filter by ``owner_id == str(session.<attr>)``
+    where ``<attr>`` is :attr:`~be.config.schema.AuthConfig.user_id_attr`."""
+
     name: Mapped[str] = mapped_column(String(255))
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    """Caller-supplied display name."""
+
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        default=dict,
+    )
+    """Raw filter+sort spec.  Ref values store ids only; hydration
+    happens at read time via :func:`hydrate_view`."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now_utc
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now_utc, onupdate=_now_utc
     )
@@ -82,20 +123,78 @@ class SavedViewUpdate(BaseModel):
     payload: dict[str, Any] | None = None
 
 
-def dump_view(view: SavedView) -> dict[str, Any]:
-    """Serialize a :class:`SavedView` to the JSON dump shape.
+RefResolver = (
+    "Callable[[list[Any], AsyncSession, Any],"
+    " Awaitable[tuple[list[dict[str, Any]], int]]]"
+)
+"""Type alias for the per-resource ref resolvers stored in the
+generated ``REF_RESOLVERS`` mapping.  Each resolver fetches rows
+by id, runs them through the resource's link builder, and returns
+``(items, dropped)``.  Kept as a string to avoid forcing
+SQLAlchemy / typing imports at module load."""
 
-    The shape is intentionally flat and FE-agnostic; ref filter
-    values stay as ``{kind: "ref", type, ids}`` and the FE
-    resolves labels through the target resource's ``_values``
-    endpoint.
+
+async def hydrate_view(
+    view: SavedViewMixin,
+    ref_resolvers: dict[str, Any],
+    db: AsyncSession,
+    session: Any,
+) -> dict[str, Any]:
+    """Return the dump-format payload for one saved view.
+
+    Walks each entry in ``view.payload["filters"]``; for entries
+    with ``value.kind == "ref"``, looks up the target type in
+    *ref_resolvers* and replaces ``ids`` with hydrated ``items``.
+    Stale or invisible rows bump ``dropped`` rather than erroring
+    so the dump never throws because of dangling refs.
+
+    All other shapes pass through unchanged so the FE sees a
+    single uniform structure.
     """
+    payload = dict(view.payload or {})
+    raw_filters = list(payload.get("filters") or [])
+    hydrated_filters: list[dict[str, Any]] = [
+        await _hydrate_entry(entry, ref_resolvers, db, session)
+        for entry in raw_filters
+    ]
+    payload["filters"] = hydrated_filters
     return {
-        "id": view.id,
+        "id": str(view.id) if view.id is not None else None,
         "name": view.name,
         "resource_type": view.resource_type,
         "owner_id": view.owner_id,
-        "payload": dict(view.payload or {}),
+        "payload": payload,
         "created_at": view.created_at.isoformat(),
         "updated_at": view.updated_at.isoformat(),
+    }
+
+
+async def _hydrate_entry(
+    entry: dict[str, Any],
+    ref_resolvers: dict[str, Any],
+    db: AsyncSession,
+    session: Any,
+) -> dict[str, Any]:
+    """Hydrate one filter entry, leaving non-ref values untouched."""
+    value = entry.get("value")
+
+    if not isinstance(value, dict) or value.get("kind") != "ref":
+        return entry
+
+    ref_type = value.get("type")
+    resolver = (
+        ref_resolvers.get(ref_type) if isinstance(ref_type, str) else None
+    )
+    ids: list[Any] = list(value.get("ids") or [])
+
+    if resolver is None or not ids:
+        return {
+            **entry,
+            "value": {**value, "items": [], "dropped": len(ids)},
+        }
+
+    items, dropped = await resolver(list(ids), db, session)
+    return {
+        **entry,
+        "value": {**value, "items": items, "dropped": dropped},
     }

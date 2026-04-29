@@ -125,6 +125,12 @@ def _build_entry(
     link_class = _LINK_KIND_TO_CLASS[link.kind]
     link_class_names.add(link_class)
 
+    # Always import the model — the ref resolver fetches rows by
+    # id even when the link itself is built by a user function.
+    model_imports.setdefault(model_module, set()).add(model_name.pascal)
+    pk_attr = resource.pk
+    resolver_fn_name = f"_resolve_{slug}_refs"
+
     if link.builder is not None:
         builder_module, _, builder_name = link.builder.rpartition(".")
 
@@ -140,9 +146,11 @@ def _build_entry(
             "slug": slug,
             "fn_name": builder_name,
             "is_user_builder": True,
+            "model_class": model_name.pascal,
+            "pk_attr": pk_attr,
+            "resolver_fn_name": resolver_fn_name,
         }
 
-    model_imports.setdefault(model_module, set()).add(model_name.pascal)
     id_attr = link.id or resource.pk
     name_attr = link.name
     fn_name = f"_link_{slug}"
@@ -156,6 +164,8 @@ def _build_entry(
         "id_attr": id_attr,
         "name_attr": name_attr,
         "kind": link.kind,
+        "pk_attr": pk_attr,
+        "resolver_fn_name": resolver_fn_name,
     }
 
 

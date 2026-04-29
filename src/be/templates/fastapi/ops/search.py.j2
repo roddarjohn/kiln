@@ -47,7 +47,9 @@
         else None
     )
     return {{ model_name }}Page(
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session, db) for obj in items],
+{% elif serializer_async|default(false) %}
         items=[await {{ serializer_fn }}(obj, session) for obj in items],
 {% else %}
         items=[{{ serializer_fn }}(obj) for obj in items],
@@ -79,7 +81,9 @@
     )
 {% endif %}
     return {{ model_name }}Page(
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session, db) for obj in rows],
+{% elif serializer_async|default(false) %}
         items=[await {{ serializer_fn }}(obj, session) for obj in rows],
 {% else %}
         items=[{{ serializer_fn }}(obj) for obj in rows],
@@ -97,7 +101,9 @@
         find_can({{ collection_specs_const }}, "list"),
     )
 {% endif %}
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+    return [await {{ serializer_fn }}(obj, session, db) for obj in rows]
+{% elif serializer_async|default(false) %}
     return [await {{ serializer_fn }}(obj, session) for obj in rows]
 {% else %}
     return [{{ serializer_fn }}(obj) for obj in rows]

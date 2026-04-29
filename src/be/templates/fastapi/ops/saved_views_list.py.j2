@@ -1,9 +1,0 @@
-{% extends "fastapi/handler_default.py.j2" %}
-{% block body %}
-    stmt = select(SavedView).where(
-        SavedView.resource_type == "{{ slug }}",
-        SavedView.owner_id == str(session.user_id),
-    )
-    rows = (await db.execute(stmt)).scalars()
-    return [dump_view(v) for v in rows]
-{% endblock %}

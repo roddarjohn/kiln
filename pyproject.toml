@@ -91,7 +91,6 @@ actions = "be.operations.actions:Actions"
 permissions = "be.operations.permissions:Permissions"
 links = "be.operations.links:Links"
 searchable = "be.operations.searchable:Searchable"
-saved_views = "be.operations.saved_views:SavedViews"
 
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"

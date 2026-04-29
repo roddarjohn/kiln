@@ -286,7 +286,7 @@ def _handler_fragment(
         imports.add_from(response_mod, response_schema)
 
     if handler.serializer_fn:
-        serializer_mod = prefix_import(
+        serializer_mod = handler.serializer_fn_module or prefix_import(
             info.package_prefix, info.app, "serializers", info.model.lower
         )
         imports.add_from(serializer_mod, handler.serializer_fn)

@@ -113,6 +113,13 @@ class AuthConfig(BaseModel):
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
 
+    user_id_attr: str = "user_id"
+    """Attribute name on the parsed session schema that the
+    generated saved-view CRUD reads to scope rows by owner.
+    Defaults to ``"user_id"``; override (e.g. to ``"sub"`` or
+    ``"id"``) when the consumer's session model names it
+    differently."""
+
     session_store: str | None = None
     """Dotted path to an :class:`ingot.auth.SessionStore` instance
     (e.g. ``"myapp.revocation.revocations"``).  When set, the
@@ -509,6 +516,25 @@ class OperationConfig(BaseModel):
     from the project's :attr:`TelemetryConfig.span_per_handler` /
     :attr:`TelemetryConfig.span_per_action`).  Set ``False`` to
     skip span emission for noisy / hot-path operations."""
+    serializer: str | None = None
+    """Dotted path to a custom async serializer for read-op
+    responses, e.g. ``"myapp.serializers.dump_view_hydrated"``.
+
+    Signature: ``async (obj, session, db) -> Any``.  When set, the
+    generated ``get`` / ``list`` route calls this function instead
+    of the auto-generated ``to_<model>_resource`` /
+    ``to_<model>_list_item`` serializer.  ``response_model`` is
+    omitted on the route, so the function may return any
+    JSON-serializable shape (typically ``dict[str, Any]``).
+
+    Useful for custom dump shapes — saved-view payload hydration
+    via :func:`ingot.saved_views.hydrate_view`, joined-row
+    flattening, computed fields that need DB access, etc.
+    Auto-generated schemas (``{Model}Resource`` /
+    ``{Model}ListItem``) are still emitted so request schemas and
+    other ops on the resource keep working.
+    """
+
     can: str | None = None
     """Dotted path to an async ``(resource, session) -> bool`` guard.
 
@@ -673,18 +699,10 @@ class ResourceConfig(BaseModel):
     on other resources and any FE "search this table" affordance.
     Requires :attr:`link` to be set."""
 
-    saved_views: bool = False
-    """When ``True``, generate per-user CRUD for named filter+sort
-    states under ``/{prefix}/views``.  Stored views hold raw filter
-    values; on read, ``ref`` filter values hydrate through the
-    target resource's :attr:`link` builder.  Requires :attr:`link`
-    on this resource and on every resource referenced by ``ref``
-    filters."""
-
     link: LinkConfig | None = None
     """How this resource serializes as a link.  Required when
-    :attr:`searchable` or :attr:`saved_views` is on, and when any
-    other resource's filter has ``values: "ref"`` pointing here."""
+    :attr:`searchable` is on, and when any other resource's
+    filter has ``values: "ref"`` pointing here."""
 
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
@@ -825,17 +843,6 @@ class ProjectConfig(FoundryConfig):
                     )
                     raise ValueError(msg)
 
-                if resource.saved_views:
-                    msg = (
-                        f"Resource {resource.model!r} sets "
-                        f"saved_views=True but the project has no "
-                        f"auth configured.  Saved views are scoped "
-                        f"per user and require a session for "
-                        f"`owner_id`; configure project.auth or "
-                        f"drop the flag."
-                    )
-                    raise ValueError(msg)
-
                 for op in resource.operations:
                     if op.can is not None:
                         msg = (
@@ -856,11 +863,10 @@ class ProjectConfig(FoundryConfig):
     ) -> ProjectConfig:
         """Reject opt-ins that need a link without one.
 
-        ``searchable=True`` and ``saved_views=True`` both serialize
-        results via the resource's :class:`LinkConfig`; any other
-        resource's filter using ``values: "ref"`` to point here
-        does the same on the target side.  Each of those triggers
-        requires :attr:`ResourceConfig.link` to be set.
+        ``searchable=True`` serializes results via the resource's
+        :class:`LinkConfig`; any other resource's filter using
+        ``values: "ref"`` to point here does the same on the
+        target side.  Each requires :attr:`ResourceConfig.link`.
         """
         ref_targets = _collect_ref_targets(self)
 
@@ -952,7 +958,7 @@ def _check_resource_link(
     """Raise if *resource* needs a link config but doesn't have one."""
     slug = _resource_class_lower(resource)
     referenced = slug in ref_targets
-    needs_link = resource.searchable or resource.saved_views or referenced
+    needs_link = resource.searchable or referenced
 
     if not needs_link or resource.link is not None:
         return
@@ -961,9 +967,6 @@ def _check_resource_link(
 
     if resource.searchable:
         reasons.append("searchable=True")
-
-    if resource.saved_views:
-        reasons.append("saved_views=True")
 
     if referenced:
         reasons.append(
