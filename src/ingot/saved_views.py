@@ -24,7 +24,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import DateTime, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 if TYPE_CHECKING:
@@ -86,11 +87,12 @@ class SavedViewMixin:
     """Caller-supplied display name."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSON,
+        JSONB,
         default=dict,
     )
-    """Raw filter+sort spec.  Ref values store ids only; hydration
-    happens at read time via :func:`hydrate_view`."""
+    """Raw filter+sort spec, stored as PostgreSQL ``JSONB``.
+    Ref values store ids only; hydration happens at read time via
+    :func:`hydrate_view`."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now_utc

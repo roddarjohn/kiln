@@ -53,9 +53,21 @@ local resource = import "be/resources/presets.libsonnet";
           // Structured filter spec — every entry declares its
           // operators, value source, and any source-specific
           // metadata so the discovery payload can drive a typed
-          // filter UI.
+          // filter UI.  Demonstrates every value-kind:
+          //   self      — filter by Product's own id (eq / in)
+          //   ref       — filter by FK to Customer (autocomplete
+          //               into /customers/_values)
+          //   free_text — ILIKE on string columns
+          //   literal   — typed numeric input
+          //   bool      — toggle
           filter={
             fields: [
+              { name: "id", values: "self" },
+              {
+                name: "customer_id",
+                values: "ref",
+                ref_resource: "customer",
+              },
               { name: "sku", values: "free_text" },
               { name: "name", values: "free_text" },
               {
