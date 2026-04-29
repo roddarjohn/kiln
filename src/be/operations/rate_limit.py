@@ -100,25 +100,17 @@ class RateLimit:
 
             handler.decorators.insert(0, f'@limiter.limit("{limit}")')
             handler.extra_imports.append((rate_limit_module, "limiter"))
-
-            if not _has_request_param(handler):
-                # slowapi reads the limit metadata off the request
-                # at runtime, so the parameter has to be on the
-                # signature even when the handler body never
-                # references it.  Insert at the front so optional /
-                # default-bearing params stay last.
-                handler.params.insert(
-                    0,
-                    RouteParam(name="request", annotation="Request"),
-                )
-                handler.extra_imports.append(("fastapi", "Request"))
+            # slowapi reads the limit metadata off the request at
+            # runtime, so the parameter has to be on the signature
+            # even when the handler body never references it.
+            # Renderer dedupes ``params`` by name and
+            # :class:`~foundry.imports.ImportCollector` dedupes
+            # imports, so we can blindly insert here without
+            # checking whether the handler already declares them.
+            handler.params.insert(
+                0,
+                RouteParam(name="request", annotation="Request"),
+            )
+            handler.extra_imports.append(("fastapi", "Request"))
 
         return ()
-
-
-def _has_request_param(handler: RouteHandler) -> bool:
-    """Return whether *handler* already declares ``request: Request``."""
-    return any(
-        param.name == "request" and param.annotation == "Request"
-        for param in handler.params
-    )

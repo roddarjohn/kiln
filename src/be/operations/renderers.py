@@ -322,11 +322,24 @@ def _handler_context(
     signature, docstring, body block).  Op-specific templates
     ``{% extends %}`` the default and override the ``body`` block
     only, so they share the same context shape.
+
+    ``handler.params`` is deduplicated by name (first occurrence
+    wins) so after-children ops can append parameters without
+    checking whether they're already present -- the same idiom
+    :class:`~foundry.imports.ImportCollector` uses for imports.
     """
-    params: list[dict[str, object]] = [
-        {"name": p.name, "annotation": p.annotation, "default": p.default}
-        for p in handler.params
-    ]
+    seen: set[str] = set()
+    params: list[dict[str, object]] = []
+
+    for p in handler.params:
+        if p.name in seen:
+            continue
+
+        seen.add(p.name)
+        params.append(
+            {"name": p.name, "annotation": p.annotation, "default": p.default}
+        )
+
     params.append(
         {
             "name": "db",
