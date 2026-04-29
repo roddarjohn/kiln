@@ -148,9 +148,6 @@ be.operations
 .. automodule:: ingot.filters
    :members:
 
-.. automodule:: ingot.links
-   :members:
-
 .. automodule:: ingot.ordering
    :members:
 
