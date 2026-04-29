@@ -1,0 +1,10 @@
+class {{ schema_name }}(BaseModel):
+    """Link schema for {{ schema_name | replace("Link", "") }}."""
+
+    type: Literal["{{ slug }}"] = "{{ slug }}"
+{% if kind == "id" or kind == "id_name" %}
+    id: {{ id_py_type }}
+{% endif %}
+{% if kind == "name" or kind == "id_name" %}
+    name: str
+{% endif %}

@@ -2,22 +2,26 @@
 
 Walks each :class:`~be.config.schema.ResourceConfig` in an app
 that declares a :class:`~be.config.schema.LinkConfig` and emits
-``{app_module}/links.py`` containing a ``LINKS`` dict keyed by
-the resource's slug (lowercase model class name).  Each entry is
-an async callable ``(instance, session) -> LinkSchema`` — either
-a generated lambda for shorthand ``link`` blocks (pull
-``id``/``name`` straight off the model) or an imported builder
-function for ``link.builder`` dotted paths.
+``{app_module}/links.py`` containing two dicts keyed by slug:
 
-The module is only emitted when at least one resource in the app
-declares a link.  Otherwise the file is skipped so projects that
-don't use the link/saved-views/searchable surfaces see no extra
-modules in their generated tree.
+* ``LINKS`` — async ``(instance, session) -> {Model}Link`` builders
+  (one per resource).  Generated lambdas for shorthand entries
+  pull ``id`` / ``name`` straight off the model; user-supplied
+  ``link.builder`` dotted paths get imported as-is.
+* ``REF_RESOLVERS`` — async ``(ids, db, session) -> (items,
+  dropped)`` resolvers that fetch rows by id and run them through
+  the matching link builder.  Powers saved-view hydration.
+
+Each resource's link schema is generated separately by
+:class:`~be.operations.link_schema.LinkSchema` so the typed
+``{Model}Link`` Pydantic class lives in the resource's schemas
+file and the OpenAPI surface gets a proper discriminated type.
 """
 
 from typing import TYPE_CHECKING, cast
 
-from foundry.naming import Name
+from be.operations._naming import app_module_for
+from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -28,13 +32,6 @@ if TYPE_CHECKING:
 
     from be.config.schema import App, ProjectConfig, ResourceConfig
     from foundry.engine import BuildContext
-
-
-_LINK_KIND_TO_CLASS: dict[str, str] = {
-    "name": "LinkName",
-    "id": "LinkID",
-    "id_name": "LinkIDName",
-}
 
 
 @operation("links", scope="app", after_children=True)
@@ -67,10 +64,11 @@ class Links:
         """
         app = ctx.instance
         module = app.config.module
+        package_prefix = ctx.package_prefix
 
         entries: list[dict[str, object]] = []
-        link_class_names: set[str] = set()
         model_imports: dict[str, set[str]] = {}
+        link_schema_imports: dict[str, set[str]] = {}
         builder_imports: dict[str, set[str]] = {}
 
         for _, resource_obj in ctx.store.children(
@@ -82,7 +80,11 @@ class Links:
                 continue
 
             entry = _build_entry(
-                resource, link_class_names, model_imports, builder_imports
+                resource,
+                package_prefix,
+                model_imports,
+                link_schema_imports,
+                builder_imports,
             )
             entries.append(entry)
 
@@ -94,8 +96,8 @@ class Links:
             template="fastapi/links.py.j2",
             context={
                 "module": module,
-                "link_class_names": sorted(link_class_names),
                 "model_imports": _sorted_imports(model_imports),
+                "link_schema_imports": _sorted_imports(link_schema_imports),
                 "builder_imports": _sorted_imports(builder_imports),
                 "entries": entries,
             },
@@ -104,15 +106,15 @@ class Links:
 
 def _build_entry(
     resource: ResourceConfig,
-    link_class_names: set[str],
+    package_prefix: str,
     model_imports: dict[str, set[str]],
+    link_schema_imports: dict[str, set[str]],
     builder_imports: dict[str, set[str]],
 ) -> dict[str, object]:
     """Build template context for one resource's link entry.
 
-    Mutates *link_class_names* / *model_imports* / *builder_imports*
-    in place so the template can render the import block as one
-    sorted line per module.
+    Mutates the import bags in place so the template can render
+    the import block as one sorted line per module.
     """
     link = resource.link
 
@@ -122,8 +124,14 @@ def _build_entry(
 
     model_module, model_name = Name.from_dotted(resource.model)
     slug = model_name.lower
-    link_class = _LINK_KIND_TO_CLASS[link.kind]
-    link_class_names.add(link_class)
+    link_schema_class = f"{model_name.pascal}Link"
+    schema_module = prefix_import(
+        package_prefix,
+        app_module_for(resource.model),
+        "schemas",
+        slug,
+    )
+    link_schema_imports.setdefault(schema_module, set()).add(link_schema_class)
 
     # Always import the model — the ref resolver fetches rows by
     # id even when the link itself is built by a user function.
@@ -160,7 +168,7 @@ def _build_entry(
         "fn_name": fn_name,
         "is_user_builder": False,
         "model_class": model_name.pascal,
-        "link_class": link_class,
+        "link_schema_class": link_schema_class,
         "id_attr": id_attr,
         "name_attr": name_attr,
         "kind": link.kind,
