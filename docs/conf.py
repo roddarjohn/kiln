@@ -94,6 +94,9 @@ nitpick_ignore = [
     ("py:class", "modifier"),
     # NamedTuple internals (private API).
     ("py:class", "foundry.operation.OperationEntry"),
+    # pgcraft has no published Sphinx inventory; PGCraftFileMixin
+    # references its UUIDV4PKPlugin to explain the no-id contract.
+    ("py:class", "pgcraft.plugins.pk.UUIDV4PKPlugin"),
 ]
 
 intersphinx_mapping = {

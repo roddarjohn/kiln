@@ -2,24 +2,22 @@
 
 Conditional on a resource declaring both:
 
-* ``get_fn`` -- the openapi-ts SDK function for the get-by-id
+- ``get_fn`` -- the openapi-ts SDK function for the get-by-id
   endpoint, and
-* ``detail`` -- a :class:`fe.config.DetailConfig` carrying the
+- ``detail`` -- a :class:`fe.config.DetailConfig` carrying the
   section breakdown and any header actions.
 
-The detail page fetches the resource via React Query, renders
-each configured section (fields rendered as label / value pairs
-or a user-supplied component), and exposes header buttons for
-any actions referenced by ``detail.actions``.
+Detail is a TSR route at ``/<key>/$id``.  The component reads
+``id`` from ``useParams``, fetches the resource through the
+auto-generated ``*Options`` helper from the openapi-ts
+react-query plugin, and suspends via ``useSuspenseQuery`` so the
+route's ``pendingComponent`` (a glaze ``<PageLoader>``) handles
+loading.  Errors propagate to the route's ``errorComponent``.
 
-The component is exported as ``{Pascal}Detail`` and accepts:
-
-* ``id: string`` -- the resource id to fetch.
-* ``close: () => void`` -- called when the page wants to be
-  dismissed (e.g. from a Drawer wrapper in the list page).
-
-The list op (:mod:`fe.operations.resource_list`) opens this
-component in a glaze Drawer when ``list.row_click == "detail"``.
+The header carries a back ``<Link>`` (``onPress`` runs
+``router.history.back()``) plus optional ``Edit`` / per-action
+buttons that navigate to the matching sibling routes.  Sections
+render as ``<DataList>`` (or a user-supplied component).
 """
 
 from __future__ import annotations

@@ -9,24 +9,24 @@ one new file, never editing the central router.
 
 Per-resource route shape:
 
-* ``/<key>``                      -> ``{Pascal}List``
-* ``/<key>/new``                  -> ``Create{Pascal}Form``
-* ``/<key>/$id``                  -> ``{Pascal}Detail``
-* ``/<key>/$id/edit``             -> ``Update{Pascal}Form``
-* ``/<key>/$id/<action>``         -> ``{Pascal}{Action}Action`` (one per action)
+- ``/<key>`` -> ``{Pascal}List``
+- ``/<key>/new`` -> ``Create{Pascal}Form``
+- ``/<key>/$id`` -> ``{Pascal}Detail``
+- ``/<key>/$id/edit`` -> ``Update{Pascal}Form``
+- ``/<key>/$id/<action>`` -> ``{Pascal}{Action}Action``  (one per action)
 
 The router.tsx file declares:
 
-* ``rootRoute`` -- pathless root, just an ``<Outlet/>``.
-* ``loginRoute`` at ``/login`` -- public, no Shell chrome.
-* ``appLayoutRoute`` -- pathless layout that renders ``<Shell>``
+- ``rootRoute`` -- pathless root, just an ``<Outlet/>``.
+- ``loginRoute`` at ``/login`` -- public, no Shell chrome.
+- ``appLayoutRoute`` -- pathless layout that renders ``<Shell>``
   and runs ``beforeLoad`` to redirect unauthenticated requests
   to ``/login``.  All resource trees mount under this layout.
 
-Auth state is injected as TSR context via ``createRouter({
-context })``; ``beforeLoad`` reads ``context.auth`` to gate
-access.  Public routes (login) sit outside the layout so they
-never trigger the redirect.
+Auth state is injected as TSR context via the ``context`` option
+to ``createRouter``; ``beforeLoad`` reads ``context.auth`` to
+gate access.  Public routes (login) sit outside the layout so
+they never trigger the redirect.
 
 The list route carries a typed ``validateSearch`` for filters,
 sort, and pagination -- the only state that should round-trip

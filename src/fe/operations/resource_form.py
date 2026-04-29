@@ -4,20 +4,27 @@ For every resource that declares a ``create`` (and / or
 ``update``) section, this op emits the matching form
 components:
 
-* ``src/{key}/Create{Pascal}Form.tsx`` -- wraps the openapi-ts
-  ``create_fn`` mutation; rendered inside the list page's
-  ``<DrawerTrigger><Drawer>`` (the parent owns the open / close
-  state and passes a ``close`` callback via render-prop).
-* ``src/{key}/Update{Pascal}Form.tsx`` -- analogous, for
-  ``update_fn``.
+- ``src/{key}/Create{Pascal}Form.tsx`` -- mounted at the
+  ``/<key>/new`` route.
+- ``src/{key}/Update{Pascal}Form.tsx`` -- mounted at the
+  ``/<key>/$id/edit`` route.  Requires ``get_fn`` (used to
+  pre-populate the form).
 
-The form is plain controlled state today (no react-hook-form
-yet) -- one ``useState`` per field, each field a glaze
-``<TextField>``, submission via a React-Query ``useMutation``
-that invalidates ``[<key>]`` on success.  When more field types
-or validation are needed we'll layer on a richer form pipeline,
-but the simple shape covers the demo cases (CRUD with all-string
-bodies) without pulling in deps.
+Both forms ride glaze's ``useFormMutation`` -- a React-Hook-Form
++ React-Query adapter that collects the FormData at submit time
+and dispatches the openapi-ts mutation.  No per-field
+``useState`` boilerplate; each ``<TextField>`` is uncontrolled
+with a ``name`` matching the request body shape.
+
+Update forms additionally call ``useSuspenseQuery`` against the
+openapi-ts ``*Options`` helper to fetch the existing resource;
+the route's ``pendingComponent`` (a glaze ``<PageLoader>``)
+covers the load.  ``defaultValue`` on each TextField pre-fills
+the field with the current value.
+
+Cancel and the back link both pop the browser history so the
+user lands wherever they came from (list, detail, etc.).  On
+success we toast, invalidate ``[<key>]``, and pop history.
 """
 
 from __future__ import annotations
