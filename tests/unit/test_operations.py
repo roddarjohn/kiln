@@ -17,6 +17,7 @@ from be.config.schema import (
     PaginateConfig,
     ProjectConfig,
     ResourceConfig,
+    StructuredFilterField,
     TelemetryConfig,
 )
 from be.operations.auth import Auth as AuthOp
@@ -1538,7 +1539,11 @@ class TestFilter:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         schemas = [r for r in outputs if isinstance(r, SchemaClass)]
         assert [s.name for s in schemas] == ["UserFilterCondition"]
@@ -1551,7 +1556,11 @@ class TestFilter:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         search_req = _find_output(
             list_ctx.store, SchemaClass, name="UserSearchRequest"
@@ -1560,31 +1569,6 @@ class TestFilter:
         assert search_req.body_context["has_filter"] is True
         assert handler.body_context["has_filter"] is True
         assert ("ingot.filters", "apply_filters") in handler.extra_imports
-
-    def test_empty_fields_defaults_to_list_fields(self):
-        """FilterConfig() with no fields list uses all list fields."""
-        resource = ResourceConfig(
-            model="app.models.User",
-            operations=[
-                OperationConfig(
-                    name="list",
-                    fields=[f.model_dump() for f in _FIELDS],
-                ),
-            ],
-        )
-        list_ctx = _drive_list(resource)
-        outputs = _drive_extension(
-            list_ctx,
-            type_name="filter",
-            op_instance=Filter(),
-            options=FilterConfig(),
-        )
-        schema = next(
-            s
-            for s in outputs
-            if isinstance(s, SchemaClass) and s.name == "UserFilterCondition"
-        )
-        assert schema.body_context["allowed_fields"] == ["name", "age"]
 
 
 class TestOrder:
@@ -2034,7 +2018,11 @@ class TestListExtensionsCompose:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         _drive_extension(
             list_ctx,

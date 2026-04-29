@@ -145,7 +145,7 @@
       else [{ name: "name", type: "str" }];
     local f_fields =
       if filter_fields != null then filter_fields
-      else ["resource_type"];
+      else [{ name: "resource_type", values: "free_text" }];
     [
       {
         name: "get",

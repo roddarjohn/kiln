@@ -175,10 +175,19 @@ async def _hydrate_entry(
     db: AsyncSession,
     session: Any,
 ) -> dict[str, Any]:
-    """Hydrate one filter entry, leaving non-ref values untouched."""
+    """Hydrate one filter entry, leaving non-link values untouched.
+
+    Both ``ref`` (FK to another resource) and ``self`` (PK of
+    this resource) values dump as link schemas, so they share
+    the same hydration path: look the type up in *ref_resolvers*
+    and replace ``ids`` with hydrated ``items``.
+    """
     value = entry.get("value")
 
-    if not isinstance(value, dict) or value.get("kind") != "ref":
+    if not isinstance(value, dict):
+        return entry
+
+    if value.get("kind") not in {"ref", "self"}:
         return entry
 
     ref_type = value.get("type")

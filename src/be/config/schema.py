@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from foundry.config import FoundryConfig
+from foundry.naming import Name
 from foundry.scope import Scoped
 
 NESTED: Literal["nested"] = "nested"
@@ -778,9 +779,9 @@ def _resource_class_lower(resource: ResourceConfig) -> str:
     so ``ref_resource`` strings resolve to the same identifier the
     URL prefix uses.
     """
-    _, _, class_name = resource.model.rpartition(".")
+    _, model = Name.from_dotted(resource.model)
 
-    return class_name.lower()
+    return model.lower
 
 
 class AppConfig(BaseModel):
@@ -976,11 +977,7 @@ def _collect_ref_targets(project: ProjectConfig) -> set[str]:
 
 
 def _ref_target_from_entry(entry: object) -> str | None:
-    """Pull the ``ref_resource`` value off a filter-fields entry.
-
-    Bare-string entries are ``free_text`` shorthand and never have
-    a target; only structured dicts with ``values: "ref"`` do.
-    """
+    """Pull the ``ref_resource`` value off a filter-fields entry."""
     if not isinstance(entry, dict):
         return None
 
@@ -992,13 +989,28 @@ def _ref_target_from_entry(entry: object) -> str | None:
     return target if isinstance(target, str) and target else None
 
 
+def _has_self_filter(resource: ResourceConfig) -> bool:
+    """Whether any filter on *resource* uses ``values: "self"``."""
+    for op in resource.operations:
+        for modifier in op.modifiers:
+            if modifier.type != "filter":
+                continue
+
+            for entry in modifier.options.get("fields", []) or []:
+                if isinstance(entry, dict) and entry.get("values") == "self":
+                    return True
+
+    return False
+
+
 def _check_resource_link(
     resource: ResourceConfig, ref_targets: set[str]
 ) -> None:
     """Raise if *resource* needs a link config but doesn't have one."""
     slug = _resource_class_lower(resource)
     referenced = slug in ref_targets
-    needs_link = resource.searchable or referenced
+    has_self = _has_self_filter(resource)
+    needs_link = resource.searchable or referenced or has_self
 
     if not needs_link or resource.link is not None:
         return
@@ -1012,6 +1024,9 @@ def _check_resource_link(
         reasons.append(
             f"another resource's filter targets it via ref_resource={slug!r}"
         )
+
+    if has_self:
+        reasons.append('its own filters include `values: "self"`')
 
     msg = (
         f"Resource {resource.model!r} requires `link` because "
@@ -1029,7 +1044,7 @@ def _check_resource_link(
 # -------------------------------------------------------------------
 
 
-FilterValueKind = Literal["enum", "bool", "ref", "free_text", "literal"]
+FilterValueKind = Literal["enum", "bool", "ref", "self", "free_text", "literal"]
 """Discriminator for how a filter field's values are sourced and rendered.
 
 * ``"enum"`` — points at a Python :class:`enum.Enum` class via
@@ -1037,8 +1052,14 @@ FilterValueKind = Literal["enum", "bool", "ref", "free_text", "literal"]
   served queryably from the per-field ``_values`` endpoint.
 * ``"bool"`` — first-class; FE renders toggle/checkbox.  No
   ``_values`` endpoint.
-* ``"ref"`` — FK to another resource.  Delegates to the target
+* ``"ref"`` — FK to *another* resource.  Delegates to the target
   resource's resource-level ``_values`` endpoint for autocomplete.
+* ``"self"`` — the resource's own primary key.  Discovery emits
+  ``{"kind": "self", "type": <slug>, "endpoint"?: <_values URL>}``
+  so the FE renders an autocomplete tied to this resource (when
+  it's :attr:`~ResourceConfig.searchable`) or a plain typed input
+  otherwise.  Useful for ``id`` filters and bulk-row operations
+  via ``op: "in"``.
 * ``"free_text"`` — string column, served from the field's
   ``_values`` endpoint via ILIKE.
 * ``"literal"`` — numeric / date / datetime.  FE renders a native
@@ -1067,6 +1088,7 @@ _DEFAULT_OPERATORS: dict[FilterValueKind, list[FilterOperator]] = {
     "enum": ["eq", "in"],
     "bool": ["eq"],
     "ref": ["eq", "in"],
+    "self": ["eq", "in"],
     "free_text": ["eq", "contains", "starts_with"],
     "literal": ["eq", "gt", "gte", "lt", "lte"],
 }
@@ -1074,28 +1096,11 @@ _DEFAULT_OPERATORS: dict[FilterValueKind, list[FilterOperator]] = {
 applied when a :class:`StructuredFilterField` omits ``operators``."""
 
 
-_ALL_OPERATORS: list[FilterOperator] = [
-    "eq",
-    "neq",
-    "gt",
-    "gte",
-    "lt",
-    "lte",
-    "contains",
-    "starts_with",
-    "in",
-    "is_null",
-]
-
-
 class StructuredFilterField(BaseModel):
     """Structured spec for one filterable field.
 
     Used inside :attr:`FilterConfig.fields` to describe operators,
     value source, and any source-specific metadata for the field.
-    The bare-string entry form is shorthand for a permissive
-    ``free_text`` field with the full operator vocabulary, kept for
-    back-compat with existing fixtures.
     """
 
     name: str
@@ -1143,6 +1148,14 @@ class StructuredFilterField(BaseModel):
             self._reject("type", self.type)
             self._reject("enum", self.enum)
 
+        elif self.values == "self":
+            # Target is the resource being filtered; nothing extra
+            # to declare.  Discovery payload fills in the slug and
+            # ``_values`` endpoint at codegen time.
+            self._reject("enum", self.enum)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
         else:
             self._reject("enum", self.enum)
             self._reject("type", self.type)
@@ -1170,57 +1183,13 @@ class StructuredFilterField(BaseModel):
 class FilterConfig(BaseModel):
     """Configuration for list filtering.
 
-    Each entry in ``fields`` is either a bare string (shorthand for
-    a permissive ``free_text`` field) or a
-    :class:`StructuredFilterField` dict that explicitly declares
-    operators, value source, and any source-specific metadata.
-
-    When ``fields`` is empty or omitted, every field on the parent
-    list op becomes filterable in the permissive shorthand form.
+    Each entry in ``fields`` is a :class:`StructuredFilterField`
+    declaring a field's operators, value source, and any
+    source-specific metadata.  Required — there is no implicit
+    "all fields filterable" default.
     """
 
-    fields: list[str | StructuredFilterField] | None = None
-
-    def normalized_fields(
-        self, list_field_names: list[str]
-    ) -> list[StructuredFilterField]:
-        """Return every filterable field as a structured spec.
-
-        Bare-string entries are expanded to ``free_text`` with the
-        full operator vocabulary (preserving prior behaviour where
-        any operator was accepted on a named field).  When
-        :attr:`fields` is None/empty, *list_field_names* drives the
-        expansion so callers don't have to special-case empty.
-
-        Args:
-            list_field_names: Names of every field on the parent
-                list op, used as the fallback set when
-                :attr:`fields` is None/empty.
-
-        Returns:
-            One :class:`StructuredFilterField` per filterable
-            field, in declared order.
-
-        """
-        entries: list[str | StructuredFilterField] = self.fields or list(
-            list_field_names
-        )
-        result: list[StructuredFilterField] = []
-
-        for entry in entries:
-            if isinstance(entry, str):
-                result.append(
-                    StructuredFilterField(
-                        name=entry,
-                        values="free_text",
-                        operators=list(_ALL_OPERATORS),
-                    )
-                )
-
-            else:
-                result.append(entry)
-
-        return result
+    fields: list[StructuredFilterField] = Field(..., min_length=1)
 
 
 class OrderConfig(BaseModel):

@@ -50,15 +50,14 @@ local resource = import "be/resources/presets.libsonnet";
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
-          // Structured filter spec — bare strings stay valid for
-          // back-compat and expand to permissive ``free_text``;
-          // structured entries declare per-field operators and
-          // value sources so the discovery payload can drive a
-          // typed filter UI.
+          // Structured filter spec — every entry declares its
+          // operators, value source, and any source-specific
+          // metadata so the discovery payload can drive a typed
+          // filter UI.
           filter={
             fields: [
               { name: "sku", values: "free_text" },
-              "name",  // shorthand
+              { name: "name", values: "free_text" },
               {
                 name: "unit_price",
                 values: "literal",

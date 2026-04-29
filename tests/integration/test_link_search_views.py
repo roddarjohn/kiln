@@ -134,7 +134,9 @@ def _saved_view() -> ResourceConfig:
                 modifiers=[
                     {
                         "type": "filter",
-                        "fields": ["resource_type"],
+                        "fields": [
+                            {"name": "resource_type", "values": "free_text"},
+                        ],
                     },
                 ],
                 can="inventory.guards.is_view_owner",

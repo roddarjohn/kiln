@@ -83,8 +83,7 @@ class Filter:
             ctx.store.ancestor_of(ctx.instance_id, "operation"),
         )
 
-        list_field_names = [f.name for f in result.list_item.fields]
-        structured = options.normalized_fields(list_field_names)
+        structured = options.fields
         allowed = [f.name for f in structured]
         sort_payload = _sort_payload(list_op)
 
@@ -117,6 +116,7 @@ class Filter:
 
 def _filter_payload(
     field: StructuredFilterField,
+    resource: ResourceConfig,
     resource_prefix: str,
     project: ProjectConfig,
 ) -> dict[str, object]:
@@ -126,10 +126,6 @@ def _filter_payload(
     template can ``tojson`` it without introspection — except the
     ``enum`` case, which references the imported enum class by
     name and is handled in the template itself.
-
-    For ``ref`` fields the endpoint is resolved against *project*
-    so it points at the *target* resource's resource-level
-    ``_values`` route, honoring its ``route_prefix`` override.
     """
     values: dict[str, object] = {"kind": field.values}
 
@@ -150,6 +146,13 @@ def _filter_payload(
 
         if endpoint is not None:
             values["endpoint"] = endpoint
+
+    elif field.values == "self":
+        _, model = Name.from_dotted(resource.model)
+        values["type"] = model.lower
+
+        if resource.searchable:
+            values["endpoint"] = f"{resource_prefix}/_values"
 
     return {
         "field": field.name,
@@ -232,7 +235,9 @@ def _emit_discovery(
     class so the response reflects the enum at request time.
     """
     prefix = _resource_prefix(resource)
-    payloads = [_filter_payload(f, prefix, project) for f in structured]
+    payloads = [
+        _filter_payload(f, resource, prefix, project) for f in structured
+    ]
     enum_imports: list[tuple[str, str]] = []
 
     for field in structured:

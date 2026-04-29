@@ -25,6 +25,11 @@
 {% if "endpoint" in _vs %}
                     "endpoint": {{ _vs["endpoint"] | tojson }},
 {% endif %}
+{% elif _vs["kind"] == "self" %}
+                    "type": {{ _vs["type"] | tojson }},
+{% if "endpoint" in _vs %}
+                    "endpoint": {{ _vs["endpoint"] | tojson }},
+{% endif %}
 {% endif %}
                 },
             },

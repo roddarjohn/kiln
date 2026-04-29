@@ -21,15 +21,23 @@ _MAX_LIMIT = 200
 
 
 class FilterValuesRequest(BaseModel):
-    """Body accepted by every ``POST /_values/{field}`` route.
+    """Body accepted by every value-provider endpoint.
 
-    A single shared shape so the FE can hit any value-provider
-    endpoint with the same request type.
+    A single shared shape so the FE can hit ``POST /_values`` and
+    ``POST /_values/{field}`` routes with the same request type.
+
+    ``ids`` is set when the FE wants link-schema dumps for a
+    specific set of primary-key values — typically to render
+    chips for a saved or in-flight ``self`` / ``ref`` filter.
+    The resource's ``_values`` endpoint uses ``ids`` to filter
+    by ``pk in (...)`` ahead of the q-search; ``q`` and
+    ``cursor`` continue to apply normally for autocomplete.
     """
 
     q: str | None = None
     cursor: str | None = None
     limit: int | None = None
+    ids: list[Any] | None = None
 
 
 def resolved_limit(req_limit: int | None) -> int:
