@@ -32,5 +32,11 @@
     // deny-list and the generated logout calls store.revoke first.
     [if std.objectHas(opts, "session_store") then "session_store"]:
       opts.session_store,
+    // Attribute on the parsed session schema that the saved-view
+    // CRUD reads to scope rows by owner.  Defaults to "user_id";
+    // override when the consumer's session names it differently
+    // (e.g. "sub" for JWT subject claims).
+    [if std.objectHas(opts, "user_id_attr") then "user_id_attr"]:
+      opts.user_id_attr,
   },
 }
