@@ -16,7 +16,7 @@
 //     resources: { project: fe.resource({ ... }) },
 //   }
 
-local nav     = import "fe/nav.libsonnet";
+local nav = import "fe/nav.libsonnet";
 local presets = import "fe/resources/presets.libsonnet";
 
 {
