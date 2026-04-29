@@ -66,6 +66,10 @@ be config schema
    :members:
    :undoc-members:
 
+.. autoclass:: be.config.schema.RateLimitConfig
+   :members:
+   :undoc-members:
+
 .. autoclass:: be.config.schema.FilterConfig
    :members:
    :undoc-members:

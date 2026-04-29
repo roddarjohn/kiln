@@ -121,6 +121,12 @@ be.operations
 .. automodule:: be.operations.scaffold
    :members:
 
+.. automodule:: be.operations.rate_limit_scaffold
+   :members:
+
+.. automodule:: be.operations.rate_limit
+   :members:
+
 .. automodule:: be.operations.routing
    :members:
 
@@ -146,6 +152,9 @@ be.operations
    :members:
 
 .. automodule:: ingot.queue
+   :members:
+
+.. automodule:: ingot.rate_limit
    :members:
 
 .. automodule:: ingot.utils
