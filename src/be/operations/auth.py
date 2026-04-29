@@ -9,7 +9,7 @@ effective ``require_auth`` and flips
 from typing import TYPE_CHECKING
 
 from be.operations.types import RouteHandler, TestCase
-from foundry.naming import prefix_import
+from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 
 if TYPE_CHECKING:
@@ -46,7 +46,10 @@ class Auth:
         """
         auth_cfg = ctx.config.auth
         assert auth_cfg is not None  # noqa: S101 -- guaranteed by when()
-        session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
+        session_module, session_name_obj = Name.from_dotted(
+            auth_cfg.session_schema
+        )
+        session_name = session_name_obj.raw
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
         resource_default = ctx.instance.require_auth

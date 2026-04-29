@@ -220,13 +220,15 @@ def _resolve_can_ref(
     if op.can is None:
         return "always_true"
 
-    module_path, _, attr = op.can.rpartition(".")
+    try:
+        module_path, attr_name = Name.from_dotted(op.can)
 
-    if not module_path or not attr:
+    except ValueError as exc:
         msg = (
             f"Operation {op.name!r}: can must be a dotted path (got {op.can!r})"
         )
-        raise ValueError(msg)
+        raise ValueError(msg) from exc
 
+    attr = attr_name.raw
     guard_imports.add_from(module_path, attr)
     return attr

@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from foundry.naming import Name
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -162,11 +164,8 @@ def introspect_action_fn(
 
 def _import_callable(dotted: str) -> Callable[..., object]:
     """Import a named attribute from a dotted path."""
-    module_path, _, attr = dotted.rpartition(".")
-
-    if not module_path:
-        msg = f"'{dotted}' is not a valid dotted path."
-        raise ValueError(msg)
+    module_path, attr_name = Name.from_dotted(dotted)
+    attr = attr_name.raw
 
     try:
         module = importlib.import_module(module_path)

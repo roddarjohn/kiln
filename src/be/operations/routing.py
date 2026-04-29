@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.operations.types import RouteHandler
+from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -169,5 +170,5 @@ def _resource_module_slug(resource: ResourceConfig) -> str:
         ``"blog.models.Article"``.
 
     """
-    _, _, class_name = resource.model.rpartition(".")
-    return class_name.lower()
+    _, model = Name.from_dotted(resource.model)
+    return model.lower
