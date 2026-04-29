@@ -2,23 +2,16 @@
 
 For every action declared on a resource (``resources.*.actions``)
 this op emits ``src/{key}/actions/{Pascal}{ActionPascal}Action.tsx``,
-the form/dialog body wired to the action's openapi-ts SDK fn.
+a TSR route component mounted at ``/<key>/$id/<action>``.  The
+list and detail pages navigate to this route rather than opening
+a dialog, so the URL is shareable and the back button works.
 
-The list page (:mod:`fe.operations.resource_list`) is responsible
-for the ``DialogTrigger`` / ``Dialog`` wrapper -- this op only
-emits the inner content rendered by the dialog's
-``({ close }) => ...`` render-prop.
-
-Action components accept:
-
-* ``item: {ListItemType}`` -- the row the action runs against.
-  Object actions use ``item.id`` for the path param.
-* ``close: () => void`` -- the dialog close callback supplied by
-  glaze's ``DialogTrigger`` render-prop.
-
-The body fields are state-driven ``TextField``s keyed off
-``fields`` in the action config; a ``confirm_text`` renders as
-text above the inputs.
+The component reads ``id`` from ``useParams`` and dispatches the
+action's openapi-ts SDK fn through ``useMutation``.  Body fields
+are state-driven ``TextField``s keyed off ``fields`` in the
+action config; a ``confirm_text`` renders as text above the
+inputs.  Cancel and the back link pop browser history; on
+success we toast, invalidate ``[<key>]``, and pop history.
 """
 
 from __future__ import annotations
