@@ -198,20 +198,48 @@ def test_every_generated_python_file_parses(files: dict[str, str]) -> None:
 
 def test_links_registry_emitted(files: dict[str, str]) -> None:
     """Linked resources show up in inventory/links.py with builders
-    *and* ref resolvers."""
+    *and* ref resolvers, importing per-resource link schemas."""
     links = files["inventory/links.py"]
 
-    assert "from ingot.links import LinkIDName" in links
-    assert "from inventory.models import" in links
-    # Generated link builders for shorthand entries.
+    # Per-resource link schemas imported from generated schemas.
+    assert (
+        "from _generated.inventory.schemas.customer import CustomerLink"
+        in links
+    )
+    assert (
+        "from _generated.inventory.schemas.product import ProductLink" in links
+    )
+    assert "from inventory.models import Customer, Product" in links
+    # Generated link builders for shorthand entries return the
+    # per-resource link schema (typed by Literal[<slug>]).
     assert "async def _link_customer(" in links
+    assert "-> CustomerLink:" in links
     assert "async def _link_product(" in links
+    assert "-> ProductLink:" in links
     # Per-resource ref resolvers used by saved-view hydration.
     assert "async def _resolve_customer_refs(" in links
     assert "async def _resolve_product_refs(" in links
     # Both registries at the bottom of the module.
     assert '"customer": _link_customer' in links
     assert '"customer": _resolve_customer_refs' in links
+
+
+def test_link_schema_emitted_in_resource_schemas(
+    files: dict[str, str],
+) -> None:
+    """Each linked resource's schemas file gains ``{Model}Link`` —
+    ``type`` is a ``Literal[<slug>]`` so the FE-side OpenAPI gets
+    a proper discriminator."""
+    customer_schemas = files["inventory/schemas/customer.py"]
+
+    assert "class CustomerLink(BaseModel):" in customer_schemas
+    assert 'type: Literal["customer"] = "customer"' in customer_schemas
+    assert "id: uuid.UUID" in customer_schemas
+    assert "name: str" in customer_schemas
+
+    product_schemas = files["inventory/schemas/product.py"]
+    assert "class ProductLink(BaseModel):" in product_schemas
+    assert 'type: Literal["product"] = "product"' in product_schemas
 
 
 def test_searchable_emits_resource_values_route(
