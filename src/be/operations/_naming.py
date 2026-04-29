@@ -38,16 +38,3 @@ def object_specs_const(model: Name) -> str:
 def collection_specs_const(model: Name) -> str:
     """Return the per-resource collection-actions registry constant name."""
     return f"{model.raw.upper()}_COLLECTION_ACTIONS"
-
-
-def sorted_imports(
-    bag: dict[str, set[str]],
-) -> list[tuple[str, list[str]]]:
-    """Render an import bag as a deterministic list.
-
-    Sorts modules then names so the rendered ``from <module>
-    import <names>`` block is reproducible across builds.
-    Shared between ops that aggregate imports across resources
-    (action / link registry generation, etc.).
-    """
-    return [(mod, sorted(names)) for mod, names in sorted(bag.items())]

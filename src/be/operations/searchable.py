@@ -100,7 +100,6 @@ class Searchable:
         body_context: dict[str, object] = {
             "model_name": model.pascal,
             "slug": model.lower,
-            "pk_attr": resource.pk,
             "search_fields": search_fields,
         }
 

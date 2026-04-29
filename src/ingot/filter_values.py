@@ -25,19 +25,16 @@ class FilterValuesRequest(BaseModel):
 
     A single shared shape so the FE can hit ``POST /_values`` and
     ``POST /_values/{field}`` routes with the same request type.
-
-    ``ids`` is set when the FE wants link-schema dumps for a
-    specific set of primary-key values — typically to render
-    chips for a saved or in-flight ``self`` / ``ref`` filter.
-    The resource's ``_values`` endpoint uses ``ids`` to filter
-    by ``pk in (...)`` ahead of the q-search; ``q`` and
-    ``cursor`` continue to apply normally for autocomplete.
+    ``q`` does the work for both autocomplete and chip-rendering:
+    the resource's ``_values`` endpoint ILIKE-matches against the
+    configured search fields, so the FE narrows by name (or any
+    other configured search field) without a separate ID-lookup
+    code path.
     """
 
     q: str | None = None
     cursor: str | None = None
     limit: int | None = None
-    ids: list[Any] | None = None
 
 
 def resolved_limit(req_limit: int | None) -> int:

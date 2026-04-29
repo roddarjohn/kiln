@@ -100,6 +100,18 @@ class ImportCollector:
         """``{module: [name, ...]}`` of from-imports, preserving order."""
         return {module: list(names) for module, names in self._from.items()}
 
+    @property
+    def sorted_from_imports(self) -> list[tuple[str, list[str]]]:
+        """Deterministically-ordered from-imports.
+
+        Returns ``[(module, [name, ...]), ...]`` sorted by module
+        and by name so templates can iterate without re-sorting.
+        """
+        return [
+            (module, sorted(names))
+            for module, names in sorted(self._from.items())
+        ]
+
     def format(self, language: str) -> str:
         """Render the imports as a string in *language*'s syntax.
 

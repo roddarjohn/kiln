@@ -1,7 +1,7 @@
 """Generated link registry for app `{{ module }}`.
 
 Maps each opted-in resource's slug (lowercase model class name)
-to an async builder ``(instance, session) -> LinkSchema`` and
+to an async builder ``(instance, session) -> {Model}Link`` and
 to a ref resolver ``(ids, db, session) -> (items, dropped)``.
 
 * The ``LINKS`` mapping powers ``_values`` endpoints and any
@@ -18,12 +18,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ingot.links import {{ link_class_names | join(", ") }}
-
-{% for module, names in model_imports %}
-from {{ module }} import {{ names | join(", ") }}
-{% endfor %}
-{% for module, names in builder_imports %}
+{% for module, names in imports %}
 from {{ module }} import {{ names | join(", ") }}
 {% endfor %}
 
@@ -31,20 +26,13 @@ from {{ module }} import {{ names | join(", ") }}
 {% if not entry.is_user_builder %}
 
 
-async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ entry.link_class }}:
+async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ entry.link_schema_class }}:
 {% if entry.kind == "name" %}
-    return {{ entry.link_class }}(
-        type="{{ entry.slug }}",
-        name=obj.{{ entry.name_attr }},
-    )
+    return {{ entry.link_schema_class }}(name=obj.{{ entry.name_attr }})
 {% elif entry.kind == "id" %}
-    return {{ entry.link_class }}(
-        type="{{ entry.slug }}",
-        id=obj.{{ entry.id_attr }},
-    )
+    return {{ entry.link_schema_class }}(id=obj.{{ entry.id_attr }})
 {% else %}
-    return {{ entry.link_class }}(
-        type="{{ entry.slug }}",
+    return {{ entry.link_schema_class }}(
         id=obj.{{ entry.id_attr }},
         name=obj.{{ entry.name_attr }},
     )

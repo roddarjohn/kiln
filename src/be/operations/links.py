@@ -26,8 +26,9 @@ Two operations live here:
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations._naming import app_module_for, sorted_imports
+from be.operations._naming import app_module_for
 from be.operations.types import SchemaClass
+from foundry.imports import ImportCollector
 from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -117,9 +118,7 @@ class Links:
         package_prefix = ctx.package_prefix
 
         entries: list[dict[str, object]] = []
-        model_imports: dict[str, set[str]] = {}
-        link_schema_imports: dict[str, set[str]] = {}
-        builder_imports: dict[str, set[str]] = {}
+        imports = ImportCollector()
 
         for _, resource_obj in ctx.store.children(
             ctx.instance_id, child_scope="resource"
@@ -129,14 +128,9 @@ class Links:
             if resource.link is None:
                 continue
 
-            entry = _build_entry(
-                resource,
-                package_prefix,
-                model_imports,
-                link_schema_imports,
-                builder_imports,
+            entries.append(
+                _build_entry(resource, package_prefix, imports),
             )
-            entries.append(entry)
 
         if not entries:
             return
@@ -146,9 +140,7 @@ class Links:
             template="fastapi/links.py.j2",
             context={
                 "module": module,
-                "model_imports": sorted_imports(model_imports),
-                "link_schema_imports": sorted_imports(link_schema_imports),
-                "builder_imports": sorted_imports(builder_imports),
+                "imports": imports.sorted_from_imports,
                 "entries": entries,
             },
         )
@@ -157,14 +149,12 @@ class Links:
 def _build_entry(
     resource: ResourceConfig,
     package_prefix: str,
-    model_imports: dict[str, set[str]],
-    link_schema_imports: dict[str, set[str]],
-    builder_imports: dict[str, set[str]],
+    imports: ImportCollector,
 ) -> dict[str, object]:
     """Build template context for one resource's link entry.
 
-    Mutates the import bags in place so the template can render
-    the import block as one sorted line per module.
+    Adds every needed import to *imports* so the template renders
+    a single sorted import block.
     """
     link = resource.link
 
@@ -181,11 +171,11 @@ def _build_entry(
         "schemas",
         slug,
     )
-    link_schema_imports.setdefault(schema_module, set()).add(link_schema_class)
+    imports.add_from(schema_module, link_schema_class)
 
     # Always import the model — the ref resolver fetches rows by
     # id even when the link itself is built by a user function.
-    model_imports.setdefault(model_module, set()).add(model_name.pascal)
+    imports.add_from(model_module, model_name.pascal)
     pk_attr = resource.pk
     resolver_fn_name = f"_resolve_{slug}_refs"
 
@@ -199,7 +189,7 @@ def _build_entry(
             )
             raise ValueError(msg)
 
-        builder_imports.setdefault(builder_module, set()).add(builder_name)
+        imports.add_from(builder_module, builder_name)
         return {
             "slug": slug,
             "fn_name": builder_name,

@@ -7,11 +7,8 @@
 
     stmt = select({{ model_name }})
 
-    if body.ids:
-        stmt = stmt.where({{ model_name }}.{{ pk_attr }}.in_(body.ids))
 {% if search_fields %}
-
-    elif body.q:
+    if body.q:
         stmt = stmt.where(
             or_(
 {% for attr in search_fields %}
@@ -19,9 +16,7 @@
 {% endfor %}
             ),
         )
-{% endif %}
 
-{% if search_fields %}
 {% if search_fields|length == 1 %}
     stmt = stmt.order_by({{ model_name }}.{{ search_fields[0] }})
 {% else %}
