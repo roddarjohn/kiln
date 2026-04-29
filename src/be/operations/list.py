@@ -175,7 +175,7 @@ class List:
         if include_actions:
             actions_module = prefix_import(
                 ctx.package_prefix,
-                Name.parent_path(Name.parent_path(resource.model)),
+                Name.parent_path(resource.model, levels=2),
                 "actions",
             )
             collection_const = collection_specs_const(model)

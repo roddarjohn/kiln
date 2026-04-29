@@ -104,7 +104,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
-    app = Name.parent_path(Name.parent_path(model_dotted))
+    app = Name.parent_path(model_dotted, levels=2)
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
@@ -647,7 +647,7 @@ def gate_wiring(
     _, model = Name.from_dotted(resource.model)
     actions_module = prefix_import(
         package_prefix,
-        Name.parent_path(Name.parent_path(resource.model)),
+        Name.parent_path(resource.model, levels=2),
         "actions",
     )
     const = (

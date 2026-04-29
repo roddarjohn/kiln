@@ -167,7 +167,7 @@ def _build_entry(
     link_schema_class = f"{model_name.pascal}Link"
     schema_module = prefix_import(
         package_prefix,
-        Name.parent_path(Name.parent_path(resource.model)),
+        Name.parent_path(resource.model, levels=2),
         "schemas",
         slug,
     )

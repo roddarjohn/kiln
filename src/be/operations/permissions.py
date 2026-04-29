@@ -87,7 +87,7 @@ class Permissions:
 
         actions_module = prefix_import(
             ctx.package_prefix,
-            Name.parent_path(Name.parent_path(resource.model)),
+            Name.parent_path(resource.model, levels=2),
             "actions",
         )
         object_const = object_specs_const(model)
