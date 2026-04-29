@@ -211,6 +211,18 @@ class BuildStore:
         """Resolve the :class:`~foundry.scope.Scope` of *instance_id*."""
         return self.scope_tree.scope_for(instance_id)
 
+    def instance_at(self, instance_id: str) -> object | None:
+        """Return the instance registered at *instance_id*, if any.
+
+        Renderers occasionally need the registered instance for the
+        current dispatch entry (e.g. an op that yields outputs at
+        its own scope rather than at a child scope).
+        :meth:`ancestor_of` walks parents only, so a renderer
+        dispatched at the same scope as the wanted instance cannot
+        recover it that way -- this accessor closes the gap.
+        """
+        return self._instances.get(instance_id)
+
     def ancestor_of(
         self,
         instance_id: str,

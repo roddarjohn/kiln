@@ -182,6 +182,14 @@ class SerializerFn:
     resource's ``model`` path; for nested sub-serializers it points
     at the related model so the renderer can import it alongside
     the parent.
+
+    ``include_actions`` toggles the action-framework path: the
+    serializer becomes ``async``, takes a ``session`` parameter,
+    and includes ``actions=[*object_refs, *collection_refs]`` in
+    the schema construction.  Set on the top-level resource /
+    list-item serializer when the resource has
+    :attr:`~be.config.schema.ResourceConfig.include_actions_in_dump`
+    enabled; nested sub-serializers leave it ``False``.
     """
 
     function_name: str
@@ -189,6 +197,7 @@ class SerializerFn:
     model_module: str
     schema_name: str
     fields: list[Field] = field(default_factory=list)
+    include_actions: bool = False
 
 
 @dataclass
@@ -270,12 +279,14 @@ class _DumpOutputs:
     load_imports: list[tuple[str, str]]
 
 
-def _construct_dump(
+def _construct_dump(  # noqa: PLR0913
     model: Name,
     model_module: str,
     fields: list[FieldSpec],
     suffix: str,
     stem: str,
+    *,
+    include_actions: bool = False,
 ) -> _DumpOutputs:
     """Build the schema + serializer pair for a read op, expanding nesting.
 
@@ -287,6 +298,13 @@ def _construct_dump(
     entries whose names are derived from the accumulated field path
     (e.g. ``TaskResourceProjectNested`` /
     ``to_task_resource_project_nested``).
+
+    When *include_actions* is ``True`` (the resource has
+    ``include_actions_in_dump=True``), the main schema gains an
+    ``actions: list[ActionRef]`` field and the main serializer is
+    flagged ``include_actions=True``.  Nested schemas and sub-
+    serializers are left untouched -- the action list belongs to
+    the top-level resource, not its embedded relations.
     """
     main_schema_name = model.suffixed(suffix)
     main_fn_name = f"to_{model.lower}_{stem}"
@@ -295,6 +313,13 @@ def _construct_dump(
         class_prefix=main_schema_name,
         fn_prefix=main_fn_name,
     )
+
+    if include_actions:
+        expanded = [
+            *expanded,
+            Field(name="actions", py_type="list[ActionRef]"),
+        ]
+
     main_schema = SchemaClass(
         name=main_schema_name,
         fields=expanded,
@@ -306,6 +331,7 @@ def _construct_dump(
         model_module=model_module,
         schema_name=main_schema.name,
         fields=expanded,
+        include_actions=include_actions,
     )
     load_options, load_imports = _build_load_chains(fields, model.pascal)
     return _DumpOutputs(

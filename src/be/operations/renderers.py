@@ -23,6 +23,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
+from be.operations._naming import (
+    app_module_for,
+    collection_specs_const,
+    object_specs_const,
+)
 from be.operations.list import ListResult
 from be.operations.types import (
     EnumClass,
@@ -39,7 +44,7 @@ from foundry.render import FileFragment, Fragment, SnippetFragment, registry
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from be.config.schema import ResourceConfig
+    from be.config.schema import OperationConfig, ResourceConfig
     from foundry.render import RenderCtx
 
 
@@ -61,36 +66,55 @@ class _ResourceInfo:
     pk_name: str
     pk_py_type: str
     has_auth: bool
+    session_schema: str | None
+    """Dotted path to the consumer's session Pydantic model
+    (e.g. ``"myapp.auth.Session"``), or ``None`` when auth is not
+    configured.  Used by the action-framework path to type the
+    serializer's ``session`` parameter."""
     session_module: str
     get_db_fn: str
     generate_tests: bool
+    include_actions_in_dump: bool
 
 
 def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     """Build a :class:`_ResourceInfo` from the renderer context.
 
     Walks ``ctx.store`` up from ``ctx.instance_id`` to the
-    enclosing resource.  Every renderer that calls this handles
-    an output produced at operation scope (below resource), so
-    :meth:`BuildStore.ancestor_of` always finds the resource.
+    enclosing resource.  Most callers handle an output produced
+    at operation scope (below resource), so :meth:`ancestor_of`
+    finds the resource.  Resource-scope ops (Permissions) yield
+    outputs stored at the resource id itself; the fallback uses
+    :meth:`BuildStore.instance_at` to recover the resource when
+    ``instance_id`` *is* the resource.
     """
-    resource = cast(
-        "ResourceConfig",
-        ctx.store.ancestor_of(ctx.instance_id, "resource"),
-    )
+    if ctx.store.scope_of(ctx.instance_id).name == "resource":
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.instance_at(ctx.instance_id),
+        )
+
+    else:
+        resource = cast(
+            "ResourceConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "resource"),
+        )
+
     config = ctx.config
     package_prefix = ctx.package_prefix
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
-    parts = model_module.rsplit(".", 1)
-    app = parts[0] if len(parts) > 1 else model_module
+    app = app_module_for(model_dotted)
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
 
     if not route_prefix:
         route_prefix = f"/{model.lower}s"
+
+    auth = getattr(config, "auth", None)
+    session_schema = getattr(auth, "session_schema", None) if auth else None
 
     return _ResourceInfo(
         model=model,
@@ -100,10 +124,14 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         route_prefix=route_prefix,
         pk_name=getattr(resource, "pk", "id"),
         pk_py_type=PYTHON_TYPES[resource.pk_type],
-        has_auth=getattr(config, "auth", None) is not None,
+        has_auth=auth is not None,
+        session_schema=session_schema,
         session_module=db.session_module,
         get_db_fn=db.get_db_fn,
         generate_tests=getattr(resource, "generate_tests", False),
+        include_actions_in_dump=getattr(
+            resource, "include_actions_in_dump", False
+        ),
     )
 
 
@@ -168,6 +196,9 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
 
         elif py_type == "dict[str, Any]":
             imports.add_from("typing", "Any")
+
+        elif py_type == "list[ActionRef]":
+            imports.add_from("ingot.actions", "ActionRef")
 
     yield SnippetFragment(
         path=path,
@@ -380,6 +411,20 @@ def _serializer_fragment(
     )
     imports.add_from(schema_mod, ser.schema_name)
 
+    actions_context: dict[str, object] = {}
+
+    if ser.include_actions:
+        actions_context = _wire_action_dump(info, imports)
+        # Skip the synthetic ``actions`` field in the per-field
+        # render loop -- the template's actions branch builds it
+        # directly via ``available_actions(...)``.
+        rendered_fields = [
+            f for f in ser.fields if f.py_type != "list[ActionRef]"
+        ]
+
+    else:
+        rendered_fields = ser.fields
+
     yield FileFragment(
         path=ser_path,
         template="fastapi/serializer_outer.py.j2",
@@ -399,8 +444,10 @@ def _serializer_fragment(
                     "nested_serializer": f.nested_serializer,
                     "many": f.many,
                 }
-                for f in ser.fields
+                for f in rendered_fields
             ],
+            "include_actions": ser.include_actions,
+            **actions_context,
         },
         imports=imports,
     )
@@ -524,17 +571,111 @@ def _list_result_fragment(
 # -------------------------------------------------------------------
 
 
-def utils_imports() -> list[tuple[str, str]]:
-    """Return import pairs for the ``ingot`` runtime helpers.
+def _wire_action_dump(
+    info: _ResourceInfo,
+    imports: ImportCollector,
+) -> dict[str, object]:
+    """Register imports and return template context for an action dump.
 
-    The three CRUD ops that load-or-404 a row (get, update,
-    delete) all need ``get_object_from_query_or_404`` and
-    ``assert_rowcount``; this centralizes the pair.
+    The action-framework path turns the resource's top-level
+    serializer ``async``, threads ``session`` through, and folds
+    ``available_actions`` against the per-resource registry tuples
+    into the schema construction.  Both the runtime helper
+    (:func:`ingot.actions.available_actions`) and the generated
+    registry constants come from this single wiring point so the
+    serializer renderer stays free of action-specific knowledge.
+
+    Args:
+        info: Cached resource info for the current render.
+        imports: Collector to mutate; new entries land in the
+            serializer file's import block.
+
+    Returns:
+        Template context keys consumed by ``serializer_fn.py.j2``
+        on the action-dump branch:
+        ``object_specs_const`` and ``collection_specs_const``
+        (the registry constant names) plus ``session_type`` (the
+        bare class name used in the function signature).
+
+    Raises:
+        ValueError: If auth is not configured -- the action
+            framework relies on a session, so a resource that
+            opts in must also have a session schema.
+
     """
-    return [
-        ("ingot.utils", "get_object_from_query_or_404"),
-        ("ingot.utils", "assert_rowcount"),
-    ]
+    if info.session_schema is None:
+        msg = (
+            "include_actions_in_dump=True requires auth to be "
+            "configured -- the serializer takes a session "
+            "parameter to evaluate guards"
+        )
+        raise ValueError(msg)
+
+    session_module, session_name = info.session_schema.rsplit(".", 1)
+    actions_module = prefix_import(info.package_prefix, info.app, "actions")
+    object_const = object_specs_const(info.model)
+    collection_const = collection_specs_const(info.model)
+
+    imports.add_from("ingot.actions", "available_actions")
+    imports.add_from(actions_module, object_const, collection_const)
+    imports.add_from(session_module, session_name)
+
+    return {
+        "object_specs_const": object_const,
+        "collection_specs_const": collection_const,
+        "session_type": session_name,
+    }
+
+
+def gate_wiring(
+    op: OperationConfig,
+    resource: ResourceConfig,
+    package_prefix: str,
+    *,
+    is_object_scope: bool,
+) -> tuple[dict[str, object], list[tuple[str, str]]]:
+    """Wire imports + body context for one op's execution gate.
+
+    Returns ``({}, [])`` when the op has no ``can`` configured.
+    Centralized so every CRUD and action op renders an identical
+    gate -- visibility predicate and 403 enforcement share the
+    one callable, so they can never drift.
+    """
+    if op.can is None:
+        return {}, []
+
+    _, model = Name.from_dotted(resource.model)
+    actions_module = prefix_import(
+        package_prefix, app_module_for(resource.model), "actions"
+    )
+    const = (
+        object_specs_const(model)
+        if is_object_scope
+        else collection_specs_const(model)
+    )
+
+    return (
+        {"gate_specs_const": const, "gate_op_name": op.name},
+        [
+            ("ingot.actions", "find_can"),
+            ("fastapi", "HTTPException"),
+            (actions_module, const),
+        ],
+    )
+
+
+FETCH_OR_404_IMPORT: tuple[str, str] = (
+    "ingot.utils",
+    "get_object_from_query_or_404",
+)
+"""Import pair for the load-or-404 helper.
+
+Get, update, delete, the action op (object-scope branch), and the
+permissions endpoint all share this one row-lookup helper -- they
+either dump the loaded row, gate on it, or both.  Centralized as
+a constant so each op site reads as ``[FETCH_OR_404_IMPORT, ...]``
+rather than repeating the literal tuple.
+"""
 
 
 # -------------------------------------------------------------------

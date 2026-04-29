@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT, gate_wiring
 from be.operations.types import (
     FieldsOptions,
     RouteHandler,
@@ -52,6 +52,7 @@ class Get:
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
         model_module, model = Name.from_dotted(resource.model)
+        include_actions = resource.include_actions_in_dump
 
         dump = _construct_dump(
             model,
@@ -59,6 +60,7 @@ class Get:
             options.fields,
             suffix="Resource",
             stem="resource",
+            include_actions=include_actions,
         )
 
         # Nested sub-schemas / sub-serializers are ordered deepest-first
@@ -67,6 +69,13 @@ class Get:
         yield dump.main_schema
         yield from dump.nested_serializers
         yield dump.main_serializer
+
+        gate_ctx, gate_imports = gate_wiring(
+            ctx.instance,
+            resource,
+            ctx.package_prefix,
+            is_object_scope=True,
+        )
 
         yield RouteHandler(
             method="GET",
@@ -84,11 +93,16 @@ class Get:
             return_type=dump.main_schema.name,
             doc=f"Get a {model.pascal} by {resource.pk}.",
             body_template="fastapi/ops/get.py.j2",
-            body_context={"load_options": dump.load_options},
+            body_context={
+                "load_options": dump.load_options,
+                "serializer_async": include_actions,
+                **gate_ctx,
+            },
             extra_imports=[
                 ("sqlalchemy", "select"),
-                *utils_imports(),
+                FETCH_OR_404_IMPORT,
                 *dump.load_imports,
+                *gate_imports,
             ],
         )
 

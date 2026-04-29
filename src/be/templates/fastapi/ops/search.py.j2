@@ -32,6 +32,13 @@
     )
     result = await db.execute(stmt)
     rows = list(result.scalars())
+{% if include_actions|default(false) %}
+    rows = await filter_visible(
+        rows,
+        session,
+        find_can({{ collection_specs_const }}, "list"),
+    )
+{% endif %}
     has_more = len(rows) > page_size
     items = rows[:page_size]
     next_cursor = (
@@ -40,7 +47,11 @@
         else None
     )
     return {{ model_name }}Page(
+{% if serializer_async|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session) for obj in items],
+{% else %}
         items=[{{ serializer_fn }}(obj) for obj in items],
+{% endif %}
         next_cursor=next_cursor,
     )
 {% elif pagination_mode == "offset" %}
@@ -59,13 +70,37 @@
         else 0
     )
     result = await db.execute(stmt)
+    rows = list(result.scalars())
+{% if include_actions|default(false) %}
+    rows = await filter_visible(
+        rows,
+        session,
+        find_can({{ collection_specs_const }}, "list"),
+    )
+{% endif %}
     return {{ model_name }}Page(
-        items=[{{ serializer_fn }}(obj) for obj in result.scalars()],
+{% if serializer_async|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session) for obj in rows],
+{% else %}
+        items=[{{ serializer_fn }}(obj) for obj in rows],
+{% endif %}
         total=total,
         total_pages=total_pages,
     )
 {% else %}
     result = await db.execute(stmt)
-    return [{{ serializer_fn }}(obj) for obj in result.scalars()]
+    rows = list(result.scalars())
+{% if include_actions|default(false) %}
+    rows = await filter_visible(
+        rows,
+        session,
+        find_can({{ collection_specs_const }}, "list"),
+    )
+{% endif %}
+{% if serializer_async|default(false) %}
+    return [await {{ serializer_fn }}(obj, session) for obj in rows]
+{% else %}
+    return [{{ serializer_fn }}(obj) for obj in rows]
+{% endif %}
 {% endif %}
 {% endblock %}

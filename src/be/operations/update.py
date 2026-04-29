@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
-from be.operations.renderers import utils_imports
+from be.operations.renderers import FETCH_OR_404_IMPORT, gate_wiring
 from be.operations.types import (
     Field,
     FieldsOptions,
@@ -70,6 +70,13 @@ class Update:
             doc=f"Request body for updating a {model.pascal}.",
         )
 
+        gate_ctx, gate_imports = gate_wiring(
+            ctx.instance,
+            resource,
+            ctx.package_prefix,
+            is_object_scope=True,
+        )
+
         yield RouteHandler(
             method="PATCH",
             path=f"/{{{resource.pk}}}",
@@ -85,7 +92,13 @@ class Update:
             doc=f"Update a {model.pascal} by {resource.pk}.",
             request_schema=request_schema,
             body_template="fastapi/ops/update.py.j2",
-            extra_imports=[("sqlalchemy", "update"), *utils_imports()],
+            body_context=gate_ctx,
+            extra_imports=[
+                ("sqlalchemy", "select"),
+                ("sqlalchemy", "update"),
+                FETCH_OR_404_IMPORT,
+                *gate_imports,
+            ],
         )
 
         yield TestCase(

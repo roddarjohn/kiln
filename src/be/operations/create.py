@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES, FieldType
+from be.operations.renderers import gate_wiring
 from be.operations.types import (
     FieldsOptions,
     RouteHandler,
@@ -65,6 +66,13 @@ class Create:
             doc=f"Request body for creating a {model.pascal}.",
         )
 
+        gate_ctx, gate_imports = gate_wiring(
+            ctx.instance,
+            resource,
+            ctx.package_prefix,
+            is_object_scope=False,
+        )
+
         yield RouteHandler(
             method="POST",
             path="/",
@@ -75,7 +83,8 @@ class Create:
             doc=f"Create a new {model.pascal}.",
             request_schema=request_schema,
             body_template="fastapi/ops/create.py.j2",
-            extra_imports=[("sqlalchemy", "insert")],
+            body_context=gate_ctx,
+            extra_imports=[("sqlalchemy", "insert"), *gate_imports],
         )
 
         yield TestCase(

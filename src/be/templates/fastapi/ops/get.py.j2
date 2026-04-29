@@ -1,4 +1,5 @@
 {% extends "fastapi/handler_default.py.j2" %}
+{% from "fastapi/ops/_gate.py.j2" import gate %}
 {% block body %}
 {% if load_options|default([]) %}
     stmt = select({{ model_name }}).where(
@@ -18,5 +19,10 @@
         detail="{{ model_name }} not found",
     )
 {% endif %}
+{{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
+{% if serializer_async|default(false) %}
+    return await {{ serializer_fn }}(obj, session)
+{% else %}
     return {{ serializer_fn }}(obj)
+{% endif %}
 {% endblock %}

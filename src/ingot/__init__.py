@@ -14,8 +14,9 @@ Each submodule groups related primitives:
   for transactional-outbox enqueue from a SQLAlchemy session, and
   :func:`~ingot.queue.open_worker_driver` for the worker-side
   asyncpg connection.
-* :mod:`ingot.utils` -- HTTP-status row-lookup guards
-  (``get_object_from_query_or_404``, ``assert_rowcount``).
+* :mod:`ingot.utils` -- ``get_object_from_query_or_404`` (the
+  load-or-404 helper used by every read/mutate handler) and
+  :func:`~ingot.utils.run_once`.
 
 Generated code imports from the owning submodule directly --
 ``from ingot.files import FileMixin``,

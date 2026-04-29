@@ -1,0 +1,16 @@
+{# Macro: render the execution-time 403 guard for one op.
+
+    {% from "fastapi/ops/_gate.py.j2" import gate %}
+    {{ gate(specs_const, op_name, "obj") }}
+    {{ gate(specs_const, op_name, "None") }}
+
+The macro is a no-op when *specs_const* is falsy, so callers can
+invoke it unconditionally and let opt-out flow from a missing
+context key (``gate_specs_const|default(none)``).
+-#}
+{% macro gate(specs_const, op_name, resource_var) -%}
+{% if specs_const %}
+    if not await find_can({{ specs_const }}, "{{ op_name }}")({{ resource_var }}, session):
+        raise HTTPException(status_code=403, detail="Forbidden")
+{% endif %}
+{%- endmacro %}

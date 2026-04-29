@@ -59,8 +59,19 @@ class Auth:
             for op in ctx.instance.operations
         }
 
+        # The action framework needs a session to evaluate guards.
+        # If include_actions_in_dump or permissions_endpoint is
+        # set, force-include the dep on every handler under this
+        # resource regardless of the per-op require_auth setting --
+        # otherwise the generated handler/serializer code would
+        # reference an undeclared ``session`` parameter.
+        force_session = (
+            ctx.instance.include_actions_in_dump
+            or ctx.instance.permissions_endpoint
+        )
+
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
-            if not op_auth.get(handler.op_name, False):
+            if not (force_session or op_auth.get(handler.op_name, False)):
                 continue
 
             handler.extra_deps.append(

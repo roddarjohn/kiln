@@ -1,0 +1,4 @@
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+    return await available_actions(None, session, {{ collection_specs_const }})
+{% endblock %}
