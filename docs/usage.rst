@@ -376,33 +376,43 @@ The flow:
 The model
 ^^^^^^^^^
 
-Bind a concrete ``File`` model to your ``Base`` once per app with
-:func:`ingot.files.bind_file_model`:
+Subclass :class:`ingot.files.FileMixin` on a pgcraft-mapped model
+and let a PK plugin own the ``id`` column:
 
 .. code-block:: python
 
    # myapp/models.py
-   from ingot.files import bind_file_model
+   from ingot.files import FileMixin
+   from pgcraft.factory import PGCraftSimple
+   from pgcraft.plugins.pk import UUIDV4PKPlugin
+
    from myapp.db import Base
 
-   File = bind_file_model(Base)
 
-This creates ``class File(Base, FileMixin)`` with
-``__tablename__ = "files"`` and registers it on ``Base.metadata``
-so alembic discovers the table automatically -- no env.py changes
-required.  The columns are ``id`` (UUID PK), ``s3_key``,
+   class File(Base, FileMixin):
+       __tablename__ = "files"
+       __table_args__ = {"schema": "public"}
+       __factory__ = PGCraftSimple
+       __plugins__ = [UUIDV4PKPlugin()]
+
+The mixin contributes the storage columns -- ``s3_key``,
 ``content_type``, ``size_bytes``, ``original_filename``,
 ``created_at``, and ``uploaded_at`` (NULL until the upload is
-confirmed).
+confirmed) -- and the ``UUIDV4PKPlugin`` plugin contributes the
+``id`` column.  Keeping ``id`` plugin-owned (rather than declared
+on the mixin) is what makes the mixin compose with pgcraft without
+the duplicate-column error a mixin-declared ``id`` would trigger.
 
-For multi-table apps (rare), call ``bind_file_model`` again with
-distinct ``name=`` and ``tablename=`` per binding:
+Multi-table apps just declare additional models with their own
+``__tablename__`` and the same ``FileMixin`` + PK-plugin shape:
 
 .. code-block:: python
 
-   ProfileImage = bind_file_model(
-       Base, name="ProfileImage", tablename="profile_images",
-   )
+   class ProfileImage(Base, FileMixin):
+       __tablename__ = "profile_images"
+       __table_args__ = {"schema": "public"}
+       __factory__ = PGCraftSimple
+       __plugins__ = [UUIDV4PKPlugin()]
 
 The config
 ^^^^^^^^^^
