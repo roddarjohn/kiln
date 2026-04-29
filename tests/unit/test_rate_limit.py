@@ -27,6 +27,7 @@ from foundry.store import BuildStore
 from ingot.rate_limit import (
     PostgresStorage,
     RateLimitBucketMixin,
+    build_limiter,
     default_key_func,
 )
 
@@ -593,6 +594,120 @@ class TestPostgresStorageSql:
 
         storage, _, _ = self._storage()
         assert storage.base_exceptions is SQLAlchemyError
+
+
+class TestPostgresStorageGetExpiry:
+    def _storage(self):
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+        maker = MagicMock(return_value=session)
+        return PostgresStorage(model=_Bucket, session_maker=maker), session
+
+    def test_returns_now_when_row_missing(self):
+        storage, session = self._storage()
+        session.execute.return_value.scalar_one_or_none.return_value = None
+
+        before = dt.datetime.now(dt.UTC).timestamp()
+        result = storage.get_expiry("k")
+        after = dt.datetime.now(dt.UTC).timestamp()
+
+        # Missing row: returns "now" so ``limits`` treats the
+        # window as already expired.
+        assert before <= result <= after
+
+    def test_returns_row_expiry_as_unix_timestamp(self):
+        storage, session = self._storage()
+        future = dt.datetime(2030, 1, 1, tzinfo=dt.UTC)
+        session.execute.return_value.scalar_one_or_none.return_value = future
+
+        assert storage.get_expiry("k") == future.timestamp()
+
+
+class TestPostgresStorageCheck:
+    def _storage_with(self, *, raises=False):
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+
+        if raises:
+            from sqlalchemy.exc import OperationalError
+
+            session.execute.side_effect = OperationalError("x", {}, None)
+
+        maker = MagicMock(return_value=session)
+        return PostgresStorage(model=_Bucket, session_maker=maker)
+
+    def test_returns_true_on_healthy_db(self):
+        assert self._storage_with(raises=False).check() is True
+
+    def test_returns_false_on_sqlalchemy_error(self):
+        assert self._storage_with(raises=True).check() is False
+
+
+class TestBuildLimiter:
+    def test_wires_postgres_storage(self):
+        engine = MagicMock()
+        limiter = build_limiter(
+            model=_Bucket,
+            sync_url="postgresql://unused",
+            engine=engine,
+        )
+        # Replaced storage and strategy.
+        assert isinstance(limiter._storage, PostgresStorage)
+        # ``_limiter`` is rebuilt with a fixed-window strategy.
+        from limits.strategies import FixedWindowRateLimiter
+
+        assert isinstance(limiter._limiter, FixedWindowRateLimiter)
+
+    def test_default_limits_passed_through(self):
+        engine = MagicMock()
+        limiter = build_limiter(
+            model=_Bucket,
+            sync_url="postgresql://unused",
+            engine=engine,
+            default_limits=("5/minute",),
+        )
+        assert len(limiter._default_limits) == 1
+
+    def test_default_key_func_used_when_unset(self):
+        engine = MagicMock()
+        limiter = build_limiter(
+            model=_Bucket, sync_url="postgresql://unused", engine=engine
+        )
+        assert limiter._key_func is default_key_func
+
+    def test_custom_key_func_honored(self):
+        engine = MagicMock()
+        custom = MagicMock(return_value="x")
+        limiter = build_limiter(
+            model=_Bucket,
+            sync_url="postgresql://unused",
+            engine=engine,
+            key_func=custom,
+        )
+        assert limiter._key_func is custom
+
+    def test_builds_engine_from_sync_url_when_unset(self, monkeypatch):
+        # The production path: when ``engine`` is omitted,
+        # build_limiter calls ``create_engine`` with the DSN.
+        fake_engine = MagicMock()
+        calls: list[tuple[str, dict]] = []
+
+        def fake_create_engine(url, **kwargs):
+            calls.append((url, kwargs))
+            return fake_engine
+
+        monkeypatch.setattr(
+            "ingot.rate_limit.create_engine", fake_create_engine
+        )
+        build_limiter(model=_Bucket, sync_url="postgresql://localhost/x")
+        assert calls == [
+            (
+                "postgresql://localhost/x",
+                {"future": True, "pool_pre_ping": True},
+            )
+        ]
 
 
 class TestDefaultKeyFunc:

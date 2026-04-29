@@ -167,10 +167,16 @@ class PostgresStorage(Storage):
         self._session_maker = session_maker
 
     @property
-    def base_exceptions(
-        self,
-    ) -> type[Exception] | tuple[type[Exception], ...]:
-        """Exception class(es) ``limits`` should treat as storage failures."""
+    def base_exceptions(self) -> Any:
+        """Exception class(es) ``limits`` should treat as storage failures.
+
+        The ``limits`` base class types this as
+        ``type[Exception] | tuple[type[Exception], ...]``; we narrow
+        to a single class and annotate ``Any`` here to keep autodoc
+        from cross-referencing ``type`` (which collides with three
+        unrelated ``type:`` discriminator fields in the be schema).
+        Returns :class:`~sqlalchemy.exc.SQLAlchemyError`.
+        """
         return SQLAlchemyError
 
     def _now(self) -> _dt.datetime:
