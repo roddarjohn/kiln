@@ -157,6 +157,31 @@ class RouteHandler:
     extra_deps: list[str] = field(default_factory=list)
     extra_imports: list[tuple[str, str]] = field(default_factory=list)
 
+    def add_param(self, param: RouteParam, *, prepend: bool = False) -> None:
+        """Add *param* to :attr:`params`, dropping it on a name collision.
+
+        FastAPI rejects two parameters with the same name on a
+        single handler, so :attr:`params` is semantically a set
+        keyed by :attr:`RouteParam.name`.  Mutators that fire after
+        the primary CRUD/action op (auth, tracing, rate-limit, etc.)
+        use this method to add their own parameters without checking
+        whether one is already present -- the first writer wins.
+
+        Args:
+            param: The :class:`RouteParam` to add.
+            prepend: When ``True``, insert at position 0 (in front of
+                any path / body params); otherwise append.
+
+        """
+        if any(existing.name == param.name for existing in self.params):
+            return
+
+        if prepend:
+            self.params.insert(0, param)
+
+        else:
+            self.params.append(param)
+
 
 @dataclass
 class RouterMount:

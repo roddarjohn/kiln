@@ -96,6 +96,13 @@ nitpick_ignore = [
     ("py:class", "foundry.operation.OperationEntry"),
     # pgcraft has no published Sphinx inventory.
     ("py:class", "pgcraft.plugins.pk.UUIDV4PKPlugin"),
+    # slowapi / limits have no published Sphinx inventories.  The
+    # rate-limit feature returns a slowapi.Limiter and inherits from
+    # limits.storage.Storage; autodoc surfaces both as bare names.
+    ("py:class", "slowapi.Limiter"),
+    ("py:class", "slowapi.extension.Limiter"),
+    ("py:class", "limits.storage.Storage"),
+    ("py:class", "limits.storage.base.Storage"),
 ]
 
 intersphinx_mapping = {
