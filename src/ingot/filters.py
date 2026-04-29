@@ -22,6 +22,7 @@ FilterOp = Literal[
     "contains",
     "starts_with",
     "in",
+    "is_null",
 ]
 """Operator keys accepted by a condition node's ``op`` field.
 
@@ -40,6 +41,10 @@ _FILTER_OPS: dict[FilterOp, str] = {
     "contains": "contains",
     "starts_with": "startswith",
     "in": "in_",
+    # ``is_null`` is dispatched specially in ``_build_filter_clause``
+    # because the SQL is ``col IS NULL`` / ``col IS NOT NULL`` rather
+    # than a binary operator with a value.
+    "is_null": "is_",
 }
 
 _COMBINERS = {"and_": and_, "or_": or_}
@@ -110,6 +115,15 @@ def _build_filter_clause(
     op: FilterOp = getattr(node, "op", "eq")
     value = getattr(node, "value", None)
     col = getattr(model, field_name)
+
+    if op == "is_null":
+        # ``value`` toggles direction: truthy → IS NULL, falsy →
+        # IS NOT NULL.  Keeps the operator one entry rather than
+        # introducing a sibling ``is_not_null`` and matches how
+        # most query-builder UIs render a "is empty / is not
+        # empty" toggle.
+        return col.is_(None) if value else col.is_not(None)
+
     return getattr(col, _FILTER_OPS[op])(value)
 
 
