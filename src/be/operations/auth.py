@@ -63,11 +63,16 @@ class Auth:
         # If include_actions_in_dump or permissions_endpoint is
         # set, force-include the dep on every handler under this
         # resource regardless of the per-op require_auth setting --
-        # otherwise the generated handler/serializer code would
+        # otherwise the generated handler / serializer code would
         # reference an undeclared ``session`` parameter.
+        # ``searchable`` is included because the resource-level
+        # ``_values`` endpoint passes ``session`` through to the
+        # link builder, and any consumer using a ``serializer:``
+        # hook also expects session in scope.
         force_session = (
             ctx.instance.include_actions_in_dump
             or ctx.instance.permissions_endpoint
+            or ctx.instance.searchable
         )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):

@@ -52,6 +52,7 @@ Run any target with::
    extending
    telemetry
    pgqueuer
+   design/filtering
 
 .. toctree::
    :maxdepth: 2

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 from be.config.schema import (
     FilterConfig,
+    OperationConfig,
     ProjectConfig,
     ResourceConfig,
     StructuredFilterField,
@@ -77,10 +78,15 @@ class Filter:
             "ResourceConfig",
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
+        list_op = cast(
+            "OperationConfig",
+            ctx.store.ancestor_of(ctx.instance_id, "operation"),
+        )
 
         list_field_names = [f.name for f in result.list_item.fields]
         structured = options.normalized_fields(list_field_names)
         allowed = [f.name for f in structured]
+        sort_payload = _sort_payload(list_op)
 
         yield SchemaClass(
             name=model.suffixed("FilterCondition"),
@@ -103,7 +109,9 @@ class Filter:
             ("ingot.filters", "apply_filters"),
         )
 
-        yield from _emit_discovery(ctx.config, model, resource, structured)
+        yield from _emit_discovery(
+            ctx.config, model, resource, structured, sort_payload
+        )
         yield from _emit_value_providers(model, resource, structured)
 
 
@@ -184,16 +192,42 @@ def _resolve_ref_endpoint(project: ProjectConfig, ref_slug: str) -> str | None:
     return None
 
 
+def _sort_payload(list_op: OperationConfig) -> dict[str, object] | None:
+    """Pull sort metadata off the list op's order modifier, if any.
+
+    Returns ``None`` when the list op has no order modifier — the
+    discovery payload then omits the ``sort`` block entirely.
+    """
+    for modifier in list_op.modifiers:
+        if modifier.type != "order":
+            continue
+
+        opts = modifier.options
+        fields: list[object] = list(opts.get("fields") or [])
+        default = opts.get("default")
+        default_dir = opts.get("default_dir", "asc")
+        return {
+            "fields": fields,
+            "default": default,
+            "default_dir": default_dir,
+        }
+
+    return None
+
+
 def _emit_discovery(
     project: ProjectConfig,
     model: Name,
     resource: ResourceConfig,
     structured: list[StructuredFilterField],
+    sort_payload: dict[str, object] | None,
 ) -> Iterable[object]:
-    """Emit the ``GET /_filters`` discovery handler.
+    """Emit the discovery handlers for the resource's filters.
 
-    Each filter field is rendered as a JSON-serializable descriptor
-    by :func:`_filter_payload`, except ``enum`` choices which the
+    Renders both ``GET /_filters`` (full payload) and
+    ``GET /_filters/{field}`` (single-filter lazy fetch).  Each
+    filter field becomes a JSON-serializable descriptor via
+    :func:`_filter_payload`, except ``enum`` choices which the
     template inlines as a comprehension over the imported enum
     class so the response reflects the enum at request time.
     """
@@ -219,6 +253,7 @@ def _emit_discovery(
         body_template="fastapi/ops/filter_discovery.py.j2",
         body_context={
             "filters": payloads,
+            "sort": sort_payload,
         },
         extra_imports=[
             ("typing", "Any"),
@@ -232,6 +267,38 @@ def _emit_discovery(
         path="/_filters",
         status_success=200,
         action_name="filter_discovery",
+    )
+
+    yield RouteHandler(
+        method="GET",
+        path="/_filters/{field}",
+        function_name=f"filter_field_{model.lower}",
+        op_name="filter",
+        params=[RouteParam(name="field", annotation="str")],
+        return_type="dict[str, Any]",
+        doc=(
+            f"Discovery payload for one named filterable field on "
+            f"{model.pascal}.  Returns 404 when the field is "
+            f"unknown."
+        ),
+        body_template="fastapi/ops/filter_field_discovery.py.j2",
+        body_context={
+            "filters": payloads,
+        },
+        extra_imports=[
+            ("typing", "Any"),
+            ("fastapi", "HTTPException"),
+            *enum_imports,
+        ],
+    )
+
+    yield TestCase(
+        op_name="filter",
+        method="get",
+        path="/_filters/{field}",
+        status_success=200,
+        status_not_found=404,
+        action_name="filter_field_discovery",
     )
 
 

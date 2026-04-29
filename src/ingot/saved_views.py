@@ -3,8 +3,8 @@
 A *saved view* is a named filter+sort state stored on behalf of a
 single user.  Mirrors the :class:`ingot.files.FileMixin` idiom:
 the consumer subclasses :class:`SavedViewMixin` on their own
-``DeclarativeBase`` and points each opted-in resource's
-:attr:`~be.config.schema.SavedViewsConfig.model` at it.
+``DeclarativeBase`` and defines a normal kiln resource pointing
+at it.
 
 A single mixed-in model serves every opted-in resource;
 ``resource_type`` discriminates rows so the codegen-generated

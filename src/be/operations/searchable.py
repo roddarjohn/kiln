@@ -5,7 +5,9 @@ When a resource sets
 single ``POST /_values`` route returning items shaped by the
 resource's :class:`~be.config.schema.LinkConfig`.  Powers ``ref``
 filter inputs on other resources and any FE "search this table"
-affordance.
+affordance.  The resource's ``link`` attribute is required;
+the cross-resource validator on :class:`~be.config.schema.ProjectConfig`
+catches missing links at config-load time.
 
 For shorthand link configs that name a string-typed display
 attribute (``kind: "name"`` / ``"id_name"``) the search filters by
@@ -76,7 +78,17 @@ class Searchable:
             )
             raise ValueError(msg)
 
-        search_attr = link.name if link.builder is None and link.name else None
+        # Explicit search.fields wins; fall back to link.name when
+        # shorthand (the common case) and skip q-filtering when
+        # neither is available (builder-only / id-only links).
+        if resource.search is not None:
+            search_fields: list[str] = list(resource.search.fields)
+
+        elif link.builder is None and link.name:
+            search_fields = [link.name]
+
+        else:
+            search_fields = []
 
         links_module = prefix_import(
             ctx.package_prefix,
@@ -87,7 +99,7 @@ class Searchable:
         body_context: dict[str, object] = {
             "model_name": model.pascal,
             "slug": model.lower,
-            "search_attr": search_attr,
+            "search_fields": search_fields,
         }
 
         yield RouteHandler(

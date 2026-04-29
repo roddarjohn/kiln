@@ -124,6 +124,12 @@ be.operations
 .. automodule:: be.operations.routing
    :members:
 
+.. automodule:: be.operations.links
+   :members:
+
+.. automodule:: be.operations.searchable
+   :members:
+
 .. automodule:: ingot
    :members:
 
@@ -136,7 +142,13 @@ be.operations
 .. automodule:: ingot.files
    :members:
 
+.. automodule:: ingot.filter_values
+   :members:
+
 .. automodule:: ingot.filters
+   :members:
+
+.. automodule:: ingot.links
    :members:
 
 .. automodule:: ingot.ordering
@@ -146,6 +158,9 @@ be.operations
    :members:
 
 .. automodule:: ingot.queue
+   :members:
+
+.. automodule:: ingot.saved_views
    :members:
 
 .. automodule:: ingot.utils

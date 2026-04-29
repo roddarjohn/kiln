@@ -23,13 +23,19 @@ A generic, opt-in primitive on the `be` plugin for:
    against the resource's configured search fields. Powers `ref`
    filter inputs on other resources and any FE "search this table"
    affordance.
-4. **Saved views** — per-user CRUD of named filter+sort states, with
-   a dump format that resolves typed references (e.g.
-   `Customer #123 → "Acme Corp"`) via a per-resource labeler.
+4. **Saved views** — per-user CRUD of named filter+sort states.
+   Saved views are *not* a special opt-in: the consumer defines a
+   `SavedView` resource normally (subclassing
+   `ingot.saved_views.SavedViewMixin`), wires per-user scoping
+   via `can` guards, filters by `resource_type`, and points the
+   read ops at a custom `serializer:` that calls
+   `ingot.saved_views.hydrate_view`.  The hydrate helper resolves
+   stored `ref` ids through the per-app `REF_RESOLVERS` registry
+   (also generated next to `LINKS`).
 
 All endpoints with non-trivial inputs are `POST` with JSON bodies.
-Only metadata GETs (`GET /_filters`) and entity GETs
-(`GET /views/{id}`) stay GET. No filter/search state in URLPlease go t params.
+Only metadata GETs (`GET /_filters`) and entity GETs (`GET /{pk}`)
+stay GET. No filter/search state in URL params.
 
 ## Non-goals (initial cut)
 
@@ -316,17 +322,53 @@ For `enum` fields, items carry the enum value alongside its label
 
 ## Saved views
 
-### Endpoints
+### Architecture: SavedView is a normal resource
 
-Per-resource CRUD: `GET|POST|PATCH|DELETE /{resource}/views[/{id}]`.
-Per-user scoping enforced at the operation level (rows filtered by
-`owner_id == session.user_id`). Sharing/teams: deferred.
+No `saved_views: true` opt-in.  The consumer subclasses
+`SavedViewMixin` on their own `DeclarativeBase`, defines a normal
+kiln resource pointing at it, and uses the standard CRUD ops
+plus a few hooks:
+
+```jsonnet
+local resource = import "be/resources/presets.libsonnet";
+
+{
+  model: "myapp.models.SavedView",
+  pk: "id", pk_type: "str",
+  require_auth: true,
+  operations: resource.saved_views(
+    serializer="myapp.serializers.dump_view_hydrated",
+    owner_guard="myapp.guards.is_view_owner",
+  ),
+}
+```
+
+The `resource.saved_views()` preset bundles the five CRUD ops,
+wires the custom `serializer:` on the read ops, and applies the
+`owner_guard` to every op except `create` (the row doesn't exist
+yet).
+
+The user's serializer wraps `hydrate_view`:
+
+```python
+# myapp/serializers.py
+from _generated.myapp.links import REF_RESOLVERS
+from ingot.saved_views import hydrate_view
+
+async def dump_view_hydrated(view, session, db):
+    return await hydrate_view(view, REF_RESOLVERS, db, session)
+```
+
+Per-user scoping is the `is_view_owner` guard — a normal
+`async (resource, session) -> bool` from the #60 surface that
+typically checks `resource.owner_id == str(session.user_id)`.
+Resource-type filtering rides on the structured filter machinery
+(`{type: "filter", fields: ["resource_type"]}`).
 
 ### Stored payload (DB)
 
 ```json
 {
-  "name": "Open orders, recent",
   "filters": [
     {"field": "status", "op": "eq",
      "value": {"kind": "literal", "value": "open"}},
@@ -338,108 +380,110 @@ Per-user scoping enforced at the operation level (rows filtered by
 }
 ```
 
-The stored form holds **raw IDs only** — no labels are snapshotted.
-Decision: resolve on read, never on write. Rationale: customer
-renames stay in sync. Cost: a labeler call per ref on view fetch;
-cheap because it's a labeler, not a full serializer.
+The stored form holds **raw IDs only** — no labels are
+snapshotted.  Decision: resolve on read, never on write.
+Rationale: customer renames stay in sync.  Cost: one
+``REF_RESOLVERS`` lookup per ref'd type on view fetch (a single
+``SELECT ... WHERE id IN (...)`` per type, then run through the
+link builder).
 
 ### Dump format (read response)
 
-When a saved view is fetched, each `ref` value is hydrated through
-the target resource's link builder. Items conform to that
-resource's link schema:
+`hydrate_view` walks each filter entry; for `ref` values, it
+swaps `ids` for `items` (link-schema dicts) and adds a `dropped`
+count for stale/invisible refs:
 
 ```json
 {
   "id": "view_01H...",
   "name": "Open orders, recent",
-  "filters": [
-    {"field": "status", "op": "eq",
-     "value": {"kind": "literal", "value": "open"}},
-    {"field": "customer_id", "op": "in",
-     "value": {"kind": "ref", "type": "customer",
-               "items": [
-                 {"id": "01H...", "name": "Acme Corp"},
-                 {"id": "01J...", "name": "Beta LLC"}
-               ],
-               "dropped": 0}}
-  ],
-  "sort": {"field": "created_at", "direction": "desc"}
+  "resource_type": "order",
+  "owner_id": "user_01J...",
+  "payload": {
+    "filters": [
+      {"field": "status", "op": "eq",
+       "value": {"kind": "literal", "value": "open"}},
+      {"field": "customer_id", "op": "in",
+       "value": {"kind": "ref", "type": "customer",
+                 "items": [
+                   {"type": "customer", "id": "01H...",
+                    "name": "Acme Corp"},
+                   {"type": "customer", "id": "01J...",
+                    "name": "Beta LLC"}
+                 ],
+                 "dropped": 0}}
+    ],
+    "sort": {"field": "created_at", "direction": "desc"}
+  },
+  "created_at": "...",
+  "updated_at": "..."
 }
 ```
 
-If a referenced row no longer exists or the user can't see it, the
-item is dropped from `items` and `dropped` is incremented. Saved
-views never error because of stale or invisible refs.
+Saved views never error because of stale or invisible refs.
 
 ## Custom kiln (what's Python, what's jsonnet)
 
 Following the `src/be/operations/permissions.py` and
 `src/be/operations/actions.py` precedent:
 
-- **Jsonnet** — declarative surface only (`filter_discovery: true`,
-  the structured `filter:` block, `labeler:` dotted path). No
-  logic.
+- **Jsonnet** — declarative surface only (the structured
+  `filter:` block, `link:` block, `searchable: true`,
+  per-op `serializer:` dotted path).  No logic.
 - **Python operations** under `src/be/operations/`:
-  - `filter_discovery.py` —
-    `@operation("filter_discovery", scope="operation")` with
-    `when()` gating on `filter_discovery: true`. Generates the
-    `GET /_filters`, `GET /_filters/{field}`, and
-    `POST /_filters` routes from the structured filter block.
-    Reads `enum:` dotted paths at codegen time to inline choices.
-  - `value_providers.py` —
-    `@operation("value_providers", scope="resource")`. Emits
-    `POST /_values/{field}` for each `enum` and `free_text` field,
-    plus `POST /_values` for resource-level search when
-    `searchable: true`. Wires each to either an enum-backed list,
-    a free-text DB query, or a delegation to a ref'd resource's
-    value provider.
-  - `saved_views.py` —
-    `@operation("saved_views", scope="resource")` with `when()` on
-    `saved_views: true`. Generates the views table model, CRUD
-    routes, and the read-time labeler resolution. Requires
-    `labeler` set; compile-time validator rejects otherwise.
-- **Per-app registry file** — generated alongside `actions.py`:
-  `links.py` with `LINKS: dict[str, LinkBuilder]` keyed by
-  resource name, populated from each resource's `link:` block
-  (either the field-shorthand-generated builder or the dotted-path
-  builder). Saved-view dump and `_values` endpoints both look up
-  link builders through this dict.
+  - `filter.py` (modifier scope) — generates the FilterCondition
+    schema, `GET /_filters`, `GET /_filters/{field}`, and
+    `POST /_values/{field}` routes from the structured filter
+    block.  Reads `enum:` dotted paths at codegen time so the
+    template can inline choices.
+  - `searchable.py` (resource scope) — emits `POST /_values` for
+    resources that opt in.  Uses `resource.search.fields` for
+    ILIKE targets, falling back to `link.name` for shorthand
+    links.
+  - `links.py` (app scope, after-children) — emits
+    `{app}/links.py` with `LINKS` and `REF_RESOLVERS` maps keyed
+    by slug.  Each resolver fetches rows by id and runs them
+    through the link builder so saved-view hydration is one
+    lookup per type.
+- **Per-op `serializer:` hook** — read ops (`get`, `list`) take
+  a dotted path that overrides the auto-generated serializer.
+  Signature: `async (obj, session, db) -> Any`.  Skips
+  `response_model` on the route; the user's function returns
+  whatever shape it wants.  Used by saved views to call
+  `hydrate_view`, but reusable for any custom-dump scenario.
 
 ## Sequencing
 
 1. **Filter discovery + execution + value providers** — `enum` /
-   `bool` / `free_text` / `literal` modes. No `ref`, no
-   cross-resource. Load-bearing primitive.
-2. **`ref` value mode + labeler registry.** Adds the cross-resource
-   piece. Labeler required on any resource a `ref` filter can
-   target. `searchable: true` on those resources.
-3. **Saved views.** Now that ref + labeler exist, the dump format
-   is straightforward.
+   `bool` / `free_text` / `literal` modes.  No `ref`, no
+   cross-resource.  Load-bearing primitive.
+2. **`ref` value mode + link registry.** Adds the cross-resource
+   piece.  `link` required on any resource a `ref` filter can
+   target.  `searchable: true` on those resources.
+3. **Saved views.** Now that link + REF_RESOLVERS exist, the
+   serializer hook + `hydrate_view` make dump straightforward.
 
 Each step is independently shippable and testable.
 
-## Open questions
+## What shipped
 
-- **Operator vocabulary.** Initial set: `eq`, `in`, `contains`,
-  `gte`, `lte`, `is_null`. Add `not_in` / `not_eq` only when asked.
-- **Sort direction syntax.** `?sort=name,-created_at` (Django-ish)
-  vs `?sort=name:asc,created_at:desc`. Lean toward the second for
-  readability.
+- **Operator vocabulary.** `eq`, `neq`, `gt`, `gte`, `lt`, `lte`,
+  `contains`, `starts_with`, `in`, `is_null` — kept in sync with
+  `ingot.filters.FilterOp`.
+- **Sort direction syntax.** `default_dir: "asc"` / `"desc"` on
+  the order modifier; the discovery payload returns
+  `{fields, default, default_dir}`.
 - **Link builder signature.** `async (instance, session) ->
   LinkSchema`, matching the `can` guard signature for symmetry.
-  Whether session is actually used by builders is up to the user;
-  it's there for permission-aware redaction.
-- **Built-in schema set.** `LinkName`, `LinkID`, `LinkIDName` to
-  start. Add `LinkIDNameSubtitle` (or similar) when a resource
-  needs richer rendering — extending the set is cheap, but adding
-  one per resource defeats the point.
-- **Where the saved-views table lives.** One shared `saved_views`
-  table with a `resource_type` column, or one per resource.
-  Shared is simpler and matches the per-user scope; per-resource
-  matches the routing idiom but multiplies migrations. Lean toward
-  shared.
-- **Index hints in codegen.** Filterable + sortable columns are
-  prime candidates for indexes. Worth nudging users (warning at
-  codegen if a filterable column has no index in the model)? Not
-  blocking v1.
+  Whether session is used by a builder is up to the user.
+- **Built-in schema set.** `LinkName`, `LinkID`, `LinkIDName`.
+  Add `LinkIDNameSubtitle` (or similar) in `ingot.links` when a
+  resource needs richer rendering — extending the set is cheap.
+- **Saved-views table location.** One shared `saved_views` table
+  via `SavedViewMixin` (matches the `FileMixin` idiom).  Per-user
+  scoping rides on the existing `can` guards; resource-type
+  filtering rides on the structured filter block.
+- **Index hints in codegen.** Not implemented; deferred until
+  someone wants it.  Filterable + sortable columns are prime
+  candidates for indexes — worth a future codegen warning when a
+  filterable column has no index in the model.

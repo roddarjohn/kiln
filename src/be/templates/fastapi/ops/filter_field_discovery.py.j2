@@ -1,0 +1,32 @@
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+{% set _filters_list = filters %}
+{% for f in _filters_list %}
+{% set _vs = f["values"] %}
+    if field == {{ f.field | tojson }}:
+        return {
+            "field": {{ f.field | tojson }},
+            "operators": {{ f.operators | tojson }},
+            "values": {
+                "kind": {{ _vs["kind"] | tojson }},
+{% if _vs["kind"] == "enum" %}
+                "choices": [
+                    {"value": _m.value, "label": _m.name}
+                    for _m in {{ _vs["enum_class"] }}
+                ],
+                "endpoint": {{ _vs["endpoint"] | tojson }},
+{% elif _vs["kind"] == "free_text" %}
+                "endpoint": {{ _vs["endpoint"] | tojson }},
+{% elif _vs["kind"] == "literal" %}
+                "type": {{ _vs["type"] | tojson }},
+{% elif _vs["kind"] == "ref" %}
+                "type": {{ _vs["type"] | tojson }},
+{% if "endpoint" in _vs %}
+                "endpoint": {{ _vs["endpoint"] | tojson }},
+{% endif %}
+{% endif %}
+            },
+        }
+{% endfor %}
+    raise HTTPException(status_code=404, detail=f"Unknown filter field: {field}")
+{% endblock %}

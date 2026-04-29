@@ -8,6 +8,10 @@
 //   - Write-only resource with route_prefix, db_key, and
 //     email/json/datetime fields
 //   - Actions with and without params, with and without auth
+//   - Structured filter blocks (enum / bool / ref / free_text)
+//   - Resource search via `searchable: true` + `link:`
+//   - Saved-view CRUD wired through the `serializer:` hook +
+//     `resource.saved_views(...)` preset
 
 local list = import "be/operations/list.libsonnet";
 local resource = import "be/resources/presets.libsonnet";
@@ -46,7 +50,24 @@ local resource = import "be/resources/presets.libsonnet";
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
-          filter={ fields: ["sku", "name", "unit_price", "active"] },
+          // Structured filter spec — bare strings stay valid for
+          // back-compat and expand to permissive ``free_text``;
+          // structured entries declare per-field operators and
+          // value sources so the discovery payload can drive a
+          // typed filter UI.
+          filter={
+            fields: [
+              { name: "sku", values: "free_text" },
+              "name",  // shorthand
+              {
+                name: "unit_price",
+                values: "literal",
+                type: "float",
+                operators: ["eq", "gte", "lte"],
+              },
+              { name: "active", values: "bool" },
+            ],
+          },
           order={
             fields: ["name", "unit_price"],
             default: "name",

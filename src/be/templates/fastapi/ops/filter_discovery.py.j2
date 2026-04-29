@@ -30,5 +30,12 @@
             },
 {% endfor %}
         ],
+{% if sort %}
+        "sort": {
+            "fields": {{ sort.fields | tojson }},
+            "default": {{ sort.default | tojson }},
+            "default_dir": {{ sort.default_dir | tojson }},
+        },
+{% endif %}
     }
 {% endblock %}

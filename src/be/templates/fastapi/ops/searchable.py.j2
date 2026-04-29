@@ -1,16 +1,31 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% block body %}
     from ingot.filter_values import resolved_limit, resolved_offset
+{% if search_fields %}
+    from sqlalchemy import or_
+{% endif %}
 
     stmt = select({{ model_name }})
 
-{% if search_attr %}
+{% if search_fields %}
     if body.q:
         stmt = stmt.where(
-            {{ model_name }}.{{ search_attr }}.ilike(f"%{body.q}%"),
+            or_(
+{% for attr in search_fields %}
+                {{ model_name }}.{{ attr }}.ilike(f"%{body.q}%"),
+{% endfor %}
+            ),
         )
 
-    stmt = stmt.order_by({{ model_name }}.{{ search_attr }})
+{% if search_fields|length == 1 %}
+    stmt = stmt.order_by({{ model_name }}.{{ search_fields[0] }})
+{% else %}
+    stmt = stmt.order_by(
+{% for attr in search_fields %}
+        {{ model_name }}.{{ attr }},
+{% endfor %}
+    )
+{% endif %}
 {% endif %}
 
     limit = resolved_limit(body.limit)
@@ -20,10 +35,7 @@
     has_more = len(rows) > limit
     page = rows[:limit]
     builder = LINKS["{{ slug }}"]
-    # session passed as None for v1 — generated shorthand builders
-    # don't read it; consumers that need session-aware link logic
-    # will be threaded through once saved_views lands.
-    items = [(await builder(obj, None)).model_dump() for obj in page]
+    items = [(await builder(obj, session)).model_dump() for obj in page]
     next_cursor = str(start + limit) if has_more else None
     return {
         "results": items,

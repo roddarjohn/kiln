@@ -86,6 +86,97 @@
   //                               the response is the GET URL)
   //   POST /{pk}/delete-file    -- delete_file (object; cascades
   //                               S3 + row delete; 204)
+  // Default field list for the ``saved_views()`` preset's read
+  // ops — mirrors the columns
+  // :class:`ingot.saved_views.SavedViewMixin` supplies.
+  saved_view_fields:: [
+    { name: "id", type: "str" },
+    { name: "resource_type", type: "str" },
+    { name: "name", type: "str" },
+  ],
+
+  // Bundle the five CRUD ops for a SavedView resource.
+  //
+  // The consumer subclasses
+  // :class:`ingot.saved_views.SavedViewMixin` on their own
+  // ``DeclarativeBase`` once per app, points a kiln resource at
+  // it, and uses this preset to populate ``operations``:
+  //
+  //   resources: [
+  //     {
+  //       model: "myapp.models.SavedView",
+  //       pk: "id", pk_type: "str",
+  //       require_auth: true,
+  //       operations: resource.saved_views(
+  //         serializer="myapp.serializers.dump_view_hydrated",
+  //         owner_guard="myapp.guards.is_view_owner",
+  //       ),
+  //     },
+  //   ],
+  //
+  // ``serializer`` is a dotted path to an
+  // ``async (obj, session, db) -> dict[str, Any]`` function that
+  // calls :func:`ingot.saved_views.hydrate_view`.  It runs on the
+  // get + list reads so stored ``ref`` filter ids hydrate to
+  // ``items`` automatically.
+  //
+  // ``owner_guard`` is a dotted path to an
+  // ``async (resource, session) -> bool`` guard used as the
+  // ``can`` callable on every op except ``create`` (the row
+  // doesn't exist yet at that point); typically checks
+  // ``resource.owner_id == str(session.user_id)``.
+  //
+  // ``fields`` overrides the field list on the read ops.
+  saved_views(
+    serializer,
+    owner_guard,
+    fields=null,
+    create_fields=null,
+    update_fields=null,
+    filter_fields=null,
+  )::
+    local read_fields =
+      if fields != null then fields else $.saved_view_fields;
+    local write_fields =
+      if create_fields != null then create_fields
+      else [{ name: "name", type: "str" }];
+    local upd_fields =
+      if update_fields != null then update_fields
+      else [{ name: "name", type: "str" }];
+    local f_fields =
+      if filter_fields != null then filter_fields
+      else ["resource_type"];
+    [
+      {
+        name: "get",
+        fields: read_fields,
+        serializer: serializer,
+        can: owner_guard,
+      },
+      {
+        name: "list",
+        fields: read_fields,
+        serializer: serializer,
+        can: owner_guard,
+        modifiers: [
+          { type: "filter", fields: f_fields },
+        ],
+      },
+      {
+        name: "create",
+        fields: write_fields,
+      },
+      {
+        name: "update",
+        fields: upd_fields,
+        can: owner_guard,
+      },
+      {
+        name: "delete",
+        can: owner_guard,
+      },
+    ],
+
   files(
     require_auth=true,
     fields=null,

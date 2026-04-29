@@ -565,6 +565,25 @@ class OperationConfig(BaseModel):
         return self.model_extra or {}
 
 
+class SearchConfig(BaseModel):
+    """Resource-level search-field list.
+
+    Drives the ILIKE clause on
+    :attr:`~ResourceConfig.searchable`'s
+    ``POST /{prefix}/_values?q=`` endpoint.  When a query is
+    supplied, the SQL is::
+
+        WHERE col1 ILIKE %q% OR col2 ILIKE %q% OR ...
+
+    over every named attribute.  Without this block the endpoint
+    falls back to ``link.name`` (or no filtering at all when the
+    link is id-only / builder-only).
+    """
+
+    fields: list[str]
+    """Model attribute names to OR-match on the search query."""
+
+
 LinkKind = Literal["name", "id", "id_name"]
 """Built-in link-schema kinds.  Each maps to a class in
 :mod:`ingot.links`: ``"name"`` → :class:`~ingot.links.LinkName`,
@@ -698,6 +717,16 @@ class ResourceConfig(BaseModel):
     resource's :attr:`link` schema.  Powers ``ref`` filter inputs
     on other resources and any FE "search this table" affordance.
     Requires :attr:`link` to be set."""
+
+    search: SearchConfig | None = None
+    """Search-field configuration for the resource-level
+    ``_values`` endpoint.  When unset, the endpoint ILIKE's the
+    resource's :attr:`LinkConfig.name` column (or skips
+    ``q``-filtering entirely for builder-only / id-only links).
+    Set to override with an explicit list of model attributes —
+    e.g. when the consumer wants free-text search across both
+    ``sku`` and ``name``.  Only meaningful when :attr:`searchable`
+    is on."""
 
     link: LinkConfig | None = None
     """How this resource serializes as a link.  Required when
@@ -840,6 +869,17 @@ class ProjectConfig(FoundryConfig):
                         f"has no auth configured.  The /permissions "
                         f"endpoints evaluate guards against a session; "
                         f"configure project.auth or drop the flag."
+                    )
+                    raise ValueError(msg)
+
+                if resource.searchable:
+                    msg = (
+                        f"Resource {resource.model!r} sets "
+                        f"searchable=True but the project has no "
+                        f"auth configured.  The resource-level "
+                        f"`_values` endpoint passes `session` to "
+                        f"the link builder; configure project.auth "
+                        f"or drop the flag."
                     )
                     raise ValueError(msg)
 
@@ -1016,6 +1056,7 @@ FilterOperator = Literal[
     "contains",
     "starts_with",
     "in",
+    "is_null",
 ]
 """Operators supported by :func:`ingot.filters.apply_filters` and
 the generated ``FilterCondition`` schemas.  Kept in sync with
@@ -1043,6 +1084,7 @@ _ALL_OPERATORS: list[FilterOperator] = [
     "contains",
     "starts_with",
     "in",
+    "is_null",
 ]
 
 
@@ -1065,7 +1107,8 @@ class StructuredFilterField(BaseModel):
 
     operators: list[FilterOperator] = Field(default_factory=list)
     """Operators allowed on this field.  When empty, defaults are
-    derived from :data:`_DEFAULT_OPERATORS` keyed by ``values``."""
+    derived from a per-kind table keyed by ``values`` (e.g.
+    ``["eq", "in"]`` for enum/ref, ``["eq"]`` for bool, etc.)."""
 
     enum: str | None = None
     """Dotted import path to a Python :class:`enum.Enum` class.
