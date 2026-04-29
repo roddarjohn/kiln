@@ -874,10 +874,24 @@ class TestCrudHelpers:
             FieldSpec(name="title", type="str"),
             FieldSpec(name="count", type="int"),
         ]
-        result = _field_dicts(fields)
+        result, enum_imports = _field_dicts(fields)
         assert len(result) == 2
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
+        assert enum_imports == []
+
+    def test_field_dicts_enum(self):
+        fields = [
+            FieldSpec(
+                name="status",
+                type="enum",
+                enum="myapp.models.Status",
+            ),
+        ]
+        result, enum_imports = _field_dicts(fields)
+        assert len(result) == 1
+        assert result[0] == Field(name="status", py_type="Status")
+        assert enum_imports == [("myapp.models", "Status")]
 
     def test_field_dicts_rejects_nested(self):
         import pytest

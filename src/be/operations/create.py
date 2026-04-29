@@ -2,7 +2,6 @@
 
 from typing import TYPE_CHECKING, cast
 
-from be.config.schema import PYTHON_TYPES, FieldType
 from be.operations.renderers import gate_wiring
 from be.operations.types import (
     FieldsOptions,
@@ -59,11 +58,13 @@ class Create:
         )
         _, model = Name.from_dotted(resource.model)
         request_schema = model.suffixed("CreateRequest")
+        field_dicts, enum_imports = _field_dicts(options.fields)
 
         yield SchemaClass(
             name=request_schema,
-            fields=_field_dicts(options.fields),
+            fields=field_dicts,
             doc=f"Request body for creating a {model.pascal}.",
+            extra_imports=enum_imports,
         )
 
         gate_ctx, gate_imports = gate_wiring(
@@ -95,13 +96,10 @@ class Create:
             status_invalid=422,
             has_request_body=True,
             request_schema=request_schema,
-            # _field_dicts above already rejects nested FieldSpecs, so every
-            # entry here is guaranteed to carry a scalar ``type``.
+            # _field_dicts above already rejects nested FieldSpecs;
+            # ``field_dicts`` carries the rendered py_type (scalar
+            # mapping or enum class name).
             request_fields=[
-                {
-                    "name": f.name,
-                    "py_type": PYTHON_TYPES[cast("FieldType", f.type)],
-                }
-                for f in options.fields
+                {"name": f.name, "py_type": f.py_type} for f in field_dicts
             ],
         )

@@ -33,7 +33,16 @@ FieldType = Literal[
     "datetime",
     "date",
     "json",
+    "enum",
+    "nested",
 ]
+
+ENUM: Literal["enum"] = "enum"
+"""Sentinel value for :attr:`FieldSpec.type` that marks a field as
+backed by a Python :class:`enum.Enum` class.  Pairs with
+:attr:`FieldSpec.enum` (dotted path) so the schema renderer can
+import the class and use it as the field's annotation."""
+
 
 PYTHON_TYPES: dict[FieldType, str] = {
     "uuid": "uuid.UUID",
@@ -50,6 +59,11 @@ PYTHON_TYPES: dict[FieldType, str] = {
 
 Used by op builders to render pk/field type annotations into the
 generated Pydantic schemas and route handlers.
+
+``"enum"`` and ``"nested"`` aren't keyed here — both resolve to a
+consumer-supplied class name (the enum / model class) that the
+schema renderer imports from :attr:`FieldSpec.enum` /
+:attr:`FieldSpec.model`.
 """
 
 
@@ -364,12 +378,17 @@ class FieldSpec(BaseModel):
     """A named, typed field — used in operation schemas and action params.
 
     Most fields are scalars: ``{name, type}`` where ``type`` is one
-    of the :data:`~be.config.schema.FieldType` values.  A field
-    can also be *nested* — a dump of a related model — by setting
-    ``type: "nested"`` and
-    supplying ``model`` (dotted import path to the related
-    SQLAlchemy class) and ``fields`` (the sub-field list).  Set
-    ``many=True`` when the relationship returns a collection.
+    of the :data:`~be.config.schema.FieldType` values.  Two
+    type-driven extensions:
+
+    * ``type: "nested"`` — a dump of a related SQLAlchemy model.
+      Set :attr:`model` (dotted import path) and :attr:`fields`
+      (the sub-field list); add ``many=True`` when the
+      relationship returns a collection.
+    * ``type: "enum"`` — a Python :class:`enum.Enum` value.  Set
+      :attr:`enum` (dotted import path) so the generated schema
+      annotates the field with the imported enum class instead of
+      ``str``.
 
     Nested fields are only meaningful on read-op dumps (``get``,
     ``list``).  Write-op request schemas (``create`` / ``update``)
@@ -377,7 +396,7 @@ class FieldSpec(BaseModel):
     """
 
     name: str
-    type: FieldType | Literal["nested"]
+    type: FieldType
     model: str | None = None
     """Dotted import path of the related SQLAlchemy model, e.g.
     ``"blog.models.Project"``.  Required when ``type == "nested"``;
@@ -397,49 +416,99 @@ class FieldSpec(BaseModel):
     many-to-one scalars) or ``"subquery"`` for an older-style
     correlated subquery load.  Only meaningful when
     ``type == "nested"``."""
+    enum: str | None = None
+    """Dotted import path of the Python :class:`enum.Enum` class
+    backing the field.  Required when ``type == "enum"``; must be
+    omitted otherwise.  The schema renderer imports the class and
+    uses it as the field's annotation so the OpenAPI spec carries
+    the enum's choices."""
 
     @model_validator(mode="after")
-    def _validate_nested(self) -> FieldSpec:
+    def _validate_kind(self) -> FieldSpec:
         if self.type == NESTED:
-            if self.model is None or self.fields is None:
-                msg = (
-                    f"Field {self.name!r}: nested fields require "
-                    f"`model` and `fields`."
-                )
-                raise ValueError(msg)
+            self._validate_nested()
 
-            if not self.fields:
-                msg = f"Field {self.name!r}: nested `fields` must be non-empty."
-                raise ValueError(msg)
+        elif self.type == ENUM:
+            self._validate_enum()
 
         else:
-            if self.model is not None or self.fields is not None:
-                msg = (
-                    f"Field {self.name!r}: `model` and `fields` are "
-                    f'only allowed when `type: "nested"`.'
-                )
-                raise ValueError(msg)
-
-            if self.many:
-                msg = (
-                    f"Field {self.name!r}: `many` is only meaningful "
-                    f'when `type: "nested"`.'
-                )
-                raise ValueError(msg)
-
-            if self.load != _DEFAULT_LOAD:
-                msg = (
-                    f"Field {self.name!r}: `load` is only meaningful "
-                    f'when `type: "nested"`.'
-                )
-                raise ValueError(msg)
+            self._validate_scalar()
 
         return self
+
+    def _validate_nested(self) -> None:
+        """Required-and-rejected fields for ``type: "nested"``."""
+        if self.model is None or self.fields is None:
+            msg = (
+                f"Field {self.name!r}: nested fields require "
+                f"`model` and `fields`."
+            )
+            raise ValueError(msg)
+
+        if not self.fields:
+            msg = f"Field {self.name!r}: nested `fields` must be non-empty."
+            raise ValueError(msg)
+
+        if self.enum is not None:
+            msg = (
+                f"Field {self.name!r}: `enum` is only allowed "
+                f'when `type: "enum"`.'
+            )
+            raise ValueError(msg)
+
+    def _validate_enum(self) -> None:
+        """Required-and-rejected fields for ``type: "enum"``."""
+        if self.enum is None:
+            msg = (
+                f'Field {self.name!r}: `type: "enum"` requires '
+                f"`enum` (dotted path to a Python Enum class)."
+            )
+            raise ValueError(msg)
+
+        if self.model is not None or self.fields is not None or self.many:
+            msg = (
+                f"Field {self.name!r}: `model` / `fields` / `many` "
+                f'are only allowed when `type: "nested"`.'
+            )
+            raise ValueError(msg)
+
+    def _validate_scalar(self) -> None:
+        """Reject nested-only / enum-only fields on scalar entries."""
+        if (
+            self.model is not None
+            or self.fields is not None
+            or self.enum is not None
+        ):
+            msg = (
+                f"Field {self.name!r}: `model` / `fields` / `enum` "
+                f"are only allowed when `type` is "
+                f'``"nested"`` or ``"enum"``.'
+            )
+            raise ValueError(msg)
+
+        if self.many:
+            msg = (
+                f"Field {self.name!r}: `many` is only meaningful "
+                f'when `type: "nested"`.'
+            )
+            raise ValueError(msg)
+
+        if self.load != _DEFAULT_LOAD:
+            msg = (
+                f"Field {self.name!r}: `load` is only meaningful "
+                f'when `type: "nested"`.'
+            )
+            raise ValueError(msg)
 
     @property
     def is_nested(self) -> bool:
         """Whether this spec describes a nested dump of a related model."""
         return self.type == NESTED
+
+    @property
+    def is_enum(self) -> bool:
+        """Whether this spec describes a Python ``Enum``-typed field."""
+        return self.type == ENUM
 
 
 class ModifierConfig(BaseModel):

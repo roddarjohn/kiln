@@ -235,14 +235,21 @@ class FieldsOptions(BaseModel):
     fields: list[FieldSpec]
 
 
-def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
+def _field_dicts(
+    fields: list[FieldSpec],
+) -> tuple[list[Field], list[tuple[str, str]]]:
     """Convert scalar ``FieldSpec`` entries to :class:`Field` dataclasses.
 
     Write-op request schemas (``create`` / ``update``) call this —
     they don't support nested fields today, so any nested entry is
     rejected here rather than silently producing an invalid schema.
+
+    Returns ``(fields, enum_imports)`` so the caller can hoist
+    enum-class imports onto the request schema's
+    :attr:`SchemaClass.extra_imports`.
     """
     out: list[Field] = []
+    enum_imports: list[tuple[str, str]] = []
 
     for f in fields:
         if f.is_nested:
@@ -252,11 +259,18 @@ def _field_dicts(fields: list[FieldSpec]) -> list[Field]:
             )
             raise ValueError(msg)
 
+        if f.is_enum:
+            enum_dotted = cast("str", f.enum)
+            enum_module, enum_class = split_dotted_class(enum_dotted)
+            enum_imports.append((enum_module, enum_class))
+            out.append(Field(name=f.name, py_type=enum_class))
+            continue
+
         out.append(
             Field(name=f.name, py_type=PYTHON_TYPES[cast("FieldType", f.type)])
         )
 
-    return out
+    return out, enum_imports
 
 
 @dataclass
@@ -314,7 +328,7 @@ def _construct_dump(  # noqa: PLR0913
     """
     main_schema_name = model.suffixed(suffix)
     main_fn_name = f"to_{model.lower}_{stem}"
-    expanded, nested_schemas, nested_sers = _expand_field_specs(
+    expanded, nested_schemas, nested_sers, enum_imports = _expand_field_specs(
         fields,
         class_prefix=main_schema_name,
         fn_prefix=main_fn_name,
@@ -330,6 +344,7 @@ def _construct_dump(  # noqa: PLR0913
         name=main_schema_name,
         fields=expanded,
         doc=f"{suffix} schema for {model.pascal}.",
+        extra_imports=enum_imports,
     )
     main_serializer = SerializerFn(
         function_name=main_fn_name,
@@ -354,19 +369,26 @@ def _expand_field_specs(
     specs: list[FieldSpec],
     class_prefix: str,
     fn_prefix: str,
-) -> tuple[list[Field], list[SchemaClass], list[SerializerFn]]:
+) -> tuple[
+    list[Field], list[SchemaClass], list[SerializerFn], list[tuple[str, str]]
+]:
     """Walk ``specs``, expanding nested entries into sub-artifacts.
 
-    Returns ``(fields, nested_schemas, nested_serializers)``:
+    Returns ``(fields, nested_schemas, nested_serializers,
+    enum_imports)``:
 
     * ``fields`` is the flat :class:`Field` list the caller drops
       into its own schema and serializer.  Scalar specs become plain
       ``Field``; nested specs become ``Field`` entries carrying the
       nested class as ``py_type`` and the sub-serializer's function
-      name in ``nested_serializer``.
+      name in ``nested_serializer``; enum specs reference the
+      consumer's enum class by name as ``py_type``.
     * ``nested_schemas`` / ``nested_serializers`` are the sub-dump
       artifacts, ordered deepest-first so they render before the
       parent that references them.
+    * ``enum_imports`` are ``(module, class_name)`` pairs for any
+      enum-typed fields *at this level only* (deeper levels'
+      imports land on their own nested schemas).
 
     Naming uses the accumulated path to guarantee uniqueness without
     an explicit alias: ``TaskResource`` + field ``project`` ->
@@ -376,8 +398,16 @@ def _expand_field_specs(
     fields: list[Field] = []
     out_schemas: list[SchemaClass] = []
     out_sers: list[SerializerFn] = []
+    enum_imports: list[tuple[str, str]] = []
 
     for fs in specs:
+        if fs.is_enum:
+            enum_dotted = cast("str", fs.enum)
+            enum_module, enum_class = split_dotted_class(enum_dotted)
+            enum_imports.append((enum_module, enum_class))
+            fields.append(Field(name=fs.name, py_type=enum_class))
+            continue
+
         if not fs.is_nested:
             fields.append(
                 Field(
@@ -394,7 +424,12 @@ def _expand_field_specs(
         child_class_prefix = f"{class_prefix}{field_pascal}"
         child_fn_prefix = f"{fn_prefix}_{fs.name}"
 
-        inner_fields, inner_schemas, inner_sers = _expand_field_specs(
+        (
+            inner_fields,
+            inner_schemas,
+            inner_sers,
+            inner_enum_imports,
+        ) = _expand_field_specs(
             fs_fields,
             class_prefix=child_class_prefix,
             fn_prefix=child_fn_prefix,
@@ -409,6 +444,7 @@ def _expand_field_specs(
             name=nested_schema_name,
             fields=inner_fields,
             doc=f"Nested {related_pascal} dump under {class_prefix}.",
+            extra_imports=inner_enum_imports,
         )
         nested_serializer = SerializerFn(
             function_name=nested_fn_name,
@@ -436,7 +472,7 @@ def _expand_field_specs(
             )
         )
 
-    return fields, out_schemas, out_sers
+    return fields, out_schemas, out_sers, enum_imports
 
 
 def _build_load_chains(
