@@ -129,17 +129,18 @@ class List:
         )
 
         if custom_serializer is not None:
-            ser_module, _, ser_name = custom_serializer.rpartition(".")
+            try:
+                ser_module, ser_name_obj = Name.from_dotted(custom_serializer)
 
-            if not ser_module or not ser_name:
+            except ValueError as exc:
                 msg = (
                     f"Operation {ctx.instance.name!r}: serializer "
                     f"must be a dotted path (got "
                     f"{custom_serializer!r})"
                 )
-                raise ValueError(msg)
+                raise ValueError(msg) from exc
 
-            serializer_fn = ser_name
+            serializer_fn = ser_name_obj.raw
             serializer_fn_module: str | None = ser_module
             response_model: str | None = None
             return_type = "list[dict[str, Any]]"
