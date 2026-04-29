@@ -7,25 +7,10 @@ free of the cycle that would otherwise arise from
 (for ``ListResult``) while ``list`` reaches for naming helpers.
 """
 
-from foundry.naming import Name
+from typing import TYPE_CHECKING
 
-
-def app_module_for(model_path: str) -> str:
-    """Return the consumer's app package from a model dotted path.
-
-    Strips the model class name, then the trailing ``.models`` (or
-    similar) segment.  Examples::
-
-        "blog.models.Article"  -> "blog"
-        "myapp.users.User"     -> "myapp"
-        "single.Model"         -> "single"
-
-    Generated code lives at ``{package_prefix}.{app}.{...}``, so
-    every site that needs to import from a sibling generated
-    module (serializers, schemas, action registry) routes through
-    this helper.
-    """
-    return Name.parent_path(Name.parent_path(model_path))
+if TYPE_CHECKING:
+    from foundry.naming import Name
 
 
 def object_specs_const(model: Name) -> str:
