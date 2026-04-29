@@ -526,6 +526,23 @@ class OperationConfig(BaseModel):
     additionally used as the row-level visibility filter on the
     list endpoint, so it sees each candidate row in turn.
     """
+    pre: str | None = None
+    """Dotted path to an async ``(body, *, db) -> body`` hook
+    invoked between request parsing and the SQL write.  The
+    return value replaces the parsed body for the rest of the
+    handler, so a hook can normalise, enrich, or stamp defaults
+    onto the request.  Only meaningful on ``create`` and
+    ``update`` (the ops with a request body); rejected on every
+    other op including custom ``action`` ops, which already
+    invoke a user-supplied function and can do their own
+    preprocessing inline."""
+    post: str | None = None
+    """Dotted path to an async ``(obj, body, *, db) -> None``
+    hook invoked after ``db.commit()``.  Receives the
+    just-written model row and the (possibly pre-processed)
+    request body so the consumer can fan out side effects
+    (cache invalidation, audit log, downstream notification).
+    Same op restrictions as :attr:`pre`."""
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
@@ -537,6 +554,45 @@ class OperationConfig(BaseModel):
     def options(self) -> dict[str, Any]:
         """Operation-specific options (all extra fields)."""
         return self.model_extra or {}
+
+    @model_validator(mode="after")
+    def _hooks_only_on_write_ops(self) -> OperationConfig:
+        """Reject ``pre`` / ``post`` on ops that don't support them.
+
+        The hooks wrap a parsed request body and a freshly
+        written row, so they're only meaningful on the built-in
+        write ops (``create``, ``update``).  ``get`` / ``delete``
+        / ``list`` have no body to pre-process and ``action``
+        already calls a user-supplied function -- adding a
+        second hook layer would just duplicate that path.
+        """
+        if self.pre is None and self.post is None:
+            return self
+
+        if self.type == "action":
+            msg = (
+                f"Operation {self.name!r}: pre/post hooks are not "
+                f"supported on action ops -- the action's own fn "
+                f"is the user-defined entry point."
+            )
+            raise ValueError(msg)
+
+        if self.name not in _HOOK_SUPPORTED_OPS:
+            allowed = ", ".join(sorted(_HOOK_SUPPORTED_OPS))
+            msg = (
+                f"Operation {self.name!r}: pre/post hooks are only "
+                f"supported on {allowed}."
+            )
+            raise ValueError(msg)
+
+        return self
+
+
+_HOOK_SUPPORTED_OPS: frozenset[str] = frozenset({"create", "update"})
+"""Op names that accept :attr:`OperationConfig.pre` /
+:attr:`OperationConfig.post` hooks.  Extending this set means the
+matching op's ``build()`` and Jinja template must wire the hook
+calls (see ``be.operations.create`` / ``be.operations.update``)."""
 
 
 class ResourceConfig(BaseModel):

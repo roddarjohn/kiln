@@ -2166,6 +2166,62 @@ class TestUpdate:
 
 
 # -------------------------------------------------------------------
+# Pre/post hooks
+# -------------------------------------------------------------------
+
+
+class TestHooks:
+    """Tests for the ``pre`` / ``post`` operation hooks."""
+
+    def test_create_no_hooks_omits_context(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(resource, OperationConfig(name="create"))
+        result = list(Create().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert "pre_hook_call" not in handler.body_context
+        assert "post_hook_call" not in handler.body_context
+
+    def test_create_with_pre_hook(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="create", pre="app.hooks.before_create"),
+        )
+        result = list(Create().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["pre_hook_call"] == "before_create"
+        assert ("app.hooks", "before_create") in handler.extra_imports
+
+    def test_create_with_post_hook(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="create", post="app.hooks.after_create"),
+        )
+        result = list(Create().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["post_hook_call"] == "after_create"
+        assert ("app.hooks", "after_create") in handler.extra_imports
+
+    def test_update_with_both_hooks(self):
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(
+                name="update",
+                pre="app.hooks.before_update",
+                post="app.hooks.after_update",
+            ),
+        )
+        result = list(Update().build(ctx, _FieldsOpts(fields=_FIELDS)))
+        handler = next(r for r in result if isinstance(r, RouteHandler))
+        assert handler.body_context["pre_hook_call"] == "before_update"
+        assert handler.body_context["post_hook_call"] == "after_update"
+        assert ("app.hooks", "before_update") in handler.extra_imports
+        assert ("app.hooks", "after_update") in handler.extra_imports
+
+
+# -------------------------------------------------------------------
 # Delete
 # -------------------------------------------------------------------
 

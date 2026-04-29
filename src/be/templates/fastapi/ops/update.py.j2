@@ -1,16 +1,31 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% from "fastapi/ops/_gate.py.j2" import gate %}
 {% block body %}
+{% if pre_hook_call|default(none) %}
+    body = await {{ pre_hook_call }}(body, db=db)
+{% endif %}
     obj = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
 {{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
+{% if post_hook_call|default(none) %}
+    result = await db.execute(
+        update({{ model_name }})
+        .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
+        .values(**body.model_dump(exclude_unset=True))
+        .returning({{ model_name }})
+    )
+    obj = result.scalar_one()
+    await db.commit()
+    await {{ post_hook_call }}(obj, body, db=db)
+{% else %}
     await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
         .values(**body.model_dump(exclude_unset=True))
     )
     await db.commit()
+{% endif %}
 {% endblock %}
