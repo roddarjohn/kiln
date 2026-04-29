@@ -1,0 +1,53 @@
+"""Generated link registry for app `{{ module }}`.
+
+Maps each opted-in resource's slug (lowercase model class name)
+to an async builder ``(instance, session) -> LinkSchema``.  The
+``_values`` and saved-view dump endpoints look up builders here
+to hydrate cross-resource references without hard-coding their
+labels.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ingot.links import {{ link_class_names | join(", ") }}
+
+{% for module, names in model_imports %}
+from {{ module }} import {{ names | join(", ") }}
+{% endfor %}
+{% for module, names in builder_imports %}
+from {{ module }} import {{ names | join(", ") }}
+{% endfor %}
+
+{% for entry in entries %}
+{% if not entry.is_user_builder %}
+
+
+async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ entry.link_class }}:
+{% if entry.kind == "name" %}
+    return {{ entry.link_class }}(
+        type="{{ entry.slug }}",
+        name=obj.{{ entry.name_attr }},
+    )
+{% elif entry.kind == "id" %}
+    return {{ entry.link_class }}(
+        type="{{ entry.slug }}",
+        id=obj.{{ entry.id_attr }},
+    )
+{% else %}
+    return {{ entry.link_class }}(
+        type="{{ entry.slug }}",
+        id=obj.{{ entry.id_attr }},
+        name=obj.{{ entry.name_attr }},
+    )
+{% endif %}
+{% endif %}
+{% endfor %}
+
+
+LINKS: dict[str, Any] = {
+{% for entry in entries %}
+    "{{ entry.slug }}": {{ entry.fn_name }},
+{% endfor %}
+}

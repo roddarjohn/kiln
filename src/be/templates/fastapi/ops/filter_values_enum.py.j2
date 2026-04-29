@@ -1,0 +1,6 @@
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+    from ingot.filter_values import enum_values
+
+    return enum_values({{ enum_class }}, body)
+{% endblock %}

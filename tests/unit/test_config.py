@@ -10,9 +10,11 @@ from be.config.schema import (
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
+    FilterConfig,
     OperationConfig,
     ProjectConfig,
     ResourceConfig,
+    StructuredFilterField,
 )
 from foundry.config import load_config
 from foundry.errors import ConfigError
@@ -680,3 +682,163 @@ def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
     assert not isinstance(archive, str)
     assert publish.require_auth is False
     assert archive.require_auth is None
+
+
+# ---------------------------------------------------------------------------
+# StructuredFilterField + FilterConfig
+# ---------------------------------------------------------------------------
+
+
+def test_structured_filter_enum_defaults():
+    field = StructuredFilterField(
+        name="status", values="enum", enum="myapp.OrderStatus"
+    )
+    assert field.operators == ["eq", "in"]
+    assert field.enum == "myapp.OrderStatus"
+
+
+def test_structured_filter_bool_defaults():
+    field = StructuredFilterField(name="archived", values="bool")
+    assert field.operators == ["eq"]
+
+
+def test_structured_filter_ref_defaults():
+    field = StructuredFilterField(
+        name="customer_id", values="ref", ref_resource="customer"
+    )
+    assert field.operators == ["eq", "in"]
+
+
+def test_structured_filter_free_text_defaults():
+    field = StructuredFilterField(name="sku", values="free_text")
+    assert field.operators == ["eq", "contains", "starts_with"]
+
+
+def test_structured_filter_literal_defaults():
+    field = StructuredFilterField(
+        name="created_at", values="literal", type="datetime"
+    )
+    assert field.operators == ["eq", "gt", "gte", "lt", "lte"]
+
+
+def test_structured_filter_explicit_operators_kept():
+    field = StructuredFilterField(
+        name="status",
+        values="enum",
+        enum="myapp.OrderStatus",
+        operators=["eq"],
+    )
+    assert field.operators == ["eq"]
+
+
+def test_structured_filter_unknown_operator_rejected():
+    # Pydantic's Literal validation rejects unknown operators
+    # before any custom validator runs.
+    with pytest.raises(ValueError, match="literal_error"):
+        StructuredFilterField(
+            name="status",
+            values="enum",
+            enum="myapp.OrderStatus",
+            operators=["nonsense"],
+        )
+
+
+def test_structured_filter_enum_requires_enum_path():
+    with pytest.raises(ValueError, match="requires `enum`"):
+        StructuredFilterField(name="status", values="enum")
+
+
+def test_structured_filter_literal_requires_type():
+    with pytest.raises(ValueError, match="requires `type`"):
+        StructuredFilterField(name="created_at", values="literal")
+
+
+def test_structured_filter_ref_requires_ref_resource():
+    with pytest.raises(ValueError, match="requires `ref_resource`"):
+        StructuredFilterField(name="customer_id", values="ref")
+
+
+def test_structured_filter_enum_rejects_type():
+    with pytest.raises(ValueError, match="`type` is not allowed"):
+        StructuredFilterField(
+            name="status",
+            values="enum",
+            enum="myapp.OrderStatus",
+            type="str",
+        )
+
+
+def test_structured_filter_bool_rejects_enum():
+    with pytest.raises(ValueError, match="`enum` is not allowed"):
+        StructuredFilterField(name="archived", values="bool", enum="myapp.X")
+
+
+def test_structured_filter_free_text_rejects_ref_resource():
+    with pytest.raises(ValueError, match="`ref_resource` is not allowed"):
+        StructuredFilterField(
+            name="sku", values="free_text", ref_resource="customer"
+        )
+
+
+def test_filter_config_accepts_bare_strings():
+    cfg = FilterConfig.model_validate({"fields": ["sku", "name"]})
+    assert cfg.fields == ["sku", "name"]
+
+
+def test_filter_config_accepts_mixed():
+    cfg = FilterConfig.model_validate(
+        {
+            "fields": [
+                "sku",
+                {
+                    "name": "status",
+                    "values": "enum",
+                    "enum": "myapp.OrderStatus",
+                },
+            ]
+        }
+    )
+    assert cfg.fields is not None
+    assert cfg.fields[0] == "sku"
+    assert isinstance(cfg.fields[1], StructuredFilterField)
+    assert cfg.fields[1].enum == "myapp.OrderStatus"
+
+
+def test_filter_config_normalized_expands_bare_strings():
+    cfg = FilterConfig.model_validate({"fields": ["sku"]})
+    structured = cfg.normalized_fields(list_field_names=["sku", "name"])
+    assert len(structured) == 1
+    assert structured[0].name == "sku"
+    assert structured[0].values == "free_text"
+    # Bare-string shorthand keeps the full operator vocabulary so
+    # any operator the existing apply_filters supports still works.
+    assert "contains" in structured[0].operators
+    assert "eq" in structured[0].operators
+    assert "in" in structured[0].operators
+
+
+def test_filter_config_normalized_falls_back_to_list_fields():
+    cfg = FilterConfig()
+    structured = cfg.normalized_fields(
+        list_field_names=["sku", "name", "active"]
+    )
+    assert [f.name for f in structured] == ["sku", "name", "active"]
+    assert all(f.values == "free_text" for f in structured)
+
+
+def test_filter_config_normalized_passes_structured_through():
+    cfg = FilterConfig.model_validate(
+        {
+            "fields": [
+                {
+                    "name": "status",
+                    "values": "enum",
+                    "enum": "myapp.OrderStatus",
+                }
+            ]
+        }
+    )
+    structured = cfg.normalized_fields(list_field_names=["status"])
+    assert len(structured) == 1
+    assert structured[0].operators == ["eq", "in"]
+    assert structured[0].enum == "myapp.OrderStatus"

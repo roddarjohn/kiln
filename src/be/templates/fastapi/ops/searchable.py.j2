@@ -1,0 +1,29 @@
+{% extends "fastapi/handler_default.py.j2" %}
+{% block body %}
+    from ingot.filter_values import resolved_limit, resolved_offset
+
+    stmt = select({{ model_name }})
+
+{% if search_attr %}
+    if body.q:
+        stmt = stmt.where(
+            {{ model_name }}.{{ search_attr }}.ilike(f"%{body.q}%"),
+        )
+
+    stmt = stmt.order_by({{ model_name }}.{{ search_attr }})
+{% endif %}
+
+    limit = resolved_limit(body.limit)
+    start = resolved_offset(body.cursor)
+    stmt = stmt.offset(start).limit(limit + 1)
+    rows = (await db.execute(stmt)).scalars().all()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    builder = LINKS["{{ slug }}"]
+    items = [(await builder(obj, session)).model_dump() for obj in page]
+    next_cursor = str(start + limit) if has_more else None
+    return {
+        "results": items,
+        "next_cursor": next_cursor,
+    }
+{% endblock %}

@@ -539,6 +539,66 @@ class OperationConfig(BaseModel):
         return self.model_extra or {}
 
 
+LinkKind = Literal["name", "id", "id_name"]
+"""Built-in link-schema kinds.  Each maps to a class in
+:mod:`ingot.links`: ``"name"`` → :class:`~ingot.links.LinkName`,
+``"id"`` → :class:`~ingot.links.LinkID`,
+``"id_name"`` → :class:`~ingot.links.LinkIDName`."""
+
+
+class LinkConfig(BaseModel):
+    """How a resource serializes when referenced as a link.
+
+    Either declare model-attribute shorthands (``name`` / ``id``)
+    so the codegen generates a builder that pulls those attributes
+    directly off the model, or provide a ``builder:`` dotted path
+    for arbitrary logic.  Mutually exclusive — if ``builder`` is
+    set, shorthand fields must be omitted.
+    """
+
+    kind: LinkKind
+    """Which built-in link schema this resource produces.  See
+    :data:`LinkKind`."""
+
+    name: str | None = None
+    """Model attribute holding the display name, used by shorthand
+    when ``kind`` is ``"name"`` or ``"id_name"``.  Required for
+    those kinds unless ``builder`` is set."""
+
+    id: str | None = None
+    """Model attribute holding the link id, used by shorthand when
+    ``kind`` is ``"id"`` or ``"id_name"``.  Defaults to the
+    resource's primary key (``ResourceConfig.pk``); set explicitly
+    to override."""
+
+    builder: str | None = None
+    """Dotted import path to an async callable
+    ``(instance, session) -> LinkSchema`` that returns the link
+    schema instance.  Overrides shorthand."""
+
+    @model_validator(mode="after")
+    def _validate_shorthand(self) -> LinkConfig:
+        if self.builder is not None:
+            if self.name is not None or self.id is not None:
+                msg = (
+                    "LinkConfig: provide either `builder` or "
+                    "shorthand fields (`name` / `id`), not both."
+                )
+                raise ValueError(msg)
+
+            return self
+
+        if self.kind in {"name", "id_name"} and self.name is None:
+            msg = (
+                f"LinkConfig: kind={self.kind!r} requires either "
+                f"`name` (model attribute holding the display name) "
+                f"or `builder`."
+            )
+            raise ValueError(msg)
+
+        return self
+
+
 class ResourceConfig(BaseModel):
     """A resource: a consumer-defined Python model plus its operations.
 
@@ -606,6 +666,26 @@ class ResourceConfig(BaseModel):
     full resource fetch.  Independent of
     :attr:`include_actions_in_dump`."""
 
+    searchable: bool = False
+    """When ``True``, generate ``POST /{prefix}/_values`` — a
+    resource-level search endpoint returning items shaped by the
+    resource's :attr:`link` schema.  Powers ``ref`` filter inputs
+    on other resources and any FE "search this table" affordance.
+    Requires :attr:`link` to be set."""
+
+    saved_views: bool = False
+    """When ``True``, generate per-user CRUD for named filter+sort
+    states under ``/{prefix}/views``.  Stored views hold raw filter
+    values; on read, ``ref`` filter values hydrate through the
+    target resource's :attr:`link` builder.  Requires :attr:`link`
+    on this resource and on every resource referenced by ``ref``
+    filters."""
+
+    link: LinkConfig | None = None
+    """How this resource serializes as a link.  Required when
+    :attr:`searchable` or :attr:`saved_views` is on, and when any
+    other resource's filter has ``values: "ref"`` pointing here."""
+
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
@@ -642,6 +722,18 @@ class ResourceConfig(BaseModel):
                     raise ValueError(msg)
 
         return self
+
+
+def _resource_class_lower(resource: ResourceConfig) -> str:
+    """Lower-cased class name of *resource*'s model.
+
+    Matches :func:`be.operations.routing._resource_module_slug`
+    so ``ref_resource`` strings resolve to the same identifier the
+    URL prefix uses.
+    """
+    _, _, class_name = resource.model.rpartition(".")
+
+    return class_name.lower()
 
 
 class AppConfig(BaseModel):
@@ -747,6 +839,26 @@ class ProjectConfig(FoundryConfig):
 
         return self
 
+    @model_validator(mode="after")
+    def _link_required_for_searchable_and_ref_targets(
+        self,
+    ) -> ProjectConfig:
+        """Reject opt-ins that need a link without one.
+
+        ``searchable=True`` and ``saved_views=True`` both serialize
+        results via the resource's :class:`LinkConfig`; any other
+        resource's filter using ``values: "ref"`` to point here
+        does the same on the target side.  Each of those triggers
+        requires :attr:`ResourceConfig.link` to be set.
+        """
+        ref_targets = _collect_ref_targets(self)
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                _check_resource_link(resource, ref_targets)
+
+        return self
+
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
         """Return the :class:`DatabaseConfig` selected by *db_key*.
 
@@ -782,6 +894,79 @@ class ProjectConfig(FoundryConfig):
         return matched
 
 
+def _collect_ref_targets(project: ProjectConfig) -> set[str]:
+    """Return the ``ref_resource`` slugs referenced in *project*.
+
+    Walks every filter modifier across every resource and pulls
+    the target slug out of each ``values: "ref"`` entry.
+    """
+    targets: set[str] = set()
+
+    for app in project.apps:
+        for resource in app.config.resources:
+            for op in resource.operations:
+                for modifier in op.modifiers:
+                    if modifier.type != "filter":
+                        continue
+
+                    for entry in modifier.options.get("fields", []) or []:
+                        target = _ref_target_from_entry(entry)
+
+                        if target is not None:
+                            targets.add(target)
+
+    return targets
+
+
+def _ref_target_from_entry(entry: object) -> str | None:
+    """Pull the ``ref_resource`` value off a filter-fields entry.
+
+    Bare-string entries are ``free_text`` shorthand and never have
+    a target; only structured dicts with ``values: "ref"`` do.
+    """
+    if not isinstance(entry, dict):
+        return None
+
+    if entry.get("values") != "ref":
+        return None
+
+    target = entry.get("ref_resource")
+
+    return target if isinstance(target, str) and target else None
+
+
+def _check_resource_link(
+    resource: ResourceConfig, ref_targets: set[str]
+) -> None:
+    """Raise if *resource* needs a link config but doesn't have one."""
+    slug = _resource_class_lower(resource)
+    referenced = slug in ref_targets
+    needs_link = resource.searchable or resource.saved_views or referenced
+
+    if not needs_link or resource.link is not None:
+        return
+
+    reasons: list[str] = []
+
+    if resource.searchable:
+        reasons.append("searchable=True")
+
+    if resource.saved_views:
+        reasons.append("saved_views=True")
+
+    if referenced:
+        reasons.append(
+            f"another resource's filter targets it via ref_resource={slug!r}"
+        )
+
+    msg = (
+        f"Resource {resource.model!r} requires `link` because "
+        f"{', '.join(reasons)}; set `link: {{ kind: ..., name: ... }}` "
+        f"or provide a `link.builder` dotted path."
+    )
+    raise ValueError(msg)
+
+
 # -------------------------------------------------------------------
 # List-extension option shapes.  These are read by the Filter / Order
 # / Paginate ops, which run at operation scope with ``type: "filter"``
@@ -790,15 +975,195 @@ class ProjectConfig(FoundryConfig):
 # -------------------------------------------------------------------
 
 
+FilterValueKind = Literal["enum", "bool", "ref", "free_text", "literal"]
+"""Discriminator for how a filter field's values are sourced and rendered.
+
+* ``"enum"`` — points at a Python :class:`enum.Enum` class via
+  ``enum:``; choices are inlined in the discovery payload and also
+  served queryably from the per-field ``_values`` endpoint.
+* ``"bool"`` — first-class; FE renders toggle/checkbox.  No
+  ``_values`` endpoint.
+* ``"ref"`` — FK to another resource.  Delegates to the target
+  resource's resource-level ``_values`` endpoint for autocomplete.
+* ``"free_text"`` — string column, served from the field's
+  ``_values`` endpoint via ILIKE.
+* ``"literal"`` — numeric / date / datetime.  FE renders a native
+  input.  No ``_values`` endpoint.
+"""
+
+
+FilterOperator = Literal[
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "starts_with",
+    "in",
+]
+"""Operators supported by :func:`ingot.filters.apply_filters` and
+the generated ``FilterCondition`` schemas.  Kept in sync with
+:data:`ingot.filters.FilterOp`."""
+
+
+_DEFAULT_OPERATORS: dict[FilterValueKind, list[FilterOperator]] = {
+    "enum": ["eq", "in"],
+    "bool": ["eq"],
+    "ref": ["eq", "in"],
+    "free_text": ["eq", "contains", "starts_with"],
+    "literal": ["eq", "gt", "gte", "lt", "lte"],
+}
+"""Default operator vocabulary per :data:`FilterValueKind`,
+applied when a :class:`StructuredFilterField` omits ``operators``."""
+
+
+_ALL_OPERATORS: list[FilterOperator] = [
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "starts_with",
+    "in",
+]
+
+
+class StructuredFilterField(BaseModel):
+    """Structured spec for one filterable field.
+
+    Used inside :attr:`FilterConfig.fields` to describe operators,
+    value source, and any source-specific metadata for the field.
+    The bare-string entry form is shorthand for a permissive
+    ``free_text`` field with the full operator vocabulary, kept for
+    back-compat with existing fixtures.
+    """
+
+    name: str
+    """Column / attribute name on the model."""
+
+    values: FilterValueKind
+    """How values are sourced and rendered.  Drives validation of
+    the other fields below."""
+
+    operators: list[FilterOperator] = Field(default_factory=list)
+    """Operators allowed on this field.  When empty, defaults are
+    derived from :data:`_DEFAULT_OPERATORS` keyed by ``values``."""
+
+    enum: str | None = None
+    """Dotted import path to a Python :class:`enum.Enum` class.
+    Required iff ``values == "enum"``; rejected otherwise."""
+
+    type: FieldType | None = None
+    """Scalar type for ``values == "literal"`` (e.g. ``"datetime"``,
+    ``"int"``, ``"float"``).  Required iff ``values == "literal"``;
+    rejected otherwise."""
+
+    ref_resource: str | None = None
+    """Resource model name this field FK-references.  Required iff
+    ``values == "ref"``; rejected otherwise."""
+
+    @model_validator(mode="after")
+    def _apply_defaults_and_validate(self) -> StructuredFilterField:
+        if not self.operators:
+            self.operators = list(_DEFAULT_OPERATORS[self.values])
+
+        if self.values == "enum":
+            self._require("enum", present=self.enum is not None)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
+        elif self.values == "literal":
+            self._require("type", present=self.type is not None)
+            self._reject("enum", self.enum)
+            self._reject("ref_resource", self.ref_resource)
+
+        elif self.values == "ref":
+            self._require("ref_resource", present=self.ref_resource is not None)
+            self._reject("type", self.type)
+            self._reject("enum", self.enum)
+
+        else:
+            self._reject("enum", self.enum)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
+        return self
+
+    def _require(self, attr: str, *, present: bool) -> None:
+        if not present:
+            msg = (
+                f"Filter field {self.name!r}: `values: "
+                f"{self.values!r}` requires `{attr}`."
+            )
+            raise ValueError(msg)
+
+    def _reject(self, attr: str, value: object) -> None:
+        if value is not None:
+            msg = (
+                f"Filter field {self.name!r}: `{attr}` is not "
+                f"allowed when `values: {self.values!r}`."
+            )
+            raise ValueError(msg)
+
+
 class FilterConfig(BaseModel):
     """Configuration for list filtering.
 
-    When ``fields`` is empty or omitted, all of the list op's
-    ``fields`` become filterable; otherwise only the named fields
-    are filterable.
+    Each entry in ``fields`` is either a bare string (shorthand for
+    a permissive ``free_text`` field) or a
+    :class:`StructuredFilterField` dict that explicitly declares
+    operators, value source, and any source-specific metadata.
+
+    When ``fields`` is empty or omitted, every field on the parent
+    list op becomes filterable in the permissive shorthand form.
     """
 
-    fields: list[str] | None = None
+    fields: list[str | StructuredFilterField] | None = None
+
+    def normalized_fields(
+        self, list_field_names: list[str]
+    ) -> list[StructuredFilterField]:
+        """Return every filterable field as a structured spec.
+
+        Bare-string entries are expanded to ``free_text`` with the
+        full operator vocabulary (preserving prior behaviour where
+        any operator was accepted on a named field).  When
+        :attr:`fields` is None/empty, *list_field_names* drives the
+        expansion so callers don't have to special-case empty.
+
+        Args:
+            list_field_names: Names of every field on the parent
+                list op, used as the fallback set when
+                :attr:`fields` is None/empty.
+
+        Returns:
+            One :class:`StructuredFilterField` per filterable
+            field, in declared order.
+
+        """
+        entries: list[str | StructuredFilterField] = self.fields or list(
+            list_field_names
+        )
+        result: list[StructuredFilterField] = []
+
+        for entry in entries:
+            if isinstance(entry, str):
+                result.append(
+                    StructuredFilterField(
+                        name=entry,
+                        values="free_text",
+                        operators=list(_ALL_OPERATORS),
+                    )
+                )
+
+            else:
+                result.append(entry)
+
+        return result
 
 
 class OrderConfig(BaseModel):
