@@ -196,17 +196,14 @@ def test_supports_search_false_when_entry_lacks_search() -> None:
 
 
 def test_filter_discovery_empty_list_returns_no_resources() -> None:
-    payload = _registry().filter_discovery(
-        FilterDiscoveryRequest(resources=[])
-    )
+    payload = _registry().filter_discovery(FilterDiscoveryRequest(resources=[]))
     assert payload.resources == []
 
 
 def test_filter_discovery_unknown_resource_404() -> None:
     with pytest.raises(HTTPException) as ei:
-        _registry().filter_discovery(
-            FilterDiscoveryRequest(resources=["nope"])
-        )
+        _registry().filter_discovery(FilterDiscoveryRequest(resources=["nope"]))
+
     assert ei.value.status_code == 404
 
 
@@ -267,6 +264,7 @@ def test_field_discovery_unknown_field_404() -> None:
                 fields=[FieldRef(resource="item", field="nope")],
             )
         )
+
     assert ei.value.status_code == 404
 
 
@@ -511,6 +509,7 @@ async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
 @pytest.mark.asyncio
 async def test_bool_and_literal_have_no_value_provider() -> None:
     db = _ExecuteCapture(rows=[])
+
     for field_name in ("active", "count"):
         with pytest.raises(HTTPException) as ei:
             await _registry().values(
@@ -519,5 +518,6 @@ async def test_bool_and_literal_have_no_value_provider() -> None:
                 request=FilterValuesRequest(),
                 db=db,  # type: ignore[arg-type]
             )
+
         assert ei.value.status_code == 404
         assert db.statements == []

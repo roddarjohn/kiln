@@ -400,9 +400,7 @@ def _build_schema_entry(
     # multi-member unions; a single-member "union" renders as a bare
     # type alias and skips the Annotated wrapper.
     filter_union_src = (
-        " | ".join(member_class_names)
-        if len(member_class_names) > 1
-        else None
+        " | ".join(member_class_names) if len(member_class_names) > 1 else None
     )
 
     return {
@@ -435,9 +433,7 @@ def _format_top_level_unions(
       ``FieldsDiscovery.fields: list[...]``.
     """
     resource_classes = [str(entry["resource_class"]) for entry in entries]
-    field_ref_classes = [
-        f"{entry['pascal']}FieldRef" for entry in entries
-    ]
+    field_ref_classes = [f"{entry['pascal']}FieldRef" for entry in entries]
     values_request_classes = [
         f"{entry['pascal']}ValuesRequest" for entry in entries
     ]

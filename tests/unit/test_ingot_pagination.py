@@ -78,5 +78,3 @@ def test_offset_clamps_limit_to_max():
     )
     assert size == 50
     assert "LIMIT 50" in _sql(paginated_stmt)
-
-

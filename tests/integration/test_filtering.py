@@ -170,16 +170,12 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
 
     # Three endpoints, all POST.  Discovery uses the codegen'd
     # discriminated unions; values is a single discriminated POST.
-    assert (
-        '@router.post("/_filters", response_model=Discovery)' in router
-    )
+    assert '@router.post("/_filters", response_model=Discovery)' in router
     assert (
         '@router.post("/_filters/fields", response_model=FieldsDiscovery)'
         in router
     )
-    assert (
-        '@router.post("/_values", response_model=ValuesPage)' in router
-    )
+    assert '@router.post("/_values", response_model=ValuesPage)' in router
     # The two-route shape is gone.
     assert "/_values/{resource}" not in router
 
@@ -249,9 +245,7 @@ def test_central_schemas_module_re_exports_unions(
     schemas = files["resources/schemas.py"]
 
     # Imports each per-resource module.
-    assert (
-        "from _generated.inventory.resources.product import" in schemas
-    )
+    assert "from _generated.inventory.resources.product import" in schemas
 
     # Resource slug literal.
     assert 'ResourceSlug = Literal[\n "product"\n]' in schemas or (

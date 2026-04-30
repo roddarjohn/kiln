@@ -12,10 +12,8 @@ Every endpoint returns a typed Pydantic model.  Discovery payloads
 use a discriminator on ``kind`` so OpenAPI clients narrow without
 runtime type checks.
 
-Pagination is single-key keyset / offset depending on the path —
-documented inline on each runner.  The cursor wire format is just
-the previous-key value as a string; each runner knows how to
-decode for its own ordering.
+Value endpoints are single-page — autocomplete UX narrows by
+typing more characters, not by paginating.
 """
 
 from __future__ import annotations
@@ -366,11 +364,11 @@ class ResourceRegistry:
         ``None`` → every registered resource; otherwise the named
         subset, in request order.  404 on unknown slugs.
         """
-        slugs = (
-            list(self._entries)
-            if request.resources is None
-            else [self._require_slug(slug) for slug in request.resources]
-        )
+        slugs = request.resources
+
+        if not slugs:
+            slugs = list(self._entries)
+
         return ProjectDiscovery(
             resources=[self._discover_resource(slug) for slug in slugs],
         )
@@ -387,6 +385,7 @@ class ResourceRegistry:
         )
 
     def _discover_resource(self, slug: str) -> ResourceDiscovery:
+        self._require_entry(slug)
         entry = self._entries[slug]
         return ResourceDiscovery(
             resource=slug,
@@ -456,11 +455,53 @@ class ResourceRegistry:
                 detail=f"Unknown filter field: {field_name}",
             )
 
+        limit = resolved_limit(request.limit)
+
         if isinstance(spec, Enum):
-            return await _run_enum_values(spec.enum_class, request, db)
+            # Enum members via Postgres VALUES — same pipeline as
+            # SQL tables, ILIKE-filtered when ``q`` is set.
+            table = values_table(
+                _ChoiceRow,
+                [
+                    _ChoiceRow(value=str(member.value), label=member.name)
+                    for member in spec.enum_class
+                ],
+                name="enum_values",
+            )
+            label_col = table.c.label
+            statement: Select[Any] = (
+                select(table.c.value, label_col)
+                .order_by(label_col.asc())
+                .limit(limit)
+            )
+
+            if request.q:
+                statement = statement.where(label_col.ilike(f"%{request.q}%"))
+
+            rows = (await db.execute(statement)).all()
+            return ValuesPage(
+                results=[
+                    {"value": row.value, "label": row.label} for row in rows
+                ],
+            )
 
         if isinstance(spec, FreeText):
-            return await _run_free_text_values(entry, spec, request, db)
+            # DISTINCT column values, optionally ILIKE-filtered.
+            text_col = getattr(entry.model, spec.column or spec.name)
+            statement = (
+                select(text_col)
+                .distinct()
+                .order_by(text_col.asc())
+                .limit(limit)
+            )
+
+            if request.q:
+                statement = statement.where(text_col.ilike(f"%{request.q}%"))
+
+            rows = (await db.execute(statement)).scalars().all()
+            return ValuesPage(
+                results=[{"value": value, "label": value} for value in rows],
+            )
 
         if isinstance(spec, Ref):
             target_entry = self._require_entry(spec.target)
@@ -486,10 +527,6 @@ class ResourceRegistry:
             )
 
         return entry
-
-    def _require_slug(self, slug: str) -> str:
-        self._require_entry(slug)  # 404 on unknown
-        return slug
 
     # -------- Multi-column trigram union --------
 
@@ -597,7 +634,17 @@ class ResourceRegistry:
         if isinstance(spec, Ref):
             target = self._require_entry(spec.target)
             target_pk = getattr(target.model, target.pk)
-            target_label = _ref_label_column(target)
+
+            # Label by the target's first configured search column
+            # when present; otherwise fall back to its stringified
+            # pk.  Must be text-shaped for ``similarity()`` to
+            # compose.
+            if target.search and target.search.columns:
+                target_label = getattr(target.model, target.search.columns[0])
+
+            else:
+                target_label = cast(target_pk, String)
+
             return select(
                 literal(spec.name).label("field"),
                 cast(target_pk, String).label("value"),
@@ -621,32 +668,33 @@ class ResourceRegistry:
 
 
 def _discover_filter(spec: FilterField) -> FieldDiscovery:
-    return FieldDiscovery(
-        field=spec.name,
-        operators=[FilterOperator(op) for op in spec.operators],
-        values=_discover_values(spec),
-    )
+    values: ValuesDescriptor
 
-
-def _discover_values(spec: FilterField) -> ValuesDescriptor:
     if isinstance(spec, Enum):
-        return EnumValuesDescriptor(
+        values = EnumValuesDescriptor(
             choices=[
                 Choice(value=str(member.value), label=member.name)
                 for member in spec.enum_class
             ],
         )
 
-    if isinstance(spec, FreeText):
-        return FreeTextValuesDescriptor()
+    elif isinstance(spec, FreeText):
+        values = FreeTextValuesDescriptor()
 
-    if isinstance(spec, Ref):
-        return RefValuesDescriptor(target=spec.target)
+    elif isinstance(spec, Ref):
+        values = RefValuesDescriptor(target=spec.target)
 
-    if isinstance(spec, LiteralField):
-        return LiteralValuesDescriptor(type=spec.type)
+    elif isinstance(spec, LiteralField):
+        values = LiteralValuesDescriptor(type=spec.type)
 
-    return BoolValuesDescriptor()  # Bool
+    else:  # Bool
+        values = BoolValuesDescriptor()
+
+    return FieldDiscovery(
+        field=spec.name,
+        operators=[FilterOperator(op) for op in spec.operators],
+        values=values,
+    )
 
 
 def _find_field(entry: ResourceEntry, name: str) -> FilterField | None:
@@ -673,25 +721,25 @@ async def _run_resource_search(
     db: AsyncSession,
     session: Any,
 ) -> ValuesPage:
-    """Resource-level search; ORDER BY pk; one page of link-shaped results.
+    """Resource-level search; one page of link-shaped results.
 
-    Three branches by ``q`` and search config:
+    Branches by ``q`` and search config:
 
     * ``q`` + tsvector → ``vector @@ websearch_to_tsquery``,
       ``ORDER BY ts_rank DESC``.
     * ``q`` + ILIKE columns → OR'd ILIKE WHERE, ``ORDER BY pk``.
     * Otherwise → unfiltered ``ORDER BY pk``.
 
-    Entries without a configured :class:`SearchSpec` get a
-    synthetic one (empty ``columns``, default pk → label link)
-    so the same dispatch tree applies.
+    Entries without a :class:`SearchSpec` get a pk-only page with
+    ``{"value": pk, "label": str(pk)}`` rows so ref-only resources
+    still drive a usable autocomplete.
     """
-    search = entry.search or _default_search_spec(entry)
+    search = entry.search
     query = request.q
     limit = resolved_limit(request.limit)
     pk_column = getattr(entry.model, entry.pk)
 
-    if query and search.vector_column is not None:
+    if search and query and search.vector_column is not None:
         vector = getattr(entry.model, search.vector_column)
         tsquery = func.websearch_to_tsquery("english", query)
         rank = func.ts_rank(vector, tsquery)
@@ -705,7 +753,7 @@ async def _run_resource_search(
     else:
         statement = select(entry.model).order_by(pk_column.asc()).limit(limit)
 
-        if query and search.columns:
+        if search and query and search.columns:
             ilike_columns = [
                 getattr(entry.model, name) for name in search.columns
             ]
@@ -714,115 +762,32 @@ async def _run_resource_search(
             )
 
     rows = list((await db.execute(statement)).scalars().all())
-    return ValuesPage(
-        results=[await _shape_link(row, search, session) for row in rows],
-    )
 
+    if search is None:
+        return ValuesPage(
+            results=[
+                {
+                    "value": str(getattr(row, entry.pk)),
+                    "label": str(getattr(row, entry.pk)),
+                }
+                for row in rows
+            ],
+        )
 
-async def _shape_link(
-    instance: Any, search: SearchSpec, session: Any
-) -> dict[str, Any]:
-    link = await search.link(instance, session)
-    return link.model_dump() if hasattr(link, "model_dump") else link
+    results: list[dict[str, Any]] = []
 
+    for row in rows:
+        link = await search.link(row, session)
+        results.append(
+            link.model_dump() if hasattr(link, "model_dump") else link
+        )
 
-def _default_search_spec(entry: ResourceEntry) -> SearchSpec:
-    """Synthetic :class:`SearchSpec` for entries without one configured.
-
-    Empty ``columns`` (no ``q``-filtering) and a link builder that
-    emits ``{"value": pk, "label": str(pk)}`` so ref-only
-    resources still get a usable autocomplete.
-    """
-    pk_attr = entry.pk
-
-    async def _pk_link(instance: Any, _session: Any) -> dict[str, Any]:
-        pk_value = getattr(instance, pk_attr)
-        return {"value": str(pk_value), "label": str(pk_value)}
-
-    return SearchSpec(columns=(), link=_pk_link)
-
-
-async def _run_free_text_values(
-    entry: ResourceEntry,
-    spec: FreeText,
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> ValuesPage:
-    """DISTINCT column values, optionally ILIKE-filtered.  Single page."""
-    column = getattr(entry.model, spec.column or spec.name)
-    statement = (
-        select(column)
-        .distinct()
-        .order_by(column.asc())
-        .limit(resolved_limit(request.limit))
-    )
-
-    if request.q:
-        statement = statement.where(column.ilike(f"%{request.q}%"))
-
-    rows = (await db.execute(statement)).scalars().all()
-    return ValuesPage(
-        results=[{"value": value, "label": value} for value in rows],
-    )
-
-
-@dataclass(frozen=True)
-class _LabelRow:
-    """One-column row for the enum-values ``VALUES`` clause."""
-
-    label: str
-
-
-async def _run_enum_values(
-    enum_class: type[_enum_mod.Enum],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> ValuesPage:
-    """Enum members via Postgres ``VALUES`` — same pipeline as SQL tables.
-
-    Values map back to the enum Python-side; only labels make
-    the SQL round-trip (which exists so ILIKE filtering composes
-    with the same machinery as the rest of the registry).
-    """
-    label_to_value = {member.name: str(member.value) for member in enum_class}
-    table = values_table(
-        _LabelRow,
-        [_LabelRow(label=name) for name in label_to_value],
-        name="enum_values",
-    )
-    label = table.c.label
-    statement = (
-        select(label).order_by(label.asc()).limit(resolved_limit(request.limit))
-    )
-
-    if request.q:
-        statement = statement.where(label.ilike(f"%{request.q}%"))
-
-    rows = (await db.execute(statement)).scalars().all()
-    return ValuesPage(
-        results=[
-            {"value": label_to_value[name], "label": name} for name in rows
-        ],
-    )
+    return ValuesPage(results=results)
 
 
 @dataclass(frozen=True)
 class _ChoiceRow:
-    """One ``(value, label)`` row for the enum trigram-search VALUES table."""
+    """One ``(value, label)`` row for VALUES-clause enum tables."""
 
     value: str
     label: str
-
-
-def _ref_label_column(target: ResourceEntry) -> Any:
-    """Pick the column on *target* whose value labels each ref hit.
-
-    Uses the target's first configured search column when available
-    (``SearchSpec.columns[0]``); otherwise falls back to the
-    target's stringified primary key.  The picked column must be
-    text-shaped for ``similarity()`` to compose.
-    """
-    if target.search and target.search.columns:
-        return getattr(target.model, target.search.columns[0])
-
-    return cast(getattr(target.model, target.pk), String)
