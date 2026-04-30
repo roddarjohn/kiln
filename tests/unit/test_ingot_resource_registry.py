@@ -210,7 +210,7 @@ def test_filter_discovery_unknown_resource_404() -> None:
     assert ei.value.status_code == 404
 
 
-def test_field_discovery_enum_includes_choices_and_endpoint() -> None:
+def test_field_discovery_enum_includes_choices() -> None:
     response = _registry().field_discovery(
         FieldDiscoveryRequest(
             fields=[FieldRef(resource="item", field="status")],
@@ -221,7 +221,6 @@ def test_field_discovery_enum_includes_choices_and_endpoint() -> None:
     assert descriptor.kind == "enum"
     labels = {choice.label for choice in descriptor.choices}
     assert labels == {"DRAFT", "PUBLISHED", "ARCHIVED"}
-    assert descriptor.endpoint == "/_values/status"
 
 
 def test_field_discovery_self_renders_as_ref() -> None:
@@ -235,7 +234,6 @@ def test_field_discovery_self_renders_as_ref() -> None:
     descriptor = response.fields[0].values
     assert descriptor.kind == "ref"
     assert descriptor.target == "item"
-    assert descriptor.endpoint == "/_values/item"
 
 
 def test_field_discovery_operators_use_filter_operator_enum() -> None:
@@ -272,10 +270,10 @@ def test_field_discovery_unknown_field_404() -> None:
     assert ei.value.status_code == 404
 
 
-def test_field_discovery_ref_endpoint_always_set() -> None:
-    """Ref descriptor always exposes an endpoint — the registry
-    serves a search when configured and falls back to a pk-ordered
-    page otherwise, so the FE always has a URL to call."""
+def test_field_discovery_ref_carries_target_slug() -> None:
+    """Ref descriptor exposes ``target`` for the FE to use as
+    ``body.resource`` when calling ``POST /_values``.  The endpoint
+    URL is implicit (``/_values``) so we don't dump it."""
     response = _registry().field_discovery(
         FieldDiscoveryRequest(
             fields=[FieldRef(resource="item", field="owner_id")],
@@ -284,7 +282,6 @@ def test_field_discovery_ref_endpoint_always_set() -> None:
     descriptor = response.fields[0].values
     assert descriptor.kind == "ref"
     assert descriptor.target == "owner"
-    assert descriptor.endpoint == "/_values/owner"
 
 
 # -------------------------------------------------------------------
@@ -299,7 +296,7 @@ async def test_enum_values_run_through_postgres_values_clause() -> None:
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
-        field="status",
+        fields=["status"],
         request=FilterValuesRequest(),
         db=db,  # type: ignore[arg-type]
     )
@@ -320,7 +317,7 @@ async def test_enum_values_with_q_filters_via_ilike() -> None:
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
-        field="status",
+        fields=["status"],
         request=FilterValuesRequest(q="draft"),
         db=db,  # type: ignore[arg-type]
     )
@@ -337,7 +334,7 @@ async def test_free_text_values_no_q_uses_keyset_pagination() -> None:
     db = _ExecuteCapture(rows=["apple", "apricot"])
     await _registry().values(
         resource="item",
-        field="name",
+        fields=["name"],
         request=FilterValuesRequest(limit=2),
         db=db,  # type: ignore[arg-type]
     )
@@ -345,7 +342,8 @@ async def test_free_text_values_no_q_uses_keyset_pagination() -> None:
     sql = _sql(db.statements[0])
     assert "SELECT DISTINCT" in sql
     assert "_filter_registry_test_items.name" in sql
-    assert "LIMIT 3" in sql
+    # Single-page only — LIMIT is exactly request.limit, no over-fetch.
+    assert "LIMIT 2" in sql
     assert "ILIKE" not in sql.upper()
 
 
@@ -359,7 +357,7 @@ async def test_free_text_values_with_q_filters_no_bucket() -> None:
     db = _ExecuteCapture(rows=["apple", "apricot"])
     await _registry().values(
         resource="item",
-        field="name",
+        fields=["name"],
         request=FilterValuesRequest(q="ap"),
         db=db,  # type: ignore[arg-type]
     )
@@ -370,31 +368,16 @@ async def test_free_text_values_with_q_filters_no_bucket() -> None:
 
 
 @pytest.mark.asyncio
-async def test_free_text_values_keyset_cursor_round_trip() -> None:
-    """Keyset cursor decodes back into a ``WHERE col > prev`` clause."""
-    db = _ExecuteCapture(rows=["apple", "apricot", "banana"])
-    page1 = await _registry().values(
+async def test_values_response_has_no_cursor() -> None:
+    """Single-page only — :class:`ValuesPage` doesn't carry a cursor."""
+    db = _ExecuteCapture(rows=["apple", "apricot"])
+    page = await _registry().values(
         resource="item",
-        field="name",
+        fields=["name"],
         request=FilterValuesRequest(limit=2),
         db=db,  # type: ignore[arg-type]
     )
-
-    # Cursor is just the previous-key value as a string — no
-    # prefix tag, since each endpoint already knows what its
-    # ordering key is.
-    assert page1.next_cursor == "apricot"
-
-    db2 = _ExecuteCapture(rows=["banana"])
-    await _registry().values(
-        resource="item",
-        field="name",
-        request=FilterValuesRequest(limit=2, cursor=page1.next_cursor),
-        db=db2,  # type: ignore[arg-type]
-    )
-
-    sql2 = _sql(db2.statements[0])
-    assert "> 'apricot'" in sql2
+    assert "next_cursor" not in page.model_dump()
 
 
 @pytest.mark.asyncio
@@ -417,7 +400,7 @@ async def test_search_resource_with_tsvector_column_uses_ts_rank() -> None:
     db = _ExecuteCapture(rows=[])
     await registry.values(
         resource="item",
-        field=None,
+        fields=[],
         request=FilterValuesRequest(q="apple"),
         db=db,  # type: ignore[arg-type]
     )
@@ -438,7 +421,7 @@ async def test_search_resource_without_vector_column_keeps_ilike() -> None:
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
-        field=None,
+        fields=[],
         request=FilterValuesRequest(q="apple"),
         db=db,  # type: ignore[arg-type]
     )
@@ -457,7 +440,7 @@ async def test_search_resource_with_q_or_ilikes_every_search_column() -> None:
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
-        field=None,
+        fields=[],
         request=FilterValuesRequest(q="ap"),
         db=db,  # type: ignore[arg-type]
     )
@@ -476,13 +459,13 @@ async def test_self_ref_field_dispatches_to_resource_search() -> None:
 
     await _registry().values(
         resource="item",
-        field="id",
+        fields=["id"],
         request=req,
         db=db_self,  # type: ignore[arg-type]
     )
     await _registry().values(
         resource="item",
-        field=None,
+        fields=[],
         request=req,
         db=db_root,  # type: ignore[arg-type]
     )
@@ -513,7 +496,7 @@ async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
     db = _ExecuteCapture(rows=[])
     await registry.values(
         resource="item",
-        field="owner_id",
+        fields=["owner_id"],
         request=FilterValuesRequest(),
         db=db,  # type: ignore[arg-type]
     )
@@ -528,11 +511,11 @@ async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
 @pytest.mark.asyncio
 async def test_bool_and_literal_have_no_value_provider() -> None:
     db = _ExecuteCapture(rows=[])
-    for field in ("active", "count"):
+    for field_name in ("active", "count"):
         with pytest.raises(HTTPException) as ei:
             await _registry().values(
                 resource="item",
-                field=field,
+                fields=[field_name],
                 request=FilterValuesRequest(),
                 db=db,  # type: ignore[arg-type]
             )

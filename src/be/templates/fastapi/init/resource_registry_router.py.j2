@@ -118,17 +118,14 @@ async def values(
     """Single values endpoint covering every dispatch path.
 
     The body is discriminated on ``resource`` so the FE OpenAPI
-    client picks the right per-resource shape; ``field`` is
-    constrained to the resource's filter fields (or ``None`` for
-    the resource-level search).  The registry handles the actual
-    dispatch.
+    client picks the right per-resource shape; ``fields`` lists
+    columns to narrow the search (empty = resource defaults).
+    Single-page response — autocomplete UX narrows by typing.
     """
     return await resource_registry.values(
         resource=body.resource,
-        field=body.field,
-        request=FilterValuesRequest(
-            q=body.q, cursor=body.cursor, limit=body.limit,
-        ),
+        fields=body.fields,
+        request=FilterValuesRequest(q=body.q, limit=body.limit),
         db=db,
 {% if require_auth %}
         session=session,

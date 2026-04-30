@@ -91,5 +91,4 @@ class {{ entry.pascal }}ValuesRequest(BaseModel):
     fields: list[str] = Field(default_factory=list)
 {% endif %}
     q: str | None = None
-    cursor: str | None = None
     limit: int | None = None

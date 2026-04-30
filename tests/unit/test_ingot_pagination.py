@@ -1,14 +1,9 @@
 """Tests for ingot.pagination."""
 
-import pytest
 from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.orm import declarative_base
 
-from ingot.pagination import (
-    apply_compound_keyset_pagination,
-    apply_keyset_pagination,
-    apply_offset_pagination,
-)
+from ingot.pagination import apply_keyset_pagination, apply_offset_pagination
 
 Base = declarative_base()
 
@@ -85,57 +80,3 @@ def test_offset_clamps_limit_to_max():
     assert "LIMIT 50" in _sql(paginated_stmt)
 
 
-def test_compound_keyset_no_cursor_just_limits():
-    stmt, size = apply_compound_keyset_pagination(
-        select(Post),
-        columns=[(Post.title, "asc"), (Post.id, "asc")],
-        cursor=None,
-        page_size=10,
-        max_page_size=100,
-    )
-    sql = _sql(stmt)
-    assert "WHERE" not in sql
-    assert "LIMIT 11" in sql
-    assert size == 10
-
-
-def test_compound_keyset_with_cursor_emits_lex_compare():
-    """Two-column ASC cursor produces the standard (a > a0) OR (a == a0
-    AND b > b0) lex comparison; no row-tuple shorthand needed."""
-    stmt, _ = apply_compound_keyset_pagination(
-        select(Post),
-        columns=[(Post.title, "asc"), (Post.id, "asc")],
-        cursor=("hello", 5),
-        page_size=10,
-        max_page_size=100,
-    )
-    sql = _sql(stmt)
-    assert "post.title > 'hello'" in sql
-    assert "post.title = 'hello'" in sql
-    assert "post.id > 5" in sql
-    assert " OR " in sql.upper()
-
-
-def test_compound_keyset_mixed_directions_flips_strict_compare():
-    """A DESC column flips its strict comparator from > to <."""
-    stmt, _ = apply_compound_keyset_pagination(
-        select(Post),
-        columns=[(Post.title, "desc"), (Post.id, "asc")],
-        cursor=("zebra", 7),
-        page_size=10,
-        max_page_size=100,
-    )
-    sql = _sql(stmt)
-    assert "post.title < 'zebra'" in sql
-    assert "post.id > 7" in sql
-
-
-def test_compound_keyset_rejects_cursor_arity_mismatch():
-    with pytest.raises(ValueError, match="2 ordering columns"):
-        apply_compound_keyset_pagination(
-            select(Post),
-            columns=[(Post.title, "asc"), (Post.id, "asc")],
-            cursor=("only-one",),
-            page_size=10,
-            max_page_size=100,
-        )
