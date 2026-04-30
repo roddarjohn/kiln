@@ -25,21 +25,36 @@
   // Build one list operation with zero or more modifiers.
   //
   // Args:
-  //   fields:   Field list for the list op's response items.
-  //   filter:   Optional FilterConfig dict
-  //             (``{ fields: [...] }``).
-  //   order:    Optional OrderConfig dict
-  //             (``{ fields: [...], default: ..., default_dir: ... }``).
-  //   paginate: Optional PaginateConfig dict
-  //             (``{ mode: ..., cursor: { name: ..., type: ... },
-  //              default_page_size: ... }``).
-  searchable(fields, filter=null, order=null, paginate=null):: {
+  //   fields:         Ad-hoc per-op field list for the response
+  //                   rows.  Pass ``null`` (the default) when
+  //                   ``representation`` is set or when the
+  //                   resource declares a ``default_representation``
+  //                   the list should inherit.
+  //   representation: Optional name of a declared representation
+  //                   on the resource.  Wins over ``fields``;
+  //                   exactly one path drives the response shape.
+  //   filter:         Optional FilterConfig dict
+  //                   (``{ fields: [...] }``).
+  //   order:          Optional OrderConfig dict
+  //                   (``{ fields: [...], default: ...,
+  //                   default_dir: ... }``).
+  //   paginate:       Optional PaginateConfig dict
+  //                   (``{ mode: ..., cursor: { name: ...,
+  //                   type: ... }, default_page_size: ... }``).
+  searchable(
+    fields=null,
+    representation=null,
+    filter=null,
+    order=null,
+    paginate=null,
+  ):: std.prune({
     name: "list",
     fields: fields,
+    representation: representation,
     modifiers: std.prune([
       if filter != null then { type: "filter" } + filter,
       if order != null then { type: "order" } + order,
       if paginate != null then { type: "paginate" } + paginate,
     ]),
-  },
+  }),
 }
