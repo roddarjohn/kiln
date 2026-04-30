@@ -12,10 +12,9 @@
         .returning({{ model_name }})
     )
     obj = result.scalar_one()
+    await db.commit()
 
     await {{ post_hook_call }}(obj, body, db=db)
-
-    await db.commit()
 
 {% else %}
     await db.execute(insert({{ model_name }}).values(**body.model_dump()))

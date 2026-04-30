@@ -27,7 +27,16 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, literal, or_, select, union_all
+from sqlalchemy import (
+    String,
+    cast,
+    column,
+    func,
+    literal,
+    or_,
+    select,
+    union_all,
+)
 
 from ingot.filter_values import FilterValuesRequest, resolved_limit
 from ingot.values_table import values_table
@@ -429,7 +438,7 @@ class ResourceRegistry:
                 entry, fields[0], request, db, session
             )
 
-        return await _run_multi_column_search(entry, fields, request, db)
+        return await self._run_multi_column_search(entry, fields, request, db)
 
     async def _dispatch_single_field(
         self,
@@ -481,6 +490,129 @@ class ResourceRegistry:
     def _require_slug(self, slug: str) -> str:
         self._require_entry(slug)  # 404 on unknown
         return slug
+
+    # -------- Multi-column trigram union --------
+
+    async def _run_multi_column_search(
+        self,
+        entry: ResourceEntry,
+        fields: Sequence[str],
+        request: FilterValuesRequest,
+        db: AsyncSession,
+    ) -> ValuesPage:
+        """UNION ``(field, value, label, score)`` per field, ranked together.
+
+        Each named field dispatches by its :class:`FilterField` kind
+        so heterogeneous filters compose into one search box:
+
+        * **FreeText** — trigram on the source column.
+        * **Enum** — trigram on the enum's member names via a
+          ``VALUES`` table (so unused enum members still surface).
+        * **Ref** — trigram on the target resource's first
+          configured search column; ``value`` is the target's
+          stringified pk so the FE can plug it straight into a
+          filter operand.
+        * **Bool** / **LiteralField** — rejected with 400; they
+          have no text to score against.
+
+        Without ``q`` the union returns nothing (relevance scoring
+        is meaningless without a query).  Requires ``pg_trgm``.
+        """
+        if not request.q:
+            return ValuesPage(results=[])
+
+        sub_queries = [
+            self._trigram_subquery(entry, name, request.q) for name in fields
+        ]
+        statement = (
+            union_all(*sub_queries)
+            .order_by(column("score").desc(), column("value").asc())
+            .limit(resolved_limit(request.limit))
+        )
+        rows = (await db.execute(statement)).all()
+        return ValuesPage(
+            results=[
+                {
+                    "field": row.field,
+                    "value": row.value,
+                    "label": row.label,
+                    "score": float(row.score),
+                }
+                for row in rows
+            ],
+        )
+
+    def _trigram_subquery(
+        self,
+        entry: ResourceEntry,
+        field_name: str,
+        query: str,
+    ) -> Select[Any]:
+        """Build the trigram subquery for one field in the union.
+
+        Dispatches on the field's :class:`FilterField` kind so each
+        type contributes the right ``(value, label, score)`` shape:
+        a FreeText column comes straight from the source row, an
+        Enum from the enum class' members table, a Ref from the
+        target resource's link column.
+        """
+        spec = _find_field(entry, field_name)
+
+        if spec is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown filter field: {field_name}",
+            )
+
+        if isinstance(spec, FreeText):
+            column_expr = getattr(entry.model, spec.column or spec.name)
+            return (
+                select(
+                    literal(spec.name).label("field"),
+                    column_expr.label("value"),
+                    column_expr.label("label"),
+                    func.similarity(column_expr, query).label("score"),
+                )
+                .distinct()
+                .where(column_expr.op("%")(query))
+            )
+
+        if isinstance(spec, Enum):
+            members_table = values_table(
+                _ChoiceRow,
+                [
+                    _ChoiceRow(value=str(member.value), label=member.name)
+                    for member in spec.enum_class
+                ],
+                name=f"enum_{spec.name}",
+            )
+            label_col = members_table.c.label
+            return select(
+                literal(spec.name).label("field"),
+                members_table.c.value.label("value"),
+                label_col.label("label"),
+                func.similarity(label_col, query).label("score"),
+            ).where(label_col.op("%")(query))
+
+        if isinstance(spec, Ref):
+            target = self._require_entry(spec.target)
+            target_pk = getattr(target.model, target.pk)
+            target_label = _ref_label_column(target)
+            return select(
+                literal(spec.name).label("field"),
+                cast(target_pk, String).label("value"),
+                target_label.label("label"),
+                func.similarity(target_label, query).label("score"),
+            ).where(target_label.op("%")(query))
+
+        # Bool / LiteralField — no text to score against.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Field {field_name!r} is not searchable in a multi-column "
+                f"union (kind={spec.kind!r})."
+            ),
+        )
 
 
 # =============================================================================
@@ -674,40 +806,23 @@ async def _run_enum_values(
     )
 
 
-async def _run_multi_column_search(
-    entry: ResourceEntry,
-    fields: Sequence[str],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> ValuesPage:
-    """UNION distinct ``(field, value)`` pairs from each named column.
+@dataclass(frozen=True)
+class _ChoiceRow:
+    """One ``(value, label)`` row for the enum trigram-search VALUES table."""
 
-    Result items carry a ``"field"`` key so the FE knows which
-    column each value came from and can group / sort however
-    it likes.
+    value: str
+    label: str
+
+
+def _ref_label_column(target: ResourceEntry) -> Any:
+    """Pick the column on *target* whose value labels each ref hit.
+
+    Uses the target's first configured search column when available
+    (``SearchSpec.columns[0]``); otherwise falls back to the
+    target's stringified primary key.  The picked column must be
+    text-shaped for ``similarity()`` to compose.
     """
+    if target.search and target.search.columns:
+        return getattr(target.model, target.search.columns[0])
 
-    def per_field(name: str) -> Select[Any]:
-        column = getattr(entry.model, name)
-        statement = select(
-            literal(name).label("field"),
-            column.label("value"),
-        ).distinct()
-        return (
-            statement.where(column.ilike(f"%{request.q}%"))
-            if request.q
-            else statement
-        )
-
-    statement = (
-        union_all(*[per_field(name) for name in fields])
-        .order_by("value")
-        .limit(resolved_limit(request.limit))
-    )
-    rows = (await db.execute(statement)).all()
-    return ValuesPage(
-        results=[
-            {"field": row.field, "value": row.value, "label": row.value}
-            for row in rows
-        ],
-    )
+    return cast(getattr(target.model, target.pk), String)
