@@ -685,14 +685,17 @@ async def _run_unfiltered_search(  # noqa: PLR0913
     primary_key_column: ColumnElement[Any],
 ) -> ValuesPage:
     """No query: ORDER BY pk ASC, keyset on pk."""
-    statement = select(entry.model)
-    statement = _apply_pk_keyset(statement, primary_key_column, request.cursor)
-    statement = statement.order_by(primary_key_column.asc())
-
-    rows = await _fetch_models(statement, request, db)
-    page, next_cursor = _finalise_pk_page(
-        rows, entry.pk, request.limit
+    page_size = resolved_limit(request.limit)
+    statement, _ = apply_keyset_pagination(
+        select(entry.model).order_by(primary_key_column.asc()),
+        entry.model,
+        cursor=_decode_pk_cursor(request.cursor),
+        cursor_field=entry.pk,
+        page_size=page_size,
+        max_page_size=page_size,
     )
+    rows = list((await db.execute(statement)).scalars().all())
+    page, next_cursor = _finalise_pk_page(rows, entry.pk, page_size)
     items = await _shape_link_items(page, search, session)
     return ValuesPage(results=items, next_cursor=next_cursor)
 
@@ -709,24 +712,20 @@ async def _run_ilike_search(  # noqa: PLR0913
 ) -> ValuesPage:
     """Query + ILIKE: ORDER BY bucket ASC, pk ASC, keyset on (bucket, pk)."""
     columns = [getattr(entry.model, name) for name in search.columns]
-    statement = select(entry.model).where(
-        or_(*[column.ilike(f"%{query}%") for column in columns])
+    bucket = _bucket_expr(query, columns)
+    page_size = resolved_limit(request.limit)
+    statement = (
+        select(entry.model)
+        .where(or_(*[column.ilike(f"%{query}%") for column in columns]))
+        .order_by(bucket.asc(), primary_key_column.asc())
+        .limit(page_size + 1)
     )
     statement = _apply_bucket_keyset(
-        statement,
-        _bucket_expr(query, columns),
-        primary_key_column,
-        request.cursor,
-        query,
+        statement, bucket, primary_key_column, request.cursor
     )
-    statement = statement.order_by(
-        _bucket_expr(query, columns).asc(),
-        primary_key_column.asc(),
-    )
-
-    rows = await _fetch_models(statement, request, db)
+    rows = list((await db.execute(statement)).scalars().all())
     page, next_cursor = _finalise_bucket_page(
-        rows, entry.pk, columns, query, request.limit
+        rows, entry.pk, columns, query, page_size
     )
     items = await _shape_link_items(page, search, session)
     return ValuesPage(results=items, next_cursor=next_cursor)
@@ -751,26 +750,20 @@ async def _run_tsvector_search(  # noqa: PLR0913
     vector = getattr(entry.model, search.vector_column)
     tsquery = func.websearch_to_tsquery("english", query)
     rank_expression = func.ts_rank(vector, tsquery).label("_rank")
+    page_size = resolved_limit(request.limit)
 
     statement = (
         select(entry.model, rank_expression)
         .where(vector.op("@@")(tsquery))
+        .order_by(rank_expression.desc(), primary_key_column.asc())
+        .limit(page_size + 1)
     )
     statement = _apply_rank_keyset(
-        statement,
-        rank_expression,
-        primary_key_column,
-        request.cursor,
+        statement, rank_expression, primary_key_column, request.cursor
     )
-    statement = statement.order_by(
-        rank_expression.desc(),
-        primary_key_column.asc(),
-    )
-
-    rows = await _fetch_model_rank_pairs(statement, request, db)
-    page, next_cursor = _finalise_rank_page(
-        rows, entry.pk, request.limit
-    )
+    raw_rows = (await db.execute(statement)).all()
+    rows = [(row[0], float(row[1])) for row in raw_rows]
+    page, next_cursor = _finalise_rank_page(rows, entry.pk, page_size)
     instances = [model_instance for model_instance, _ in page]
     items = await _shape_link_items(instances, search, session)
     return ValuesPage(results=items, next_cursor=next_cursor)
