@@ -523,10 +523,13 @@ def _find_field(entry: ResourceEntry, name: str) -> FilterField | None:
 
 
 # =============================================================================
-# Resource-level search runner — pk-keyset pagination, link-shaped
-# results.  Three branches: tsvector, ILIKE, unfiltered.  When the
-# entry has no SearchSpec, a synthetic one (no columns, default
-# pk → label link) is built so the runner has a uniform shape.
+# Value-provider runners.
+#
+# Every runner is single-page — autocomplete UX narrows by typing
+# more characters rather than paginating, so the registry doesn't
+# carry cursor / over-fetch / next_cursor bookkeeping.  Each
+# runner: build a SELECT, optional WHERE on ``q``, ORDER BY,
+# LIMIT, execute, shape rows.  That's it.
 # =============================================================================
 
 
@@ -536,97 +539,50 @@ async def _run_resource_search(
     db: AsyncSession,
     session: Any,
 ) -> ValuesPage:
-    """Resource-level search; ORDER BY pk in every branch."""
+    """Resource-level search; ORDER BY pk; one page of link-shaped results.
+
+    Three branches by ``q`` and search config:
+
+    * ``q`` + tsvector → ``vector @@ websearch_to_tsquery``,
+      ``ORDER BY ts_rank DESC``.
+    * ``q`` + ILIKE columns → OR'd ILIKE WHERE, ``ORDER BY pk``.
+    * Otherwise → unfiltered ``ORDER BY pk``.
+
+    Entries without a configured :class:`SearchSpec` get a
+    synthetic one (empty ``columns``, default pk → label link)
+    so the same dispatch tree applies.
+    """
     search = entry.search or _default_search_spec(entry)
     query = request.q
+    limit = resolved_limit(request.limit)
+    pk_column = getattr(entry.model, entry.pk)
 
     if query and search.vector_column is not None:
-        return await _run_tsvector_search(
-            entry, search, query, request, db, session
+        vector = getattr(entry.model, search.vector_column)
+        tsquery = func.websearch_to_tsquery("english", query)
+        rank = func.ts_rank(vector, tsquery)
+        statement: Select[Any] = (
+            select(entry.model)
+            .where(vector.op("@@")(tsquery))
+            .order_by(rank.desc())
+            .limit(limit)
         )
 
-    statement = select(entry.model)
+    else:
+        statement = select(entry.model).order_by(pk_column.asc()).limit(limit)
 
-    if query and search.columns:
-        ilike_columns = [getattr(entry.model, name) for name in search.columns]
-        statement = statement.where(
-            or_(*[col.ilike(f"%{query}%") for col in ilike_columns])
-        )
+        if query and search.columns:
+            ilike_columns = [
+                getattr(entry.model, name) for name in search.columns
+            ]
+            statement = statement.where(
+                or_(*[col.ilike(f"%{query}%") for col in ilike_columns])
+            )
 
-    return await _execute_pk_search(
-        statement, entry, search, request, db, session
-    )
-
-
-async def _execute_pk_search(
-    statement: Select[Any],
-    entry: ResourceEntry,
-    search: SearchSpec,
-    request: FilterValuesRequest,
-    db: AsyncSession,
-    session: Any,
-) -> ValuesPage:
-    """Apply pk-keyset pagination, execute, shape via link builder."""
-    pk_column = getattr(entry.model, entry.pk)
-    page_size = resolved_limit(request.limit)
-    statement, _ = apply_keyset_pagination(
-        statement.order_by(pk_column.asc()),
-        entry.model,
-        cursor=request.cursor or None,
-        cursor_field=entry.pk,
-        page_size=page_size,
-        max_page_size=page_size,
-    )
     rows = list((await db.execute(statement)).scalars().all())
-    page, next_cursor = _trim_page(
-        rows,
-        page_size,
-        cursor_from=lambda last: str(getattr(last, entry.pk)),
+    return ValuesPage(
+        results=[await _shape_link(row, search, session) for row in rows],
     )
-    items = [await _shape_link(row, search, session) for row in page]
-    return ValuesPage(results=items, next_cursor=next_cursor)
-
-
-async def _run_tsvector_search(
-    entry: ResourceEntry,
-    search: SearchSpec,
-    query: str,
-    request: FilterValuesRequest,
-    db: AsyncSession,
-    session: Any,
-) -> ValuesPage:
-    """``q`` + tsvector — ORDER BY ts_rank DESC, cursor on rank.
-
-    Single-column ordering means tied ranks could skip a row at
-    page boundaries, but ts_rank values diverge enough in
-    practice that the autocomplete UX tolerates it.
-    """
-    assert search.vector_column is not None  # noqa: S101 — guarded by caller
-    vector = getattr(entry.model, search.vector_column)
-    tsquery = func.websearch_to_tsquery("english", query)
-    rank = func.ts_rank(vector, tsquery).label("_rank")
-    page_size = resolved_limit(request.limit)
-    statement: Select[Any] = (
-        select(entry.model, rank)
-        .where(vector.op("@@")(tsquery))
-        .order_by(rank.desc())
-        .limit(page_size + 1)
-    )
-    previous_rank = _parse_float_cursor(request.cursor)
-
-    if previous_rank is not None:
-        statement = statement.where(rank < previous_rank)
-
-    raw_rows = (await db.execute(statement)).all()
-    rows = [(row[0], float(row[1])) for row in raw_rows]
-    page, next_cursor = _trim_page(
-        rows,
-        page_size,
-        cursor_from=lambda last: repr(last[1]),
-    )
-    instances = [instance for instance, _ in page]
-    items = [await _shape_link(row, search, session) for row in instances]
-    return ValuesPage(results=items, next_cursor=next_cursor)
 
 
 async def _shape_link(
@@ -637,7 +593,7 @@ async def _shape_link(
 
 
 def _default_search_spec(entry: ResourceEntry) -> SearchSpec:
-    """Synthetic SearchSpec for entries without one configured.
+    """Synthetic :class:`SearchSpec` for entries without one configured.
 
     Empty ``columns`` (no ``q``-filtering) and a link builder that
     emits ``{"value": pk, "label": str(pk)}`` so ref-only
@@ -652,31 +608,27 @@ def _default_search_spec(entry: ResourceEntry) -> SearchSpec:
     return SearchSpec(columns=(), link=_pk_link)
 
 
-# =============================================================================
-# Per-field value providers — enum + free-text.  Both use the same
-# offset-paged scalar pipeline; offset is fine here since the result
-# sets are small and stable enough that keyset bookkeeping isn't
-# worth the complexity.
-# =============================================================================
-
-
 async def _run_free_text_values(
     entry: ResourceEntry,
     spec: FreeText,
     request: FilterValuesRequest,
     db: AsyncSession,
 ) -> ValuesPage:
-    """DISTINCT column values, optionally ILIKE-filtered."""
+    """DISTINCT column values, optionally ILIKE-filtered.  Single page."""
     column = getattr(entry.model, spec.column or spec.name)
-    statement = select(column).distinct().order_by(column.asc())
+    statement = (
+        select(column)
+        .distinct()
+        .order_by(column.asc())
+        .limit(resolved_limit(request.limit))
+    )
 
     if request.q:
         statement = statement.where(column.ilike(f"%{request.q}%"))
 
-    page, next_cursor = await _execute_offset_scalars(statement, request, db)
+    rows = (await db.execute(statement)).scalars().all()
     return ValuesPage(
-        results=[{"value": value, "label": value} for value in page],
-        next_cursor=next_cursor,
+        results=[{"value": value, "label": value} for value in rows],
     )
 
 
@@ -692,9 +644,11 @@ async def _run_enum_values(
     request: FilterValuesRequest,
     db: AsyncSession,
 ) -> ValuesPage:
-    """Enum members served via Postgres ``VALUES`` — same pipeline
-    as SQL tables.  Values map back to the enum Python-side; only
-    labels make the round-trip.
+    """Enum members via Postgres ``VALUES`` — same pipeline as SQL tables.
+
+    Values map back to the enum Python-side; only labels make
+    the SQL round-trip (which exists so ILIKE filtering composes
+    with the same machinery as the rest of the registry).
     """
     label_to_value = {member.name: str(member.value) for member in enum_class}
     table = values_table(
@@ -703,26 +657,19 @@ async def _run_enum_values(
         name="enum_values",
     )
     label = table.c.label
-    statement = select(label).order_by(label.asc())
+    statement = (
+        select(label).order_by(label.asc()).limit(resolved_limit(request.limit))
+    )
 
     if request.q:
         statement = statement.where(label.ilike(f"%{request.q}%"))
 
-    page, next_cursor = await _execute_offset_scalars(statement, request, db)
+    rows = (await db.execute(statement)).scalars().all()
     return ValuesPage(
         results=[
-            {"value": label_to_value[name], "label": name} for name in page
+            {"value": label_to_value[name], "label": name} for name in rows
         ],
-        next_cursor=next_cursor,
     )
-
-
-# =============================================================================
-# Multi-column union — distinct values from each named column,
-# UNION'd together and tagged with the source field name.  Result
-# items carry a ``"field"`` key so the FE knows which column each
-# value came from and can group / sort however it likes.
-# =============================================================================
 
 
 async def _run_multi_column_search(
@@ -733,9 +680,9 @@ async def _run_multi_column_search(
 ) -> ValuesPage:
     """UNION distinct ``(field, value)`` pairs from each named column.
 
-    Single page only — capped at ``request.limit`` (default 50).
-    Cross-field relevance matching for autocomplete UX, where the
-    user narrows by typing rather than paginating.
+    Result items carry a ``"field"`` key so the FE knows which
+    column each value came from and can group / sort however
+    it likes.
     """
 
     def per_field(name: str) -> Select[Any]:
@@ -761,103 +708,4 @@ async def _run_multi_column_search(
             {"field": row.field, "value": row.value, "label": row.value}
             for row in rows
         ],
-        next_cursor=None,
     )
-
-
-# =============================================================================
-# Offset-paged scalar pipeline — used by enum + free-text.
-# =============================================================================
-
-
-async def _execute_offset_scalars(
-    statement: Select[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> tuple[list[Any], str | None]:
-    """Paginate *statement* by offset, return ``(scalar rows, next cursor)``."""
-    page_size = resolved_limit(request.limit)
-    offset = _parse_int_cursor(request.cursor)
-    rows = list(
-        (await db.execute(statement.offset(offset).limit(page_size + 1)))
-        .scalars()
-        .all()
-    )
-    has_more, page = _has_more(rows, page_size)
-    next_cursor = str(offset + page_size) if has_more else None
-    return page, next_cursor
-
-
-async def _fetch_offset(
-    statement: Select[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> list[Any]:
-    """Execute *statement* with ``OFFSET / LIMIT n+1`` for offset paging."""
-    page_size = resolved_limit(request.limit)
-    offset = _parse_int_cursor(request.cursor)
-    return list(
-        (await db.execute(statement.offset(offset).limit(page_size + 1))).all()
-    )
-
-
-# =============================================================================
-# Cursor + page-trim helpers.
-#
-# Three cursor formats over the wire (all bare strings):
-#
-# * Resource search keyset: stringified pk value (e.g. ``"42"``,
-#   UUID, ...) — passed through to a SQLAlchemy ``WHERE pk > prev``.
-# * Tsvector keyset: stringified float (``repr(0.1234)``) — decoded
-#   via :func:`_parse_float_cursor`.
-# * Offset (enum / free-text / multi-column): stringified int —
-#   decoded via :func:`_parse_int_cursor`.
-#
-# Each runner knows which mode it's in so the wire format doesn't
-# need a tag.
-# =============================================================================
-
-
-def _trim_page[T](
-    rows: list[T],
-    page_size: int,
-    *,
-    cursor_from: Callable[[T], str],
-) -> tuple[list[T], str | None]:
-    """Trim the over-fetch row, build a keyset cursor from the last row."""
-    has_more, page = _has_more(rows, page_size)
-    next_cursor = cursor_from(page[-1]) if has_more and page else None
-    return page, next_cursor
-
-
-def _has_more[T](rows: list[T], page_size: int) -> tuple[bool, list[T]]:
-    """Detect over-fetch and return ``(has_more, trimmed_page)``."""
-    return len(rows) > page_size, rows[:page_size]
-
-
-def _next_offset_cursor(previous: str | None, page_size: int) -> str:
-    return str(_parse_int_cursor(previous) + page_size)
-
-
-def _parse_int_cursor(cursor: str | None) -> int:
-    """Decode a stringified-int cursor; ``0`` for missing / invalid."""
-    if not cursor:
-        return 0
-
-    try:
-        return max(0, int(cursor))
-
-    except ValueError:
-        return 0
-
-
-def _parse_float_cursor(cursor: str | None) -> float | None:
-    """Decode a stringified-float cursor; ``None`` for missing / invalid."""
-    if not cursor:
-        return None
-
-    try:
-        return float(cursor)
-
-    except ValueError:
-        return None
