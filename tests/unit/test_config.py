@@ -632,6 +632,91 @@ def test_link_config_builder_only_is_valid() -> None:
     assert cfg.id is None
 
 
+def test_searchable_resource_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(model="app.models.Item", searchable=True)
+
+    with pytest.raises(
+        ValidationError, match=r"requires `link`.*searchable=True"
+    ):
+        ProjectConfig(
+            **_project_with(
+                resource,
+                auth=AuthConfig(
+                    credentials_schema="app.auth.LoginCredentials",
+                    session_schema="app.auth.Session",
+                    validate_fn="app.auth.validate",
+                ),
+            ),
+        )
+
+
+def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    target = ResourceConfig(model="app.models.Customer")
+    referrer = ResourceConfig(
+        model="app.models.Order",
+        operations=[
+            OperationConfig(
+                name="list",
+                modifiers=[
+                    {
+                        "type": "filter",
+                        "fields": [
+                            {
+                                "name": "customer_id",
+                                "values": "ref",
+                                "ref_resource": "customer",
+                            },
+                        ],
+                    },
+                ],
+            ),
+        ],
+    )
+
+    with pytest.raises(ValidationError, match=r"requires `link`.*ref_resource"):
+        ProjectConfig(
+            databases=[DatabaseConfig(key="primary", default=True)],
+            apps=[
+                {
+                    "config": {
+                        "module": "app",
+                        "resources": [
+                            target.model_dump(),
+                            referrer.model_dump(),
+                        ],
+                    },
+                    "prefix": "",
+                },
+            ],
+        )
+
+
+def test_self_filter_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(
+        model="app.models.Item",
+        operations=[
+            OperationConfig(
+                name="list",
+                modifiers=[
+                    {
+                        "type": "filter",
+                        "fields": [{"name": "id", "values": "self"}],
+                    },
+                ],
+            ),
+        ],
+    )
+
+    with pytest.raises(ValidationError, match=r'requires `link`.*"self"'):
+        ProjectConfig(**_project_with(resource))
+
+
 # ---------------------------------------------------------------------------
 # Loader tests
 # ---------------------------------------------------------------------------

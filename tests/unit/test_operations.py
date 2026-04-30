@@ -979,6 +979,19 @@ class TestGet:
         assert handler.params[0].name == "user_id"
         assert handler.params[0].annotation == "int"
 
+    def test_get_serializer_must_be_dotted_path(self):
+        """Non-dotted serializer values raise at build time."""
+        import pytest
+
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="get", serializer="bareword"),
+        )
+
+        with pytest.raises(ValueError, match="must be a dotted path"):
+            list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+
     def test_get_with_nested_field_emits_sub_schema_and_serializer(self):
         """A nested field adds its own schema + serializer alongside main."""
         fields = [
@@ -1028,6 +1041,39 @@ class TestGet:
         main_ser = sers[1]
         assert main_ser.model_module == "blog.models"
         assert main_ser.model_name == "Task"
+
+    def test_get_with_nested_enum_field_imports_enum_class(self):
+        """Enum specs nested under a parent get expanded inline,
+        contributing an import for the enum class."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="status",
+                        type="enum",
+                        enum="blog.models.ProjectStatus",
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        nested = next(
+            s for s in sers if s.schema_name == "TaskResourceProjectNested"
+        )
+        # The enum field is rendered with the enum class name as its
+        # Python type, and the (module, class) pair lands in the
+        # nested schema's enum_imports.
+        status_field = next(f for f in nested.fields if f.name == "status")
+        assert status_field.py_type == "ProjectStatus"
 
     def test_get_with_nested_many_wraps_in_list(self):
         fields = [
@@ -1429,6 +1475,19 @@ def _drive_extension(
 
 class TestList:
     """Tests for the bare List op (no extensions)."""
+
+    def test_list_serializer_must_be_dotted_path(self):
+        """Non-dotted serializer values raise at build time."""
+        import pytest
+
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="list", serializer="bareword"),
+        )
+
+        with pytest.raises(ValueError, match="must be a dotted path"):
+            list(List().build(ctx, List.Options(fields=_FIELDS)))
 
     def test_emits_list_item_schema_and_serializer(self):
         resource = ResourceConfig(model="app.models.User")
