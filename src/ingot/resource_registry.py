@@ -34,27 +34,30 @@ requiring callers to track mode out-of-band.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal, overload
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func, or_, select, tuple_
+from sqlalchemy import case, func, or_, select
 
 from ingot.filter_values import (
     FilterValuesRequest,
     enum_values,
     resolved_limit,
 )
-from ingot.pagination import apply_keyset_pagination
+from ingot.pagination import (
+    SortDirection,
+    apply_compound_keyset_pagination,
+    apply_keyset_pagination,
+)
 
 if TYPE_CHECKING:
     import enum
+    from collections.abc import Awaitable, Callable, Sequence
 
     from sqlalchemy import ColumnElement
     from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.sql import Select
 
 
 # -------------------------------------------------------------------
@@ -364,9 +367,7 @@ class ResourceRegistry:
     def discovery(self, *, resource: str) -> ResourceDiscovery: ...
 
     @overload
-    def discovery(
-        self, *, resource: str, field: str
-    ) -> FieldDiscovery: ...
+    def discovery(self, *, resource: str, field: str) -> FieldDiscovery: ...
 
     def discovery(
         self,
@@ -389,8 +390,7 @@ class ResourceRegistry:
         if resource is None:
             return ProjectDiscovery(
                 resources={
-                    slug: self._resource_payload(slug)
-                    for slug in self._entries
+                    slug: self._resource_payload(slug) for slug in self._entries
                 },
             )
 
@@ -512,7 +512,11 @@ class ResourceRegistry:
             return await self._search_resource(entry, request, db, session)
 
         spec = next(
-            (candidate for candidate in entry.fields if candidate.name == field),
+            (
+                candidate
+                for candidate in entry.fields
+                if candidate.name == field
+            ),
             None,
         )
 
@@ -574,7 +578,8 @@ class ResourceRegistry:
 
         * ``"k:<value>"`` when no query is set (ORDER BY column ASC).
         * ``"b:<bucket>:<value>"`` when a query is set
-          (ORDER BY bucket ASC, column ASC).
+          (ORDER BY bucket ASC, column ASC) — compound keyset
+          since the bucket column has only two distinct values.
         """
         column_name = spec.column or spec.name
         column = getattr(entry.model, column_name)
@@ -583,16 +588,19 @@ class ResourceRegistry:
         statement = select(column).distinct()
 
         if query:
-            statement = (
-                statement.where(column.ilike(f"%{query}%"))
-                .order_by(
-                    _bucket_expr(query, [column]).asc(),
-                    column.asc(),
-                )
-                .limit(page_size + 1)
-            )
-            statement = _apply_bucket_keyset(
-                statement, column, column, request.cursor
+            bucket = _bucket_expr(query, [column])
+            ordering: list[tuple[ColumnElement[Any], SortDirection]] = [
+                (bucket, "asc"),
+                (column, "asc"),
+            ]
+            statement, _ = apply_compound_keyset_pagination(
+                statement.where(column.ilike(f"%{query}%")).order_by(
+                    bucket.asc(), column.asc()
+                ),
+                columns=ordering,
+                cursor=_decode_bucket_cursor(request.cursor),
+                page_size=page_size,
+                max_page_size=page_size,
             )
 
         else:
@@ -675,7 +683,7 @@ class ResourceRegistry:
 # -------------------------------------------------------------------
 
 
-async def _run_unfiltered_search(  # noqa: PLR0913
+async def _run_unfiltered_search(
     *,
     entry: ResourceEntry,
     search: SearchSpec,
@@ -700,7 +708,7 @@ async def _run_unfiltered_search(  # noqa: PLR0913
     return ValuesPage(results=items, next_cursor=next_cursor)
 
 
-async def _run_ilike_search(  # noqa: PLR0913
+async def _run_ilike_search(
     *,
     entry: ResourceEntry,
     search: SearchSpec,
@@ -710,28 +718,32 @@ async def _run_ilike_search(  # noqa: PLR0913
     session: Any,
     primary_key_column: ColumnElement[Any],
 ) -> ValuesPage:
-    """Query + ILIKE: ORDER BY bucket ASC, pk ASC, keyset on (bucket, pk)."""
+    """Query + ILIKE: ORDER BY bucket ASC, pk ASC; compound keyset."""
     columns = [getattr(entry.model, name) for name in search.columns]
     bucket = _bucket_expr(query, columns)
     page_size = resolved_limit(request.limit)
-    statement = (
+    ordering: list[tuple[ColumnElement[Any], SortDirection]] = [
+        (bucket, "asc"),
+        (primary_key_column, "asc"),
+    ]
+    statement, _ = apply_compound_keyset_pagination(
         select(entry.model)
         .where(or_(*[column.ilike(f"%{query}%") for column in columns]))
-        .order_by(bucket.asc(), primary_key_column.asc())
-        .limit(page_size + 1)
-    )
-    statement = _apply_bucket_keyset(
-        statement, bucket, primary_key_column, request.cursor
+        .order_by(bucket.asc(), primary_key_column.asc()),
+        columns=ordering,
+        cursor=_decode_bucket_cursor(request.cursor),
+        page_size=page_size,
+        max_page_size=page_size,
     )
     rows = list((await db.execute(statement)).scalars().all())
     page, next_cursor = _finalise_bucket_page(
-        rows, entry.pk, columns, query, page_size
+        rows, entry.pk, search.columns, query, page_size
     )
     items = await _shape_link_items(page, search, session)
     return ValuesPage(results=items, next_cursor=next_cursor)
 
 
-async def _run_tsvector_search(  # noqa: PLR0913
+async def _run_tsvector_search(
     *,
     entry: ResourceEntry,
     search: SearchSpec,
@@ -741,25 +753,35 @@ async def _run_tsvector_search(  # noqa: PLR0913
     session: Any,
     primary_key_column: ColumnElement[Any],
 ) -> ValuesPage:
-    """Query + tsvector: ORDER BY ts_rank DESC, pk ASC, keyset on (rank, pk).
+    """Query + tsvector: ORDER BY ts_rank DESC, pk ASC; compound keyset.
 
     The rank is read off each row directly — :func:`select` adds it
     as a labelled column so we don't have to recompute it Python-side
     (we couldn't anyway: ``ts_rank`` is a Postgres function).
     """
-    vector = getattr(entry.model, search.vector_column)
+    vector_column_name = search.vector_column
+
+    if vector_column_name is None:  # pragma: no cover -- guarded by caller
+        msg = "Tsvector runner invoked without a vector_column."
+        raise ValueError(msg)
+
+    vector = getattr(entry.model, vector_column_name)
     tsquery = func.websearch_to_tsquery("english", query)
     rank_expression = func.ts_rank(vector, tsquery).label("_rank")
     page_size = resolved_limit(request.limit)
 
-    statement = (
+    ordering: list[tuple[ColumnElement[Any], SortDirection]] = [
+        (rank_expression, "desc"),
+        (primary_key_column, "asc"),
+    ]
+    statement, _ = apply_compound_keyset_pagination(
         select(entry.model, rank_expression)
         .where(vector.op("@@")(tsquery))
-        .order_by(rank_expression.desc(), primary_key_column.asc())
-        .limit(page_size + 1)
-    )
-    statement = _apply_rank_keyset(
-        statement, rank_expression, primary_key_column, request.cursor
+        .order_by(rank_expression.desc(), primary_key_column.asc()),
+        columns=ordering,
+        cursor=_decode_rank_cursor(request.cursor),
+        page_size=page_size,
+        max_page_size=page_size,
     )
     raw_rows = (await db.execute(statement)).all()
     rows = [(row[0], float(row[1])) for row in raw_rows]
@@ -779,97 +801,25 @@ async def _shape_link_items(
 
     for model_instance in instances:
         link = await search.link(model_instance, session)
-        items.append(
-            link.model_dump() if hasattr(link, "model_dump") else link
-        )
+        items.append(link.model_dump() if hasattr(link, "model_dump") else link)
 
     return items
 
 
 # -------------------------------------------------------------------
-# Keyset WHERE-clause builders.
+# Cursor formats.
 #
-# Three modes; each takes a previous-cursor string and returns a
-# statement with the resume predicate appended.  Empty/wrong-tag
-# cursors fall back to "no resume" (start of result set), matching
-# how a fresh navigation would behave.
+# Three tags carry the registry's three ordering shapes.  Decoders
+# are tolerant: an empty / mismatched / unparseable cursor decodes
+# to ``None``, matching the "start from the beginning" path.  WHERE
+# clause construction lives in
+# :func:`ingot.pagination.apply_compound_keyset_pagination`.
 # -------------------------------------------------------------------
 
 
 _PK_CURSOR_PREFIX = "k:"
 _BUCKET_CURSOR_PREFIX = "b:"
 _RANK_CURSOR_PREFIX = "r:"
-
-
-def _apply_pk_keyset(
-    statement: Select[Any],
-    primary_key_column: ColumnElement[Any],
-    cursor: str | None,
-) -> Select[Any]:
-    """Resume after ``pk == previous`` (single-column keyset)."""
-    previous_pk = _decode_pk_cursor(cursor)
-
-    if previous_pk is None:
-        return statement
-
-    return statement.where(primary_key_column > previous_pk)
-
-
-def _apply_bucket_keyset(
-    statement: Select[Any],
-    bucket_expression: ColumnElement[Any],
-    primary_key_column: ColumnElement[Any],
-    cursor: str | None,
-    query: str,
-) -> Select[Any]:
-    """Resume after ``(bucket, pk) > (previous_bucket, previous_pk)``.
-
-    The bucket expression must match the one used in ORDER BY,
-    so callers pass the same :func:`_bucket_expr` result here.
-    The unused *query* parameter keeps the call-site contract
-    explicit — bucket ordering only makes sense when there's a
-    query.
-    """
-    del query  # documented constraint; bucket keyset implies a query
-    previous = _decode_bucket_cursor(cursor)
-
-    if previous is None:
-        return statement
-
-    previous_bucket, previous_pk = previous
-    return statement.where(
-        tuple_(bucket_expression, primary_key_column)
-        > tuple_(previous_bucket, previous_pk)
-    )
-
-
-def _apply_rank_keyset(
-    statement: Select[Any],
-    rank_expression: ColumnElement[Any],
-    primary_key_column: ColumnElement[Any],
-    cursor: str | None,
-) -> Select[Any]:
-    """Resume after ``rank DESC, pk ASC`` keyset boundary.
-
-    ORDER BY directions disagree, so we can't use the row-tuple
-    shorthand: a row is "after" the cursor when its rank is strictly
-    less, OR when ranks tie and its pk is strictly greater.
-    """
-    previous = _decode_rank_cursor(cursor)
-
-    if previous is None:
-        return statement
-
-    previous_rank, previous_pk = previous
-    return statement.where(
-        or_(
-            rank_expression < previous_rank,
-            and_(
-                rank_expression == previous_rank,
-                primary_key_column > previous_pk,
-            ),
-        )
-    )
 
 
 def _bucket_expr(
@@ -883,53 +833,18 @@ def _bucket_expr(
     ORDER BY (so starts-with hits sort first) and the keyset
     predicate (so cursor decoding lines up).
     """
-    starts_with = or_(
-        *[column.ilike(f"{query}%") for column in columns]
-    )
+    starts_with = or_(*[column.ilike(f"{query}%") for column in columns])
     return case((starts_with, 0), else_=1)
 
 
 # -------------------------------------------------------------------
-# Result fetchers + page finalisers.
+# Page finalisers.
 #
-# Each fetcher executes the statement and returns the over-fetched
-# row list (LIMIT n+1).  Each finaliser trims the over-fetch row,
-# computes the next cursor for its mode, and returns the trimmed
-# page plus cursor.  Splitting fetch from finalise keeps the SQL
-# and cursor maths in separate, testable pieces.
+# After the runner executes its over-fetched (LIMIT n+1) statement
+# and reads the rows, the finaliser for that mode trims the spare
+# row and computes the next cursor.  Cursor formats differ by mode
+# (pk vs bucket+pk vs rank+pk) so each gets its own helper.
 # -------------------------------------------------------------------
-
-
-async def _fetch_scalars(
-    statement: Select[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> list[Any]:
-    """Execute *statement* with LIMIT n+1, return scalar rows."""
-    limit = resolved_limit(request.limit)
-    bounded = statement.limit(limit + 1)
-    return list((await db.execute(bounded)).scalars().all())
-
-
-async def _fetch_models(
-    statement: Select[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> list[Any]:
-    """Execute *statement* with LIMIT n+1, return ORM instances."""
-    return await _fetch_scalars(statement, request, db)
-
-
-async def _fetch_model_rank_pairs(
-    statement: Select[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-) -> list[tuple[Any, float]]:
-    """Execute *statement* (model + rank), return ``[(instance, rank)]``."""
-    limit = resolved_limit(request.limit)
-    bounded = statement.limit(limit + 1)
-    raw_rows = (await db.execute(bounded)).all()
-    return [(row[0], float(row[1])) for row in raw_rows]
 
 
 def _finalise_scalar_page(
@@ -971,10 +886,10 @@ def _finalise_pk_page(
     return page, _encode_pk_cursor(str(last_pk))
 
 
-def _finalise_bucket_page(  # noqa: PLR0913
+def _finalise_bucket_page(
     rows: list[Any],
     pk_attr: str,
-    columns: Sequence[ColumnElement[Any]],
+    column_names: Sequence[str],
     query: str,
     requested_limit: int | None,
 ) -> tuple[list[Any], str | None]:
@@ -987,7 +902,7 @@ def _finalise_bucket_page(  # noqa: PLR0913
         return page, None
 
     last_row = page[-1]
-    bucket = _row_bucket_from_columns(query, columns, last_row)
+    bucket = _row_bucket_from_columns(query, column_names, last_row)
     last_pk = getattr(last_row, pk_attr)
     return page, _encode_bucket_cursor(bucket, str(last_pk))
 
@@ -1030,14 +945,14 @@ def _row_bucket_from_value(query: str, value: Any) -> int:
 
 def _row_bucket_from_columns(
     query: str,
-    columns: Sequence[ColumnElement[Any]],
+    column_names: Sequence[str],
     instance: Any,
 ) -> int:
-    """Return ``0`` when any of *columns*'s values starts with *query*."""
+    """Return ``0`` when any column on *instance* starts with *query*."""
     lowered_query = query.lower()
 
-    for column in columns:
-        attribute_value = getattr(instance, column.key, None)
+    for name in column_names:
+        attribute_value = getattr(instance, name, None)
 
         if attribute_value is None:
             continue

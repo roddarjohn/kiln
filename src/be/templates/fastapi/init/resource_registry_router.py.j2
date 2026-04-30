@@ -19,12 +19,18 @@ Mount this router in your app once::
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ingot.filter_values import FilterValuesRequest
+from ingot.resource_registry import (
+    FieldDiscovery,
+    ProjectDiscovery,
+    ResourceDiscovery,
+    ValuesPage,
+)
 
 from {{ session_module }} import {{ get_db_fn }}
 {% if require_auth %}
@@ -37,40 +43,40 @@ from {{ registry_module }} import resource_registry
 router = APIRouter()
 
 
-@router.get("/_filters")
+@router.get("/_filters", response_model=ProjectDiscovery)
 def filters_root(
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> dict[str, Any]:
+) -> ProjectDiscovery:
     """Return the full project discovery payload."""
     return resource_registry.discovery()
 
 
-@router.get("/_filters/{resource}")
+@router.get("/_filters/{resource}", response_model=ResourceDiscovery)
 def filters_resource(
     resource: str,
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> dict[str, Any]:
+) -> ResourceDiscovery:
     """Return one resource's discovery payload."""
     return resource_registry.discovery(resource=resource)
 
 
-@router.get("/_filters/{resource}/{field}")
+@router.get("/_filters/{resource}/{field}", response_model=FieldDiscovery)
 def filters_resource_field(
     resource: str,
     field: str,
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> dict[str, Any]:
+) -> FieldDiscovery:
     """Return one field's discovery payload (404 on unknown field)."""
     return resource_registry.discovery(resource=resource, field=field)
 
 
-@router.post("/_values/{resource}")
+@router.post("/_values/{resource}", response_model=ValuesPage)
 async def values_resource(
     resource: str,
     body: FilterValuesRequest,
@@ -78,7 +84,7 @@ async def values_resource(
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> dict[str, Any]:
+) -> ValuesPage:
     """Resource-level search; routes to the registry's link builder."""
     return await resource_registry.values(
         resource=resource,
@@ -91,7 +97,7 @@ async def values_resource(
     )
 
 
-@router.post("/_values/{resource}/{field}")
+@router.post("/_values/{resource}/{field}", response_model=ValuesPage)
 async def values_resource_field(
     resource: str,
     field: str,
@@ -100,7 +106,7 @@ async def values_resource_field(
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> dict[str, Any]:
+) -> ValuesPage:
     """Per-field value provider (enum / free-text / ref / self)."""
     return await resource_registry.values(
         resource=resource,

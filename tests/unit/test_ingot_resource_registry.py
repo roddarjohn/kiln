@@ -149,15 +149,15 @@ def _sql(stmt: Select[Any]) -> str:
 
 def test_discovery_full_payload() -> None:
     payload = _registry().discovery()
-    assert "resources" in payload
-    assert "item" in payload["resources"]
+    assert "item" in payload.resources
 
 
 def test_discovery_resource_payload() -> None:
     payload = _registry().discovery(resource="item")
-    assert payload["resource"] == "item"
-    assert payload["search"] == {"endpoint": "/_values/item"}
-    fields = {f["field"]: f for f in payload["filters"]}
+    assert payload.resource == "item"
+    assert payload.search is not None
+    assert payload.search.endpoint == "/_values/item"
+    fields = {entry.field: entry for entry in payload.filters}
     assert set(fields) == {
         "status",
         "name",
@@ -170,17 +170,18 @@ def test_discovery_resource_payload() -> None:
 
 def test_discovery_enum_includes_choices_and_endpoint() -> None:
     payload = _registry().discovery(resource="item", field="status")
-    values = payload["values"]
-    assert values["kind"] == "enum"
-    labels = {c["label"] for c in values["choices"]}
+    descriptor = payload.values
+    assert descriptor.kind == "enum"
+    labels = {choice.label for choice in descriptor.choices}
     assert labels == {"DRAFT", "PUBLISHED", "ARCHIVED"}
-    assert values["endpoint"] == "/_values/item/status"
+    assert descriptor.endpoint == "/_values/item/status"
 
 
 def test_discovery_self_includes_endpoint_when_searchable() -> None:
     payload = _registry().discovery(resource="item", field="id")
-    assert payload["values"]["kind"] == "self"
-    assert payload["values"]["endpoint"] == "/_values/item"
+    descriptor = payload.values
+    assert descriptor.kind == "self"
+    assert descriptor.endpoint == "/_values/item"
 
 
 def test_discovery_unknown_field_404() -> None:
@@ -197,10 +198,10 @@ def test_discovery_unknown_resource_404() -> None:
 
 def test_discovery_ref_to_unknown_target_omits_endpoint() -> None:
     payload = _registry().discovery(resource="item", field="owner_id")
-    values = payload["values"]
-    assert values["kind"] == "ref"
-    assert values["type"] == "owner"
-    assert "endpoint" not in values
+    descriptor = payload.values
+    assert descriptor.kind == "ref"
+    assert descriptor.type == "owner"
+    assert descriptor.endpoint is None
 
 
 # -------------------------------------------------------------------
@@ -219,7 +220,7 @@ async def test_enum_values_dispatch_is_in_memory() -> None:
         db=db,  # type: ignore[arg-type]
     )
 
-    labels = {item["label"] for item in page["results"]}
+    labels = {item["label"] for item in page.results}
     assert labels == {"DRAFT", "PUBLISHED", "ARCHIVED"}
     assert db.statements == []  # no SQL issued
 
@@ -282,14 +283,14 @@ async def test_free_text_values_keyset_cursor_round_trip() -> None:
         db=db,  # type: ignore[arg-type]
     )
 
-    assert page1["next_cursor"] is not None
-    assert page1["next_cursor"].startswith("k:")
+    assert page1.next_cursor is not None
+    assert page1.next_cursor.startswith("k:")
 
     db2 = _ExecuteCapture(rows=["banana"])
     await _registry().values(
         resource="item",
         field="name",
-        request=FilterValuesRequest(limit=2, cursor=page1["next_cursor"]),
+        request=FilterValuesRequest(limit=2, cursor=page1.next_cursor),
         db=db2,  # type: ignore[arg-type]
     )
 

@@ -168,21 +168,44 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert "resources/router.py" in files
     router = files["resources/router.py"]
 
-    # Five endpoints, all thin wrappers.
-    assert '@router.get("/_filters")' in router
-    assert '@router.get("/_filters/{resource}")' in router
-    assert '@router.get("/_filters/{resource}/{field}")' in router
-    assert '@router.post("/_values/{resource}")' in router
-    assert '@router.post("/_values/{resource}/{field}")' in router
+    # Five endpoints, each declaring a typed response_model so
+    # FastAPI/OpenAPI surface real schemas (not bare dicts).
+    assert (
+        '@router.get("/_filters", response_model=ProjectDiscovery)'
+        in router
+    )
+    assert (
+        '@router.get("/_filters/{resource}", response_model=ResourceDiscovery)'
+        in router
+    )
+    assert (
+        '@router.get("/_filters/{resource}/{field}", '
+        "response_model=FieldDiscovery)"
+    ) in router
+    assert (
+        '@router.post("/_values/{resource}", response_model=ValuesPage)'
+        in router
+    )
+    assert (
+        '@router.post("/_values/{resource}/{field}", response_model=ValuesPage)'
+        in router
+    )
 
     # Each delegates to the registry.
     assert "resource_registry.discovery()" in router
     assert "resource_registry.discovery(resource=resource)" in router
-    assert "resource_registry.discovery(resource=resource, field=field)" in router
+    assert (
+        "resource_registry.discovery(resource=resource, field=field)" in router
+    )
     assert "await resource_registry.values(" in router
 
-    # Shared body schema imported once.
+    # Typed registry models imported alongside the body schema.
     assert "from ingot.filter_values import FilterValuesRequest" in router
+    assert "from ingot.resource_registry import" in router
+    assert "ProjectDiscovery" in router
+    assert "ResourceDiscovery" in router
+    assert "FieldDiscovery" in router
+    assert "ValuesPage" in router
 
 
 def test_project_router_mounts_resource_router(files: dict[str, str]) -> None:
