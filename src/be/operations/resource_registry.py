@@ -110,6 +110,7 @@ class ResourceRegistry:
             _build_schema_entry(resource, schema_imports)
             for _, resource in _iter_contributing_resources(config)
         ]
+        union_sources = _format_top_level_unions(schema_entries)
 
         yield StaticFile(
             path="resources/__init__.py",
@@ -126,6 +127,7 @@ class ResourceRegistry:
             context={
                 "extra_imports": _format_imports(schema_imports),
                 "entries": schema_entries,
+                **union_sources,
             },
         )
 
@@ -359,16 +361,31 @@ def _build_schema_entry(
     pascal = model.pascal
 
     field_schemas: list[dict[str, object]] = []
+    member_class_names: list[str] = []
+    field_literals: list[str] = []
 
     for field in _resource_filter_fields(resource):
         field_pascal = Name(field.name).pascal
+        class_name = f"{pascal}{field_pascal}Filter"
         field_schemas.append(
             {
-                "class_name": f"{pascal}{field_pascal}Filter",
+                "class_name": class_name,
                 "field_name": field.name,
                 "values_class": _VALUES_DESCRIPTOR_BY_KIND[field.values],
             }
         )
+        member_class_names.append(class_name)
+        field_literals.append(repr(field.name))
+
+    field_literal_src = ", ".join(field_literals) if field_literals else None
+    # ``Annotated[X, Field(discriminator=...)]`` only makes sense for
+    # multi-member unions; a single-member "union" renders as a bare
+    # type alias and skips the Annotated wrapper.
+    filter_union_src = (
+        " | ".join(member_class_names)
+        if len(member_class_names) > 1
+        else None
+    )
 
     return {
         "slug": slug,
@@ -376,8 +393,57 @@ def _build_schema_entry(
         "resource_class": f"{pascal}Resource",
         "filter_union": f"{pascal}Filter",
         "field_schemas": field_schemas,
+        "filter_union_src": filter_union_src,
+        "field_literal_src": field_literal_src,
         "has_search": resource.searchable,
     }
+
+
+def _format_top_level_unions(
+    entries: list[dict[str, object]],
+) -> dict[str, str]:
+    """Render the project-wide discriminated union expressions.
+
+    Pulled out of Jinja because Python's ``" | ".join(...)`` reads
+    cleaner than the equivalent loop with whitespace-control tags.
+    Returns the right-hand side of three module-level assignments,
+    pre-rendered:
+
+    * ``registered_resource_src`` — for ``RegisteredResource = ...``
+    * ``registered_field_ref_src`` — for ``RegisteredFieldRef = ...``
+    * ``fields_discovery_inner_src`` — the element type for
+      ``FieldsDiscovery.fields: list[...]``.
+    """
+    resource_classes = [str(entry["resource_class"]) for entry in entries]
+    field_ref_classes = [
+        f"{entry['pascal']}FieldRef" for entry in entries
+    ]
+    filter_unions = [
+        str(entry["filter_union"])
+        for entry in entries
+        if entry["field_schemas"]
+    ]
+
+    return {
+        "registered_resource_src": _join_union(resource_classes),
+        "registered_field_ref_src": _join_union(field_ref_classes),
+        "fields_discovery_inner_src": (
+            " | ".join(filter_unions) if filter_unions else "ValuesDescriptor"
+        ),
+    }
+
+
+def _join_union(members: list[str]) -> str:
+    """Render a Python union expression from *members*.
+
+    A single-member "union" is just the bare class name (no
+    ``Annotated`` / ``|``); two or more members render as the
+    ``A | B | C`` shape Pydantic uses for discriminated unions.
+    """
+    if len(members) == 1:
+        return members[0]
+
+    return " | ".join(members)
 
 
 def _default_search_fields(link: object) -> list[str]:

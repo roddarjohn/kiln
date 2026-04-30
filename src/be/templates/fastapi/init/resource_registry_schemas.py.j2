@@ -38,7 +38,6 @@ from ingot.resource_registry import (
     SelfValuesDescriptor,
     ValuesDescriptor,
 )
-
 {% for line in extra_imports %}
 {{ line }}
 {% endfor %}
@@ -71,9 +70,9 @@ class {{ field.class_name }}(BaseModel):
 
 
 {% endfor %}
-{% if entry.field_schemas | length > 1 %}
+{% if entry.filter_union_src %}
 {{ entry.filter_union }} = Annotated[
-    {% for field in entry.field_schemas %}{{ field.class_name }}{% if not loop.last %} | {% endif %}{% endfor %},
+    {{ entry.filter_union_src }},
     Field(discriminator="field"),
 ]
 """Discriminated union of every {{ entry.pascal }} filter field."""
@@ -94,13 +93,12 @@ class {{ entry.resource_class }}(BaseModel):
     search: SearchDiscovery | None = None
 
 
-# {{ entry.pascal }} field reference (used in :class:`FieldDiscoveryRequest`).
 class {{ entry.pascal }}FieldRef(BaseModel):
     """Pointer to one filter field on ``{{ entry.slug }}``."""
 
     resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
-{% if entry.field_schemas | length > 0 %}
-    field: Literal[{% for field in entry.field_schemas %}{{ field.field_name | tojson }}{% if not loop.last %}, {% endif %}{% endfor %}]
+{% if entry.field_literal_src %}
+    field: Literal[{{ entry.field_literal_src }}]
 {% else %}
     field: str
 {% endif %}
@@ -114,23 +112,21 @@ class {{ entry.pascal }}FieldRef(BaseModel):
 
 {% if entries | length > 1 %}
 RegisteredResource = Annotated[
-    {% for entry in entries %}{{ entry.resource_class }}{% if not loop.last %} | {% endif %}{% endfor %},
+    {{ registered_resource_src }},
     Field(discriminator="resource"),
 ]
 """Discriminated union of every registered resource's discovery."""
-{% elif entries | length == 1 %}
-RegisteredResource = {{ entries[0].resource_class }}
-"""The sole registered resource."""
-{% endif %}
 
-{% if entries | length > 1 %}
 RegisteredFieldRef = Annotated[
-    {% for entry in entries %}{{ entry.pascal }}FieldRef{% if not loop.last %} | {% endif %}{% endfor %},
+    {{ registered_field_ref_src }},
     Field(discriminator="resource"),
 ]
 """Discriminated union of every resource's typed field reference."""
-{% elif entries | length == 1 %}
-RegisteredFieldRef = {{ entries[0].pascal }}FieldRef
+{% else %}
+RegisteredResource = {{ registered_resource_src }}
+"""The sole registered resource."""
+
+RegisteredFieldRef = {{ registered_field_ref_src }}
 {% endif %}
 
 
@@ -143,13 +139,7 @@ class Discovery(BaseModel):
 class FieldsDiscovery(BaseModel):
     """Multi-field discovery response."""
 
-    fields: list[
-{% for entry in entries %}
-        {% if entry.field_schemas | length > 0 -%}
-        {{ entry.filter_union }}{% if not loop.last %} |{% endif %}
-        {%- endif %}
-{% endfor %}
-    ]
+    fields: list[{{ fields_discovery_inner_src }}]
 
 
 # -------------------------------------------------------------------
