@@ -202,33 +202,63 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert "ValuesPage" in router
 
 
-def test_schemas_module_emitted(files: dict[str, str]) -> None:
-    """The codegen'd schemas module discriminates on resource and field."""
+def test_per_resource_schema_module_emitted(files: dict[str, str]) -> None:
+    """Each contributing resource gets its own ``<app>/resources/<slug>.py``.
+
+    Per-resource schemas live alongside the rest of the per-app
+    generated tree (schemas, serializers, links) so file size
+    stays bounded as resources accumulate.
+    """
+    assert "inventory/resources/product.py" in files
+    schema = files["inventory/resources/product.py"]
+
+    # Per-resource Resource class with the slug as discriminator.
+    assert "class ProductResource(BaseModel):" in schema
+    assert 'resource: Literal["product"] = "product"' in schema
+    assert "supports_search: bool" in schema
+
+    # Per-field filter classes with field-name discriminators +
+    # narrowed values descriptor types.
+    assert "class ProductStatusFilter(BaseModel):" in schema
+    assert 'field: Literal["status"] = "status"' in schema
+    assert "values: EnumValuesDescriptor" in schema
+
+    assert "class ProductSkuFilter(BaseModel):" in schema
+    assert "values: FreeTextValuesDescriptor" in schema
+
+    assert "class ProductActiveFilter(BaseModel):" in schema
+    assert "values: BoolValuesDescriptor" in schema
+
+    assert "class ProductUnitPriceFilter(BaseModel):" in schema
+    assert "values: LiteralValuesDescriptor" in schema
+
+    # Per-resource discriminated filter union.
+    assert "ProductFilter = " in schema
+
+    # Operators land as the FilterOperator enum.
+    assert "operators: list[FilterOperator]" in schema
+
+    # Per-resource FieldRef.
+    assert "class ProductFieldRef(BaseModel):" in schema
+
+
+def test_central_schemas_module_re_exports_unions(
+    files: dict[str, str],
+) -> None:
+    """``resources/schemas.py`` imports per-resource classes and assembles
+    the project-wide unions + request/response models."""
     assert "resources/schemas.py" in files
     schemas = files["resources/schemas.py"]
 
+    # Imports each per-resource module.
+    assert (
+        "from _generated.inventory.resources.product import" in schemas
+    )
+
     # Resource slug literal.
-    assert 'ResourceSlug = Literal["product"]' in schemas
-    # Per-resource Resource class with the slug as discriminator.
-    assert "class ProductResource(BaseModel):" in schemas
-    assert 'resource: Literal["product"] = "product"' in schemas
-
-    # Per-field filter classes with field-name discriminators.
-    assert "class ProductStatusFilter(BaseModel):" in schemas
-    assert 'field: Literal["status"] = "status"' in schemas
-    assert "values: EnumValuesDescriptor" in schemas
-
-    assert "class ProductSkuFilter(BaseModel):" in schemas
-    assert "values: FreeTextValuesDescriptor" in schemas
-
-    assert "class ProductActiveFilter(BaseModel):" in schemas
-    assert "values: BoolValuesDescriptor" in schemas
-
-    assert "class ProductUnitPriceFilter(BaseModel):" in schemas
-    assert "values: LiteralValuesDescriptor" in schemas
-
-    # Per-resource discriminated filter union.
-    assert "ProductFilter = " in schemas
+    assert 'ResourceSlug = Literal[\n "product"\n]' in schemas or (
+        'ResourceSlug = Literal[ "product"' in schemas
+    )
 
     # Project-wide unions and discovery payload.
     assert "RegisteredResource" in schemas

@@ -110,10 +110,9 @@ class ResourceRegistry:
         for app, resource in _iter_contributing_resources(config):
             entry = _build_schema_entry(resource)
             schema_entries.append(entry)
-            module_path = (
-                prefix_import(
-                    package_prefix, app.module, "resources", entry["slug"]
-                )
+            slug = str(entry["slug"])
+            module_path = prefix_import(
+                package_prefix, app.module, "resources", slug
             )
             resource_imports.append(
                 f"from {module_path} import "
@@ -122,7 +121,7 @@ class ResourceRegistry:
             )
 
             yield StaticFile(
-                path=f"{app.module}/resources/{entry['slug']}.py",
+                path=f"{app.module}/resources/{slug}.py",
                 template="fastapi/init/resource_schema.py.j2",
                 context={"entry": entry},
             )
