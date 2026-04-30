@@ -21,6 +21,7 @@ decode for its own ordering.
 from __future__ import annotations
 
 import enum as _enum_mod
+from collections.abc import Sequence  # noqa: TC003 -- runtime use by Pydantic
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -32,7 +33,7 @@ from ingot.filter_values import FilterValuesRequest, resolved_limit
 from ingot.values_table import values_table
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Awaitable, Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
@@ -257,8 +258,10 @@ class FieldRef(BaseModel):
 
 
 class FieldDiscoveryRequest(BaseModel):
-    """Body for ``POST /_filters/fields`` — list of ``(resource, field)``
-    references.  Response preserves order.
+    """Body for ``POST /_filters/fields``.
+
+    Carries a list of ``(resource, field)`` references; the
+    response preserves request order.
     """
 
     fields: list[FieldRef] = Field(default_factory=list)
@@ -337,11 +340,11 @@ class ResourceRegistry:
     """
 
     def __init__(self, entries: dict[str, ResourceEntry]) -> None:
-        # Copy so callers can keep mutating their original.
+        """Copy *entries* so the caller can mutate their original."""
         self._entries: dict[str, ResourceEntry] = dict(entries)
 
     def resources(self) -> list[str]:
-        """Registered resource slugs, in declaration order."""
+        """Return the registered resource slugs, in declaration order."""
         return list(self._entries)
 
     # -------- Discovery --------

@@ -16,6 +16,8 @@
 
     await {{ post_hook_call }}(obj, body, db=db)
 
+    await db.commit()
+
 {% else %}
     await db.execute(insert({{ model_name }}).values(**body.model_dump()))
 
