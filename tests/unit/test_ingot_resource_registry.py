@@ -288,30 +288,23 @@ def test_field_discovery_ref_carries_target_slug() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enum_values_run_through_postgres_values_clause() -> None:
-    """Enum values now go through the same SQL pipeline as everything
-    else — a ``VALUES (...)`` clause is built and queried."""
+async def test_field_values_without_q_return_empty_without_sql() -> None:
+    """No ``q`` → empty page, no SQL fired (relevance scoring is
+    meaningless without a query)."""
     db = _ExecuteCapture(rows=[])
-    await _registry().values(
+    page = await _registry().values(
         resource="item",
         fields=["status"],
         request=FilterValuesRequest(),
         db=db,  # type: ignore[arg-type]
     )
-
-    sql = _sql(db.statements[0])
-    assert "VALUES" in sql
-    # SQL only carries labels — the enum values are looked up
-    # Python-side from the enum class (no point round-tripping
-    # them through the DB).
-    assert "'DRAFT'" in sql
-    assert "'PUBLISHED'" in sql
-    assert "'ARCHIVED'" in sql
+    assert page.results == []
+    assert db.statements == []
 
 
 @pytest.mark.asyncio
-async def test_enum_values_with_q_filters_via_ilike() -> None:
-    """A query narrows the VALUES table via ILIKE on label."""
+async def test_enum_field_with_q_runs_trigram_on_labels() -> None:
+    """Enum field + ``q`` → trigram match on the label VALUES table."""
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
@@ -321,38 +314,17 @@ async def test_enum_values_with_q_filters_via_ilike() -> None:
     )
 
     sql = _sql(db.statements[0])
-    # PG dialect doubles ``%`` literals for psycopg parameter
-    # substitution.
-    assert "ILIKE '%%draft%%'" in sql
+    assert "VALUES" in sql
+    assert "'DRAFT'" in sql
+    assert "similarity" in sql.lower()
+    # ``%`` is the trigram match operator (doubled by the PG dialect).
+    assert "%% '%%draft%%'" in sql or "%%%%" in sql or "%% " in sql
 
 
 @pytest.mark.asyncio
-async def test_free_text_values_no_q_uses_keyset_pagination() -> None:
-    """No ``q`` → keyset on the column, ``LIMIT n+1``, no ILIKE."""
-    db = _ExecuteCapture(rows=["apple", "apricot"])
-    await _registry().values(
-        resource="item",
-        fields=["name"],
-        request=FilterValuesRequest(limit=2),
-        db=db,  # type: ignore[arg-type]
-    )
-
-    sql = _sql(db.statements[0])
-    assert "SELECT DISTINCT" in sql
-    assert "_filter_registry_test_items.name" in sql
-    # Single-page only — LIMIT is exactly request.limit, no over-fetch.
-    assert "LIMIT 2" in sql
-    assert "ILIKE" not in sql.upper()
-
-
-@pytest.mark.asyncio
-async def test_free_text_values_with_q_filters_no_bucket() -> None:
-    """A query just adds the ILIKE WHERE; no bucket-relevance CASE.
-
-    Single-column ordering keeps the SQL simple — no ``CASE WHEN``
-    relevance bucket, no compound keyset.
-    """
-    db = _ExecuteCapture(rows=["apple", "apricot"])
+async def test_free_text_field_with_q_runs_trigram_on_column() -> None:
+    """FreeText field + ``q`` → trigram on the source column, not ILIKE."""
+    db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
         fields=["name"],
@@ -361,18 +333,19 @@ async def test_free_text_values_with_q_filters_no_bucket() -> None:
     )
 
     sql = _sql(db.statements[0])
-    assert "ILIKE '%%ap%%'" in sql
-    assert "CASE WHEN" not in sql.upper()
+    assert "ILIKE" not in sql.upper()
+    assert "similarity" in sql.lower()
+    assert "_filter_registry_test_items.name" in sql
 
 
 @pytest.mark.asyncio
 async def test_values_response_has_no_cursor() -> None:
     """Single-page only — :class:`ValuesPage` doesn't carry a cursor."""
-    db = _ExecuteCapture(rows=["apple", "apricot"])
+    db = _ExecuteCapture(rows=[])
     page = await _registry().values(
         resource="item",
         fields=["name"],
-        request=FilterValuesRequest(limit=2),
+        request=FilterValuesRequest(limit=2, q="ap"),
         db=db,  # type: ignore[arg-type]
     )
     assert "next_cursor" not in page.model_dump()
@@ -449,33 +422,29 @@ async def test_search_resource_with_q_or_ilikes_every_search_column() -> None:
 
 
 @pytest.mark.asyncio
-async def test_self_ref_field_dispatches_to_resource_search() -> None:
-    """SelfRef field → same SQL as the resource-level search."""
-    db_self = _ExecuteCapture(rows=[])
-    db_root = _ExecuteCapture(rows=[])
-    req = FilterValuesRequest(q="ap")
-
+async def test_self_ref_with_q_uses_target_search_col() -> None:
+    """A self-ref Ref field is just a Ref whose target is the same
+    resource — its trigram subquery scores against the target's
+    first configured search column."""
+    db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
         fields=["id"],
-        request=req,
-        db=db_self,  # type: ignore[arg-type]
-    )
-    await _registry().values(
-        resource="item",
-        fields=[],
-        request=req,
-        db=db_root,  # type: ignore[arg-type]
+        request=FilterValuesRequest(q="ap"),
+        db=db,  # type: ignore[arg-type]
     )
 
-    assert _sql(db_self.statements[0]) == _sql(db_root.statements[0])
+    sql = _sql(db.statements[0])
+    # ``name`` is the first column in the registry's SearchSpec.
+    assert "_filter_registry_test_items.name" in sql
+    assert "similarity" in sql.lower()
 
 
 @pytest.mark.asyncio
-async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
-    """Ref to a target without a SearchSpec returns the first N rows
-    by pk — no 404, no search query.  Gives the FE something to
-    render even when the consumer hasn't wired a real search."""
+async def test_ref_to_unsearched_resource_with_q_uses_pk_string_label() -> None:
+    """Ref to a target without a SearchSpec falls back to the
+    target's stringified pk as the label column — trigram on
+    ``cast(pk, String)`` so the union still composes."""
     registry = ResourceRegistry(
         {
             "item": ResourceEntry(
@@ -495,15 +464,13 @@ async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
     await registry.values(
         resource="item",
         fields=["owner_id"],
-        request=FilterValuesRequest(),
+        request=FilterValuesRequest(q="42"),
         db=db,  # type: ignore[arg-type]
     )
 
     sql = _sql(db.statements[0])
-    assert "ORDER BY" in sql.upper()
-    assert "_filter_registry_test_items.id" in sql
-    # No q-filtering — fallback ignores it entirely.
-    assert "ILIKE" not in sql.upper()
+    assert "CAST" in sql.upper()
+    assert "similarity" in sql.lower()
 
 
 @pytest.mark.asyncio

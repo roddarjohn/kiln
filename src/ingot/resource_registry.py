@@ -361,14 +361,15 @@ class ResourceRegistry:
     ) -> ProjectDiscovery:
         """Per-resource discovery, narrowed by ``request.resources``.
 
-        ``None`` → every registered resource; otherwise the named
-        subset, in request order.  404 on unknown slugs.
+        ``None`` → every registered resource; an explicit list →
+        that subset (empty list → no resources), in request order.
+        404 on unknown slugs.
         """
-        slugs = request.resources
-
-        if not slugs:
-            slugs = list(self._entries)
-
+        slugs = (
+            list(self._entries)
+            if request.resources is None
+            else list(request.resources)
+        )
         return ProjectDiscovery(
             resources=[self._discover_resource(slug) for slug in slugs],
         )
@@ -416,104 +417,21 @@ class ResourceRegistry:
         db: AsyncSession,
         session: Any = None,
     ) -> ValuesPage:
-        """Dispatch a value-provider request to the right runner.
+        """Run a value-provider request.
 
-        Three cases by ``len(fields)``:
-
-        * ``0`` — resource-level search.
-        * ``1`` — per-field dispatch (Enum / FreeText / Ref;
-          Bool / Literal raise 404 — they have no value provider).
-        * ``2+`` — multi-column union: distinct values from each
-          named column, tagged with the source field for FE-side
-          grouping.
+        ``fields=[]`` runs a resource-level search (link-shaped
+        results); any non-empty ``fields`` runs a pg_trgm union
+        ranked together, which degrades naturally to a single
+        ``%``-match when only one field is named.  The FE already
+        has every enum member from discovery, so single-field Enum
+        calls without ``q`` returning nothing isn't a regression.
         """
         entry = self._require_entry(resource)
 
         if not fields:
             return await _run_resource_search(entry, request, db, session)
 
-        if len(fields) == 1:
-            return await self._dispatch_single_field(
-                entry, fields[0], request, db, session
-            )
-
         return await self._run_multi_column_search(entry, fields, request, db)
-
-    async def _dispatch_single_field(
-        self,
-        entry: ResourceEntry,
-        field_name: str,
-        request: FilterValuesRequest,
-        db: AsyncSession,
-        session: Any,
-    ) -> ValuesPage:
-        spec = _find_field(entry, field_name)
-
-        if spec is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Unknown filter field: {field_name}",
-            )
-
-        limit = resolved_limit(request.limit)
-
-        if isinstance(spec, Enum):
-            # Enum members via Postgres VALUES — same pipeline as
-            # SQL tables, ILIKE-filtered when ``q`` is set.
-            table = values_table(
-                _ChoiceRow,
-                [
-                    _ChoiceRow(value=str(member.value), label=member.name)
-                    for member in spec.enum_class
-                ],
-                name="enum_values",
-            )
-            label_col = table.c.label
-            statement: Select[Any] = (
-                select(table.c.value, label_col)
-                .order_by(label_col.asc())
-                .limit(limit)
-            )
-
-            if request.q:
-                statement = statement.where(label_col.ilike(f"%{request.q}%"))
-
-            rows = (await db.execute(statement)).all()
-            return ValuesPage(
-                results=[
-                    {"value": row.value, "label": row.label} for row in rows
-                ],
-            )
-
-        if isinstance(spec, FreeText):
-            # DISTINCT column values, optionally ILIKE-filtered.
-            text_col = getattr(entry.model, spec.column or spec.name)
-            statement = (
-                select(text_col)
-                .distinct()
-                .order_by(text_col.asc())
-                .limit(limit)
-            )
-
-            if request.q:
-                statement = statement.where(text_col.ilike(f"%{request.q}%"))
-
-            rows = (await db.execute(statement)).scalars().all()
-            return ValuesPage(
-                results=[{"value": value, "label": value} for value in rows],
-            )
-
-        if isinstance(spec, Ref):
-            target_entry = self._require_entry(spec.target)
-            return await _run_resource_search(
-                target_entry, request, db, session
-            )
-
-        # Bool / LiteralField — no value provider, FE renders natively.
-        raise HTTPException(
-            status_code=404,
-            detail=f"Field {field_name!r} has no value provider",
-        )
 
     # -------- Internal helpers --------
 
@@ -539,8 +457,10 @@ class ResourceRegistry:
     ) -> ValuesPage:
         """UNION ``(field, value, label, score)`` per field, ranked together.
 
-        Each named field dispatches by its :class:`FilterField` kind
-        so heterogeneous filters compose into one search box:
+        Works for any non-empty ``fields``; one field is just a
+        one-arm union.  Each field dispatches by its
+        :class:`FilterField` kind so heterogeneous filters compose
+        into one search box:
 
         * **FreeText** — trigram on the source column.
         * **Enum** — trigram on the enum's member names via a
@@ -549,12 +469,29 @@ class ResourceRegistry:
           configured search column; ``value`` is the target's
           stringified pk so the FE can plug it straight into a
           filter operand.
-        * **Bool** / **LiteralField** — rejected with 400; they
-          have no text to score against.
+        * **Bool** / **LiteralField** — 404; they have no text to
+          score against.
 
         Without ``q`` the union returns nothing (relevance scoring
         is meaningless without a query).  Requires ``pg_trgm``.
         """
+        # Validate field names up-front so unknown / unscorable
+        # fields surface as 404 even when ``q`` is empty.
+        for name in fields:
+            spec = _find_field(entry, name)
+
+            if spec is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown filter field: {name}",
+                )
+
+            if isinstance(spec, (Bool, LiteralField)):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Field {name!r} has no value provider",
+                )
+
         if not request.q:
             return ValuesPage(results=[])
 
@@ -652,13 +589,11 @@ class ResourceRegistry:
                 func.similarity(target_label, query).label("score"),
             ).where(target_label.op("%")(query))
 
-        # Bool / LiteralField — no text to score against.
+        # Bool / LiteralField — no text to score against; the FE
+        # renders these natively without calling ``/_values``.
         raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Field {field_name!r} is not searchable in a multi-column "
-                f"union (kind={spec.kind!r})."
-            ),
+            status_code=404,
+            detail=f"Field {field_name!r} has no value provider",
         )
 
 
