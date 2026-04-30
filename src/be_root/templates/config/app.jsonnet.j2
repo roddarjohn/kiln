@@ -30,5 +30,8 @@
     //       { name: "create" },
     //     ],
     //   },
+{% if notification_preferences %}
+    import "resources/notification_preference.jsonnet",
+{% endif %}
   ],
 }

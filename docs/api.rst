@@ -127,6 +127,9 @@ be.operations
 .. automodule:: be.operations.rate_limit
    :members:
 
+.. automodule:: be.operations.comms_scaffold
+   :members:
+
 .. automodule:: be.operations.routing
    :members:
 
@@ -143,6 +146,9 @@ be.operations
    :members:
 
 .. automodule:: ingot.auth
+   :members:
+
+.. automodule:: ingot.comms
    :members:
 
 .. automodule:: ingot.files

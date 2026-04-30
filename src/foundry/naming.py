@@ -127,6 +127,29 @@ class Name:
         return dotted
 
 
+def split_dotted_class(dotted_path: str) -> tuple[str, str]:
+    """Split a fully-qualified class path into ``(module, class_name)``.
+
+    Convenience for callers that just want both pieces as strings —
+    skip the :class:`Name` wrapper that :meth:`Name.from_dotted`
+    returns when the only thing they need is the bare class-name
+    string for an import line.
+
+    Args:
+        dotted_path: Fully-qualified class path, e.g.
+            ``"myapp.models.Article"``.
+
+    Returns:
+        ``(module, class_name)`` tuple of plain strings.
+
+    Raises:
+        ValueError: If *dotted_path* contains fewer than two parts.
+
+    """
+    module, name = Name.from_dotted(dotted_path)
+    return module, name.raw
+
+
 def prefix_import(prefix: str, *parts: str) -> str:
     """Build a Python import path under *prefix* (which may be empty).
 

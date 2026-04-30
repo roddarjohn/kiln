@@ -23,6 +23,12 @@ local auth = import "be/auth/jwt.libsonnet";
 {% if opentelemetry %}
 local telemetry = import "be/telemetry/telemetry.libsonnet";
 {% endif %}
+{% if rate_limit %}
+local rate_limit = import "be/rate_limit/rate_limit.libsonnet";
+{% endif %}
+{% if comms %}
+local comms = import "be/comms/comms.libsonnet";
+{% endif %}
 
 {
 {% if auth %}
@@ -50,6 +56,40 @@ local telemetry = import "be/telemetry/telemetry.libsonnet";
   // environment is read at startup from ``ENVIRONMENT``; the
   // OTLP endpoint comes from ``OTEL_EXPORTER_OTLP_ENDPOINT``.
   telemetry: telemetry.otel("{{ name }}"),
+{% endif %}
+{% if rate_limit %}
+
+  // Rate limiting: slowapi backed by a Postgres counter table.
+  // The bucket model is a SQLAlchemy class mixing in
+  // ``ingot.rate_limit.RateLimitBucketMixin`` -- you own the
+  // table, kiln owns the columns.  The dotted path below is a
+  // placeholder; replace it with your real model location.
+  rate_limit: rate_limit.slowapi("{{ module }}.models.RateLimitBucket"),
+{% endif %}
+{% if comms %}
+
+  // Communication platform: typed messages dispatched via
+  // pgqueuer (transactional outbox).  The dotted paths below
+  // point at the stub ``comms.py`` be_root scaffolded; replace
+  // the message / recipient model paths with your real model
+  // locations once you've added them.
+  comms: comms.platform({
+    message_model: "{{ module }}.models.CommMessage",
+    recipient_model: "{{ module }}.models.CommRecipient",
+    transports: {
+      email: "comms.email_transport",
+    },
+    preferences: "comms.resolver",
+    types: [
+      comms.type({
+        name: "welcome",
+        context_schema: "comms.WelcomeContext",
+        subject_template: {% raw %}"Welcome, {{ name }}!"{% endraw %},
+        body_template: {% raw %}"Hi {{ name }}, glad you're here."{% endraw %},
+        default_methods: ["email"],
+      }),
+    ],
+  }),
 {% endif %}
 
   apps: [
