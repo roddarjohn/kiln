@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from pydantic import BaseModel
+from pydantic import Field as PydanticField
 
 from be.config.schema import (
     PYTHON_TYPES,
@@ -221,6 +222,13 @@ class SerializerFn:
     list-item serializer when the resource has
     :attr:`~be.config.schema.ResourceConfig.include_actions_in_dump`
     enabled; nested sub-serializers leave it ``False``.
+
+    ``representation`` flips the serializer into "representation
+    mode": ``async def fn(obj, session) -> Schema`` with no
+    actions injection.  Used by the per-rep serializers emitted
+    alongside :class:`~be.config.schema.RepresentationConfig`
+    schemas; ``include_actions`` and ``representation`` are
+    mutually exclusive.
     """
 
     function_name: str
@@ -229,6 +237,7 @@ class SerializerFn:
     schema_name: str
     fields: list[Field] = field(default_factory=list)
     include_actions: bool = False
+    representation: bool = False
 
 
 @dataclass
@@ -255,9 +264,15 @@ class TestCase:
 
 
 class FieldsOptions(BaseModel):
-    """Options for operations that require a field list."""
+    """Options for operations that take a field list.
 
-    fields: list[FieldSpec]
+    ``fields`` is optional because read ops (``get`` / ``list``)
+    can alternatively select a representation by name via
+    :attr:`OperationConfig.representation`; the op's ``build``
+    decides which path applies.
+    """
+
+    fields: list[FieldSpec] = PydanticField(default_factory=list)
 
 
 def _field_dicts(
@@ -352,7 +367,7 @@ def _construct_dump(  # noqa: PLR0913
     the top-level resource, not its embedded relations.
     """
     main_schema_name = model.suffixed(suffix)
-    main_fn_name = f"to_{model.lower}_{stem}"
+    main_fn_name = f"to_{model.snake}_{stem}"
     expanded, nested_schemas, nested_sers, enum_imports = _expand_field_specs(
         fields,
         class_prefix=main_schema_name,

@@ -300,7 +300,7 @@ def _resource(
 ) -> ResourceConfig:
     return ResourceConfig(
         model=model,
-        pk_type=pk_type,
+        pk={"name": "id", "type": pk_type},
         generate_tests=generate_tests,
         route_prefix=route_prefix,
     )

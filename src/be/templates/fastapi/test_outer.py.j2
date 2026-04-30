@@ -266,10 +266,10 @@ async def test_{{ fn_name }}_unauthorized(
 # ---------------------------------------------------------------------------
 
 
-def test_to_{{ model_lower }}_resource_maps_fields() -> None:
+def test_to_{{ model_snake }}_resource_maps_fields() -> None:
     """Verify serializer maps all fields from ORM to schema."""
     obj = _mock_row()
-    result = to_{{ model_lower }}_resource(obj)
+    result = to_{{ model_snake }}_resource(obj)
 {% for f in serializer_fields %}
     assert result.{{ f.name }} == obj.{{ f.name }}
 {% endfor %}

@@ -36,6 +36,7 @@ from ingot.comms import (
     make_dispatch_entrypoint,
     send_communication,
 )
+from ingot.utils import compile_query
 
 # -------------------------------------------------------------------
 # Test fixtures: concrete mapped classes for the three mixins
@@ -508,6 +509,31 @@ class _StubRecipient:
         self.status = status
 
 
+def _stub_session(
+    *,
+    recipient: _StubRecipient | None,
+    message: _StubMessage | None = None,
+) -> AsyncMock:
+    """Set up an AsyncMock session for the dispatch handler's flow.
+
+    ``recipient`` is returned from the locking ``select(...)``;
+    ``message`` from the subsequent ``session.get(message_cls, ...)``.
+    """
+    locked_recipient = MagicMock()
+    locked_recipient.scalar_one_or_none = MagicMock(return_value=recipient)
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=locked_recipient)
+    session.commit = AsyncMock()
+    session.get = AsyncMock(return_value=message)
+    return session
+
+
+def _last_execute_stmt(session: AsyncMock) -> Any:
+    """Return the SQLAlchemy statement of the most recent execute call."""
+    return session.execute.call_args_list[-1].args[0]
+
+
 class TestMakeDispatchEntrypoint:
     @pytest.mark.asyncio
     async def test_marks_sent_on_transport_success(self):
@@ -516,10 +542,7 @@ class TestMakeDispatchEntrypoint:
         recipient = _StubRecipient(rid, mid, "email", "a@example.com")
         message = _StubMessage(mid)
 
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(side_effect=[recipient, message])
+        session = _stub_session(recipient=recipient, message=message)
 
         transport = LoggingTransport()
 
@@ -539,13 +562,9 @@ class TestMakeDispatchEntrypoint:
         assert sent_addr == "a@example.com"
         assert sent_body == "hello"
 
-        # Update statement was issued and committed.
-        session.execute.assert_awaited_once()
-        update_stmt = session.execute.call_args.args[0]
-        compiled = str(
-            update_stmt.compile(compile_kwargs={"literal_binds": True}),
-        )
-        assert "'sent'" in compiled
+        # First execute is the locking SELECT, second is the UPDATE.
+        assert session.execute.await_count == 2
+        assert "'sent'" in compile_query(_last_execute_stmt(session))
         session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -555,10 +574,7 @@ class TestMakeDispatchEntrypoint:
         recipient = _StubRecipient(rid, mid, "email", "a@example.com")
         message = _StubMessage(mid)
 
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(side_effect=[recipient, message])
+        session = _stub_session(recipient=recipient, message=message)
 
         class Boom:
             async def send(self, *, message, recipient):  # noqa: ARG002
@@ -574,10 +590,7 @@ class TestMakeDispatchEntrypoint:
 
         await handler(_job(str(rid).encode("utf-8")))
 
-        update_stmt = session.execute.call_args.args[0]
-        compiled = str(
-            update_stmt.compile(compile_kwargs={"literal_binds": True}),
-        )
+        compiled = compile_query(_last_execute_stmt(session))
         assert "'failed'" in compiled
         assert "smtp connection refused" in compiled
         session.commit.assert_awaited_once()
@@ -589,10 +602,7 @@ class TestMakeDispatchEntrypoint:
         recipient = _StubRecipient(rid, mid, "fax", "+1")
         message = _StubMessage(mid)
 
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(side_effect=[recipient, message])
+        session = _stub_session(recipient=recipient, message=message)
 
         handler = make_dispatch_entrypoint(
             session_factory=_stub_session_factory(session),
@@ -603,20 +613,25 @@ class TestMakeDispatchEntrypoint:
 
         await handler(_job(str(rid).encode("utf-8")))
 
-        update_stmt = session.execute.call_args.args[0]
-        compiled = str(
-            update_stmt.compile(compile_kwargs={"literal_binds": True}),
-        )
+        compiled = compile_query(_last_execute_stmt(session))
         assert "'failed'" in compiled
         assert "no transport" in compiled
 
     @pytest.mark.asyncio
-    async def test_skips_when_recipient_missing(self):
+    async def test_locks_recipient_row_on_load(self):
+        """Two workers can't both transition the same recipient to SENT.
+
+        Concrete check: the recipient is loaded via
+        ``select(...).with_for_update(skip_locked=True)`` so a
+        concurrent worker holding the row sees no row and bails
+        out before the transport runs.
+        """
         rid = uuid.uuid4()
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(return_value=None)
+        mid = uuid.uuid4()
+        recipient = _StubRecipient(rid, mid, "email", "a@example.com")
+        message = _StubMessage(mid)
+
+        session = _stub_session(recipient=recipient, message=message)
 
         handler = make_dispatch_entrypoint(
             session_factory=_stub_session_factory(session),
@@ -627,7 +642,30 @@ class TestMakeDispatchEntrypoint:
 
         await handler(_job(str(rid).encode("utf-8")))
 
-        session.execute.assert_not_called()
+        # First call to session.execute is the locking SELECT.
+        # ``SKIP LOCKED`` is Postgres-specific so render against the
+        # pg dialect to surface the modifier in the compiled SQL.
+        select_stmt = session.execute.call_args_list[0].args[0]
+        compiled = compile_query(select_stmt, dialect="postgres").upper()
+        assert "FOR UPDATE" in compiled
+        assert "SKIP LOCKED" in compiled
+
+    @pytest.mark.asyncio
+    async def test_skips_when_recipient_missing(self):
+        rid = uuid.uuid4()
+        session = _stub_session(recipient=None)
+
+        handler = make_dispatch_entrypoint(
+            session_factory=_stub_session_factory(session),
+            transports={"email": LoggingTransport()},
+            message_cls=_Message,
+            recipient_cls=_Recipient,
+        )
+
+        await handler(_job(str(rid).encode("utf-8")))
+
+        # Only the locking SELECT runs -- no UPDATE, no commit.
+        assert session.execute.await_count == 1
         session.commit.assert_not_called()
 
     @pytest.mark.asyncio
@@ -642,10 +680,7 @@ class TestMakeDispatchEntrypoint:
             status=DeliveryStatus.SENT.value,
         )
 
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(return_value=recipient)
+        session = _stub_session(recipient=recipient)
 
         handler = make_dispatch_entrypoint(
             session_factory=_stub_session_factory(session),
@@ -656,7 +691,8 @@ class TestMakeDispatchEntrypoint:
 
         await handler(_job(str(rid).encode("utf-8")))
 
-        session.execute.assert_not_called()
+        # Only the locking SELECT ran; no UPDATE, no commit.
+        assert session.execute.await_count == 1
         session.commit.assert_not_called()
 
     @pytest.mark.asyncio
@@ -665,10 +701,7 @@ class TestMakeDispatchEntrypoint:
         mid = uuid.uuid4()
         recipient = _StubRecipient(rid, mid, "email", "a@example.com")
 
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.get = AsyncMock(side_effect=[recipient, None])
+        session = _stub_session(recipient=recipient, message=None)
 
         handler = make_dispatch_entrypoint(
             session_factory=_stub_session_factory(session),
@@ -679,10 +712,7 @@ class TestMakeDispatchEntrypoint:
 
         await handler(_job(str(rid).encode("utf-8")))
 
-        update_stmt = session.execute.call_args.args[0]
-        compiled = str(
-            update_stmt.compile(compile_kwargs={"literal_binds": True}),
-        )
+        compiled = compile_query(_last_execute_stmt(session))
         assert "message row missing" in compiled
 
 

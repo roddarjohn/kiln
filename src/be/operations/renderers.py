@@ -28,6 +28,7 @@ from be.operations._naming import (
     object_specs_const,
 )
 from be.operations.list import ListResult
+from be.operations.representations import RepresentationSpec
 from be.operations.types import (
     EnumClass,
     Field,
@@ -110,7 +111,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     route_prefix = getattr(resource, "route_prefix", None)
 
     if not route_prefix:
-        route_prefix = f"/{model.lower}s"
+        route_prefix = f"/{model.slug}s"
 
     auth = getattr(config, "auth", None)
     session_schema = getattr(auth, "session_schema", None) if auth else None
@@ -121,8 +122,8 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
         app=app,
         package_prefix=package_prefix,
         route_prefix=route_prefix,
-        pk_name=getattr(resource, "pk", "id"),
-        pk_py_type=PYTHON_TYPES[resource.pk_type],
+        pk_name=resource.pk.name,
+        pk_py_type=PYTHON_TYPES[resource.pk.type],
         has_auth=auth is not None,
         session_schema=session_schema,
         session_module=db.session_module,
@@ -156,7 +157,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
       for common field types (uuid, datetime, date, Any).
     """
     info = _resource_info(ctx)
-    path = f"{info.app}/schemas/{info.model.lower}.py"
+    path = f"{info.app}/schemas/{info.model.snake}.py"
 
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
@@ -222,7 +223,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
 @registry.renders(EnumClass)
 def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    path = f"{info.app}/schemas/{info.model.lower}.py"
+    path = f"{info.app}/schemas/{info.model.snake}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
@@ -254,7 +255,7 @@ def _handler_fragment(
     :func:`_render_handler_string`).
     """
     info = _resource_info(ctx)
-    path = f"{info.app}/routes/{info.model.lower}.py"
+    path = f"{info.app}/routes/{info.model.snake}.py"
 
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
@@ -271,7 +272,7 @@ def _handler_fragment(
         imports.add_from("starlette", "status")
 
     schema_mod = prefix_import(
-        info.package_prefix, info.app, "schemas", info.model.lower
+        info.package_prefix, info.app, "schemas", info.model.snake
     )
 
     if handler.request_schema:
@@ -286,7 +287,7 @@ def _handler_fragment(
 
     if handler.serializer_fn:
         serializer_mod = handler.serializer_fn_module or prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
+            info.package_prefix, info.app, "serializers", info.model.snake
         )
         imports.add_from(serializer_mod, handler.serializer_fn)
 
@@ -298,7 +299,7 @@ def _handler_fragment(
         template="fastapi/route.py.j2",
         context={
             "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
+            "model_snake": info.model.snake,
             "route_prefix": info.route_prefix,
         },
     )
@@ -353,7 +354,7 @@ def _handler_context(
         "request_schema": handler.request_schema,
         # Resource-derived context every op body may reference.
         "model_name": info.model.pascal,
-        "model_lower": info.model.lower,
+        "model_snake": info.model.snake,
         "pk_name": info.pk_name,
         "pk_py_type": info.pk_py_type,
         "get_db_fn": info.get_db_fn,
@@ -401,12 +402,12 @@ def _serializer_fragment(
     ser: SerializerFn, ctx: RenderCtx
 ) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    ser_path = f"{info.app}/serializers/{info.model.lower}.py"
+    ser_path = f"{info.app}/serializers/{info.model.snake}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from(ser.model_module, ser.model_name)
     schema_mod = prefix_import(
-        info.package_prefix, info.app, "schemas", info.model.lower
+        info.package_prefix, info.app, "schemas", info.model.snake
     )
     imports.add_from(schema_mod, ser.schema_name)
 
@@ -423,6 +424,13 @@ def _serializer_fragment(
 
     else:
         rendered_fields = ser.fields
+
+    if ser.representation:
+        # Representation-mode serializers take ``session: Any`` so
+        # they slot in wherever a builder is expected (LINKS
+        # registry, get/list response path) without forcing the
+        # caller to import the project's session schema.
+        imports.add_from("typing", "Any")
 
     yield FileFragment(
         path=ser_path,
@@ -446,6 +454,7 @@ def _serializer_fragment(
                 for f in rendered_fields
             ],
             "include_actions": ser.include_actions,
+            "representation": ser.representation,
             **actions_context,
         },
         imports=imports,
@@ -455,12 +464,12 @@ def _serializer_fragment(
     # test template renders exactly one `test_to_{model}_resource_*`
     # function, so emitting from list_item too would duplicate the
     # mock-row assignments and assertions.
-    is_resource_ser = ser.function_name == f"to_{info.model.lower}_resource"
+    is_resource_ser = ser.function_name == f"to_{info.model.snake}_resource"
 
     if info.generate_tests and is_resource_ser:
-        test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+        test_path = f"tests/test_{info.app}_{info.model.snake}.py"
         ser_mod = prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
+            info.package_prefix, info.app, "serializers", info.model.snake
         )
         test_imports = ImportCollector()
         test_imports.add_from(ser_mod, ser.function_name)
@@ -496,9 +505,9 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     if not info.generate_tests:
         return
 
-    test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+    test_path = f"tests/test_{info.app}_{info.model.snake}.py"
     route_module = prefix_import(
-        info.package_prefix, info.app, "routes", info.model.lower
+        info.package_prefix, info.app, "routes", info.model.snake
     )
 
     imports = ImportCollector()
@@ -522,7 +531,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
         template="fastapi/test_outer.py.j2",
         context={
             "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
+            "model_snake": info.model.snake,
             "pk_name": info.pk_name,
             "pk_py_type": info.pk_py_type,
             "route_prefix": info.route_prefix,
@@ -561,6 +570,24 @@ def _list_result_fragment(
     The individual outputs it references (ListItem / SearchRequest /
     handler / etc.) are yielded separately by the list op and
     rendered through their own registered renderers.
+    """
+    return iter(())
+
+
+@registry.renders(RepresentationSpec)
+def _representation_spec_fragment(
+    _spec: RepresentationSpec, _ctx: RenderCtx
+) -> Iterator[Fragment]:
+    """RepresentationSpec is an internal handle; emit nothing.
+
+    Yielded by :class:`~be.operations.links.RepresentationSchemas`
+    so per-op builders (get / list / create / update) can fetch
+    the resolved schema-class + serializer wiring from the build
+    store via
+    :func:`~be.operations.representations.pick_representation`.
+    The schema class itself is rendered through the
+    :class:`~be.operations.types.SchemaClass` output the same op
+    yields alongside this spec.
     """
     return iter(())
 
@@ -669,13 +696,17 @@ def gate_wiring(
 def hooks_wiring(
     op: OperationConfig,
 ) -> tuple[dict[str, object], list[tuple[str, str]]]:
-    """Wire imports + body context for an op's ``pre`` / ``post`` hooks.
+    """Wire imports + body context for an op's hook callables.
 
-    Returns ``({}, [])`` when the op declares neither hook.  The
-    template references the hooks by their bare callable name
-    (``pre_hook_call`` / ``post_hook_call``); this function
-    splits the dotted path and registers the import so the bare
-    name resolves at runtime.
+    Resolves the three optional dotted-path hooks
+    (:attr:`OperationConfig.pre`, :attr:`OperationConfig.post`,
+    :attr:`OperationConfig.dump`) into ``(ctx, imports)``: the
+    template references each hook by its bare callable name
+    (``pre_hook_call`` / ``post_hook_call`` / ``dump_call``);
+    this function splits the dotted path and registers the import
+    so the bare name resolves at runtime.
+
+    Returns ``({}, [])`` when no hook is declared.
     """
     ctx: dict[str, object] = {}
     imports: list[tuple[str, str]] = []
@@ -683,16 +714,19 @@ def hooks_wiring(
     for slot, dotted in (
         ("pre_hook_call", op.pre),
         ("post_hook_call", op.post),
+        ("dump_call", op.dump),
     ):
         if dotted is None:
             continue
+
+        label = slot.removesuffix("_hook_call").removesuffix("_call")
 
         try:
             module, attr_name = Name.from_dotted(dotted)
 
         except ValueError as exc:
             msg = (
-                f"Operation {op.name!r}: {slot.removesuffix('_call')!r} "
+                f"Operation {op.name!r}: {label!r} "
                 f"must be a dotted path (got {dotted!r})"
             )
             raise ValueError(msg) from exc

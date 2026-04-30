@@ -969,8 +969,7 @@ class TestGet:
     def test_get_pk_param(self):
         resource = ResourceConfig(
             model="app.models.User",
-            pk="user_id",
-            pk_type="int",
+            pk={"name": "user_id", "type": "int"},
         )
         ctx = _operation_ctx(resource, OperationConfig(name="get"))
         result = list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
@@ -1698,7 +1697,7 @@ class TestPaginate:
             list_ctx,
             type_name="paginate",
             op_instance=Paginate(),
-            options=PaginateConfig(mode="keyset", cursor_field="id"),
+            options=PaginateConfig(mode="keyset"),
         )
         page = next(
             r
@@ -2213,8 +2212,7 @@ class TestUpdate:
     def test_update_test_case(self):
         resource = ResourceConfig(
             model="app.models.User",
-            pk="user_id",
-            pk_type="int",
+            pk={"name": "user_id", "type": "int"},
         )
         ctx = _operation_ctx(resource, OperationConfig(name="update"))
         opts = _FieldsOpts(fields=_FIELDS)
@@ -2312,8 +2310,7 @@ class TestDelete:
     def test_delete_pk_param(self):
         resource = ResourceConfig(
             model="app.models.Item",
-            pk="item_id",
-            pk_type="str",
+            pk={"name": "item_id", "type": "str"},
         )
         ctx = _operation_ctx(resource, OperationConfig(name="delete"))
         result = list(Delete().build(ctx, _Empty()))

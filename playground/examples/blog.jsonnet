@@ -20,8 +20,7 @@ local resource = import "be/resources/presets.libsonnet";
     // Authors: read-only (get + list), with nested one-to-many articles dump
     {
       model: "blog.models.Author",
-      pk: "id",
-      pk_type: "uuid",
+      pk: { name: "id", type: "uuid" },
       require_auth: false,
 
       operations: [
@@ -56,8 +55,7 @@ local resource = import "be/resources/presets.libsonnet";
     // Articles: full CRUD — specific fields per operation, two actions
     {
       model: "blog.models.Article",
-      pk: "id",
-      pk_type: "uuid",
+      pk: { name: "id", type: "uuid" },
       require_auth: false,
 
       operations: [
@@ -143,8 +141,7 @@ local resource = import "be/resources/presets.libsonnet";
     // Tags: full CRUD, int PK, no auth
     {
       model: "blog.models.Tag",
-      pk: "id",
-      pk_type: "int",
+      pk: { name: "id", type: "int" },
       require_auth: false,
 
       operations: [

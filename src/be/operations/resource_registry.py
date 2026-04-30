@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from be.config.schema import (
     AppConfig,
     ProjectConfig,
+    RepresentationConfig,
     ResourceConfig,
     StructuredFilterField,
 )
@@ -268,7 +269,7 @@ def _build_entry(
     per-app ``REF_RESOLVERS`` registry when it needs link shapes.
     """
     model_module, model = Name.from_dotted(resource.model)
-    slug = model.lower
+    slug = model.snake
 
     imports.append((model_module, model.pascal))
 
@@ -282,20 +283,12 @@ def _build_entry(
     search_columns: list[str] = []
 
     if resource.searchable:
-        link = resource.link
-
-        if link is None:  # pragma: no cover -- validator catches this
-            msg = (
-                f"Resource {resource.model!r}: searchable=True without "
-                f"a link config; cross-resource validator should have "
-                f"caught this."
-            )
-            raise ValueError(msg)
+        default_rep = _resolve_default_representation(resource)
 
         search_columns = (
             list(resource.search.fields)
             if resource.search is not None
-            else _default_search_fields(link)
+            else _default_search_fields(default_rep)
         )
 
     columns_src = ", ".join(repr(c) for c in search_columns)
@@ -306,7 +299,7 @@ def _build_entry(
     return {
         "slug": slug,
         "model_name": model.pascal,
-        "pk": resource.pk,
+        "pk": resource.pk.name,
         "fields": fields_src,
         "search_columns": columns_src,
     }
@@ -342,7 +335,7 @@ def _build_schema_entry(
     each generated module imports just what it needs).
     """
     _, model = Name.from_dotted(resource.model)
-    slug = model.lower
+    slug = model.snake
     pascal = model.pascal
 
     field_schemas: list[dict[str, object]] = []
@@ -436,19 +429,54 @@ def _join_union(members: list[str]) -> str:
     return " | ".join(members)
 
 
-def _default_search_fields(link: object) -> list[str]:
+def _resolve_default_representation(
+    resource: ResourceConfig,
+) -> RepresentationConfig:
+    """Locate *resource*'s default representation.
+
+    The cross-resource project validator already enforced that a
+    searchable / referenced / self-filter resource carries a
+    valid :attr:`~be.config.schema.ResourceConfig.default_representation`
+    naming a real entry, so a missing match here is a programmer
+    error.
+    """
+    name = resource.default_representation
+
+    if name is None:  # pragma: no cover -- validator catches this
+        msg = (
+            f"Resource {resource.model!r}: searchable=True without "
+            f"default_representation; cross-resource validator "
+            f"should have caught this."
+        )
+        raise ValueError(msg)
+
+    for rep in resource.representations:
+        if rep.name == name:
+            return rep
+
+    msg = (  # pragma: no cover -- ResourceConfig validator catches this
+        f"Resource {resource.model!r}: default_representation="
+        f"{name!r} not in representations."
+    )
+    raise AssertionError(msg)
+
+
+def _default_search_fields(rep: RepresentationConfig) -> list[str]:
     """Default search columns for a resource that opts into search.
 
     When a resource sets ``searchable`` without an explicit
-    :attr:`SearchConfig.fields`, the project-wide search uses the
-    link's ``name`` column (when shorthand and named) and skips
-    ``q``-filtering otherwise.
+    :attr:`SearchConfig.fields`, the project-wide search picks the
+    first ``str``-typed entry in the default representation's
+    ``fields`` and ILIKEs against it.  A builder-driven
+    representation or one with no string field means no default;
+    ``q``-filtering is skipped.
     """
-    name = getattr(link, "name", None)
-    builder = getattr(link, "builder", None)
+    if rep.builder is not None:
+        return []
 
-    if builder is None and name:
-        return [name]
+    for field in rep.fields:
+        if field.type == "str":
+            return [field.name]
 
     return []
 

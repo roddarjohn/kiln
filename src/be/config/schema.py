@@ -1,12 +1,82 @@
 """Pydantic models for be configuration."""
 
-from typing import Annotated, Any, Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from foundry.config import FoundryConfig
+from foundry.config import ExtensibleConfig, FoundryConfig
 from foundry.naming import Name
 from foundry.scope import Scoped
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
+def _reject_duplicates(
+    items: Iterable[tuple[str, str]],
+    *,
+    message: str,
+) -> None:
+    """Raise ``ValueError`` if any key in *items* repeats.
+
+    Shared backend for every "no duplicates" config validator:
+    :attr:`AuthConfig.sources`, :attr:`CommsConfig.types`,
+    :attr:`ResourceConfig.representations`, and the
+    cross-resource slug-collision check on :class:`ProjectConfig`.
+
+    Each item is a ``(key, source)`` pair.  The *key* is what gets
+    deduplicated (a transport literal, a name, a slug); the
+    *source* labels which input owns it -- typically equal to the
+    key (uniqueness within a flat list) but distinct for the
+    cross-resource case where two different resource models can
+    snake to the same slug.  When a collision pairs different
+    sources the error names both so the broken pair is
+    pinpointed; when sources match the key, only the key is
+    shown.
+
+    All keys are collected before raising so a single error names
+    every offender at once rather than failing fast on the first.
+
+    Args:
+        items: Iterable of ``(key, source)`` string pairs.  For
+            the simple per-list case pass
+            ``((value, value) for value in self.list)``; for
+            cross-source collision pass
+            ``((extracted_key, owning_source) for ...)``.
+        message: Human-readable preamble for the exception.
+
+    Raises:
+        ValueError: When *items* contains any repeated key.
+
+    """
+    first: dict[str, str] = {}
+    collisions: list[str] = []
+
+    for key, source in items:
+        prior = first.get(key)
+
+        if prior is None:
+            first[key] = source
+            continue
+
+        # Render the colliding labels only when they add information
+        # over the key itself -- the simple flat-list case
+        # ("bearer" appearing twice as both key and source) reads
+        # better as just ``'bearer'``.
+        if prior == key and source == key:
+            collisions.append(repr(key))
+
+        else:
+            collisions.append(
+                f"{key!r} (between {prior!r} and {source!r})",
+            )
+
+    if collisions:
+        msg = f"{message}: {', '.join(collisions)}"
+        raise ValueError(msg)
+
 
 NESTED: Literal["nested"] = "nested"
 """Sentinel value for :attr:`FieldSpec.type` that marks a field as a
@@ -65,6 +135,49 @@ consumer-supplied class name (the enum / model class) that the
 schema renderer imports from :attr:`FieldSpec.enum` /
 :attr:`FieldSpec.model`.
 """
+
+
+# Scalar types valid as a column reference -- ``"nested"`` and
+# ``"enum"`` are FieldSpec-only sentinels that don't make sense for
+# a primary key or pagination cursor.
+ScalarType = Literal[
+    "uuid",
+    "str",
+    "email",
+    "int",
+    "float",
+    "bool",
+    "datetime",
+    "date",
+    "json",
+]
+
+
+class ColumnRef(BaseModel):
+    """A reference to a single typed column on the consumer's model.
+
+    Two config knobs share this shape: a resource's primary key
+    (:attr:`ResourceConfig.pk`) and a paginator's cursor
+    (:attr:`PaginateConfig.cursor`).  Bundling the name and type
+    keeps them mutually consistent (the type drives the path-param
+    annotation generated for the pk; the cursor's type drives the
+    keyset cursor encoding) and lets callers pass a single value
+    around instead of an ``(name, type)`` pair.
+
+    Defaults assume the most common shape -- ``id`` column typed as
+    ``uuid`` -- so consumers using that convention can omit the
+    block entirely.  Override per resource when the model uses a
+    different name (``slug``, ``code``, ...) or a different scalar
+    type (``int``, ``str``, ...).
+    """
+
+    name: str = "id"
+    """Attribute name on the SQLAlchemy model class
+    (e.g. ``"id"``)."""
+
+    type: ScalarType = "uuid"
+    """Scalar type of the column.  Drives the Python annotation
+    rendered for path params and cursor parsing."""
 
 
 class AuthConfig(BaseModel):
@@ -154,10 +267,10 @@ class AuthConfig(BaseModel):
 
     @model_validator(mode="after")
     def _sources_unique(self) -> AuthConfig:
-        if len(set(self.sources)) != len(self.sources):
-            msg = f"sources must not contain duplicates: {self.sources}"
-            raise ValueError(msg)
-
+        _reject_duplicates(
+            ((source, source) for source in self.sources),
+            message="sources must not repeat",
+        )
         return self
 
     @model_validator(mode="after")
@@ -533,22 +646,10 @@ class CommsConfig(BaseModel):
         template rendering -- and the duplicate-name error has no
         useful diagnostic at runtime beyond "already registered".
         """
-        seen: set[str] = set()
-        dupes: list[str] = []
-
-        for entry in self.types:
-            if entry.name in seen:
-                dupes.append(entry.name)
-
-            seen.add(entry.name)
-
-        if dupes:
-            msg = (
-                f"comm types must have unique names; duplicates: "
-                f"{sorted(set(dupes))!r}"
-            )
-            raise ValueError(msg)
-
+        _reject_duplicates(
+            ((entry.name, entry.name) for entry in self.types),
+            message="comm types must have unique names",
+        )
         return self
 
 
@@ -717,7 +818,7 @@ class FieldSpec(BaseModel):
         return self.type == ENUM
 
 
-class ModifierConfig(BaseModel):
+class ModifierConfig(ExtensibleConfig):
     """Configuration for an op modifier.
 
     Modifiers nest inside their parent op's config (under
@@ -734,17 +835,10 @@ class ModifierConfig(BaseModel):
     operation-scope entries.
     """
 
-    model_config = ConfigDict(extra="allow")
-
     type: str
 
-    @property
-    def options(self) -> dict[str, Any]:
-        """Modifier-specific options (all extra fields)."""
-        return self.model_extra or {}
 
-
-class OperationConfig(BaseModel):
+class OperationConfig(ExtensibleConfig):
     """Configuration for a single operation.
 
     Known fields (``name``, ``require_auth``) are parsed normally.
@@ -774,8 +868,6 @@ class OperationConfig(BaseModel):
         # Custom third-party operation
         {"name": "bulk_create", "class": "my_pkg.ops.BulkOp", "max": 100}
     """
-
-    model_config = ConfigDict(extra="allow")
 
     name: str
     type: str | None = None
@@ -853,6 +945,40 @@ class OperationConfig(BaseModel):
     request body so the consumer can fan out side effects
     (cache invalidation, audit log, downstream notification).
     Same op restrictions as :attr:`pre`."""
+    dump: str | None = None
+    """Dotted path to a sync ``(body) -> dict[str, Any]`` function
+    that maps the parsed request body to the kwargs for the
+    SQL write -- ``insert(...).values(**dump(body))`` on create
+    and ``update(...).values(**dump(body))`` on update.
+
+    When ``None``, the generated handler uses
+    ``body.model_dump()`` for create and
+    ``body.model_dump(exclude_unset=True)`` for update.  Override
+    when the request shape doesn't map 1:1 to columns: a flat
+    ``address_*`` cluster folded into a JSONB column, a derived
+    ``slug`` computed from ``title``, a denormalised tag list
+    written to a join table by the caller, etc.
+
+    Same op restrictions as :attr:`pre` -- only meaningful on
+    ``create`` and ``update``.  The function runs after :attr:`pre`
+    (so the dump sees the pre-processed body) and inside the SQL
+    write, so it should be cheap and pure -- use :attr:`pre` for
+    anything that needs ``db``."""
+    representation: str | None = None
+    """Name of a representation declared on the resource (see
+    :attr:`ResourceConfig.representations`) used as the response
+    shape:
+
+    * On ``get`` / ``list``: drives the response schema.  Falls
+      back to :attr:`ResourceConfig.default_representation` when
+      unset; if neither is set, the op's ``fields:`` declares an
+      ad-hoc per-op shape (legacy path).
+    * On ``create`` / ``update``: when set, the handler returns
+      the just-written row through the representation's builder
+      (response carries a body); when unset, the handler returns
+      no body (201 / 200, today's behaviour).
+
+    Mutually exclusive with the read-op ``fields:`` shorthand."""
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
@@ -860,28 +986,23 @@ class OperationConfig(BaseModel):
     outputs.  Today only the list op consumes modifiers (Filter /
     Order / Paginate); every other op leaves this empty."""
 
-    @property
-    def options(self) -> dict[str, Any]:
-        """Operation-specific options (all extra fields)."""
-        return self.model_extra or {}
-
     @model_validator(mode="after")
     def _hooks_only_on_write_ops(self) -> OperationConfig:
-        """Reject ``pre`` / ``post`` on ops that don't support them.
+        """Reject ``pre`` / ``post`` / ``dump`` on unsupported ops.
 
-        The hooks wrap a parsed request body and a freshly
+        These hooks wrap a parsed request body and a freshly
         written row, so they're only meaningful on the built-in
         write ops (``create``, ``update``).  ``get`` / ``delete``
         / ``list`` have no body to pre-process and ``action``
         already calls a user-supplied function -- adding a
         second hook layer would just duplicate that path.
         """
-        if self.pre is None and self.post is None:
+        if self.pre is None and self.post is None and self.dump is None:
             return self
 
         if self.type == "action":
             msg = (
-                f"Operation {self.name!r}: pre/post hooks are not "
+                f"Operation {self.name!r}: pre/post/dump hooks are not "
                 f"supported on action ops -- the action's own fn "
                 f"is the user-defined entry point."
             )
@@ -890,7 +1011,7 @@ class OperationConfig(BaseModel):
         if self.name not in _HOOK_SUPPORTED_OPS:
             allowed = ", ".join(sorted(_HOOK_SUPPORTED_OPS))
             msg = (
-                f"Operation {self.name!r}: pre/post hooks are only "
+                f"Operation {self.name!r}: pre/post/dump hooks are only "
                 f"supported on {allowed}."
             )
             raise ValueError(msg)
@@ -911,74 +1032,64 @@ class SearchConfig(BaseModel):
     Drives the project-wide ``POST /_values`` endpoint when called
     with ``fields=[]`` for this resource: each name in
     :attr:`fields` becomes a column in a pg_trgm union, ranked by
-    similarity to ``q``.  Empty ``fields`` defaults to the
-    resource's :attr:`LinkConfig.name` column.
+    similarity to ``q``.  Empty ``fields`` defaults to the first
+    ``str``-typed entry in :attr:`LinkConfig.fields`.
     """
 
     fields: list[str] = Field(default_factory=list)
     """Model attribute names to trigram-match against ``q``.
-    Defaults to ``[link.name]`` when empty."""
+    Defaults to the first ``str``-typed field in the resource's
+    default representation (see
+    :attr:`ResourceConfig.default_representation`) when empty."""
 
 
-LinkKind = Literal["name", "id", "id_name"]
-"""Built-in link-schema kinds.  Each generates a per-resource
-``{Model}Link`` Pydantic class in the resource's schemas file:
+class RepresentationConfig(BaseModel):
+    """A named serialization shape for a resource.
 
-* ``"name"`` → ``{Model}Link`` with ``type`` + ``name``.
-* ``"id"`` → ``{Model}Link`` with ``type`` + ``id``.
-* ``"id_name"`` → ``{Model}Link`` with ``type`` + ``id`` + ``name``.
+    A representation is a Pydantic class describing what fields a
+    resource exposes in some context.  Resources can declare any
+    number; ops (get / list / create / update) reference one by
+    name to drive their response shape, and
+    :attr:`ResourceConfig.default_representation` picks the one
+    used by saved-view hydration and ``ref`` filter autocomplete.
 
-``type`` is always a ``Literal[<slug>]`` so the FE-side OpenAPI
-client narrows on resource type without a manual cast."""
+    Each entry in :attr:`fields` becomes a typed field on the
+    generated ``{Model}{NamePascal}`` class; the auto-generated
+    builder reads the named attribute straight off the model.  The
+    schema always carries a ``type: Literal[<resource_slug>]``
+    discriminator so payloads are narrow-able when collected into
+    cross-resource unions (saved views, ref autocomplete).
 
-
-class LinkConfig(BaseModel):
-    """How a resource serializes when referenced as a link.
-
-    Either declare model-attribute shorthands (``name`` / ``id``)
-    so the codegen generates a builder that pulls those attributes
-    directly off the model, or provide a ``builder:`` dotted path
-    for arbitrary logic.  Mutually exclusive — if ``builder`` is
-    set, shorthand fields must be omitted.
+    Set :attr:`builder` instead when the payload needs custom
+    logic (joining related rows, formatting, async work).
+    Mutually exclusive with :attr:`fields`.
     """
 
-    kind: LinkKind
-    """Which built-in link schema this resource produces.  See
-    :data:`LinkKind`."""
+    name: str
+    """Identifier for this representation (e.g. ``"default"``,
+    ``"detail"``, ``"lite"``).  Operations and the resource's
+    ``default_representation`` reference it by name.  The generated
+    Pydantic class is named ``{Model}{NamePascal}``."""
 
-    name: str | None = None
-    """Model attribute holding the display name, used by shorthand
-    when ``kind`` is ``"name"`` or ``"id_name"``.  Required for
-    those kinds unless ``builder`` is set."""
-
-    id: str | None = None
-    """Model attribute holding the link id, used by shorthand when
-    ``kind`` is ``"id"`` or ``"id_name"``.  Defaults to the
-    resource's primary key (``ResourceConfig.pk``); set explicitly
-    to override."""
+    fields: list[ColumnRef] = Field(default_factory=list)
+    """Scalar fields to include in the dump.  Each :class:`ColumnRef`
+    names a model attribute and its type; the schema renders one
+    typed field per entry.  Empty yields a schema carrying only
+    the ``type`` discriminator -- enough to identify the resource
+    type in a cross-resource list."""
 
     builder: str | None = None
     """Dotted import path to an async callable
-    ``(instance, session) -> LinkSchema`` that returns the link
-    schema instance.  Overrides shorthand."""
+    ``(instance, session) -> {Model}{NamePascal}`` that returns
+    the representation instance.  Mutually exclusive with
+    :attr:`fields`."""
 
     @model_validator(mode="after")
-    def _validate_shorthand(self) -> LinkConfig:
-        if self.builder is not None:
-            if self.name is not None or self.id is not None:
-                msg = (
-                    "LinkConfig: provide either `builder` or "
-                    "shorthand fields (`name` / `id`), not both."
-                )
-                raise ValueError(msg)
-
-            return self
-
-        if self.kind in {"name", "id_name"} and self.name is None:
+    def _builder_excludes_fields(self) -> RepresentationConfig:
+        if self.builder is not None and self.fields:
             msg = (
-                f"LinkConfig: kind={self.kind!r} requires either "
-                f"`name` (model attribute holding the display name) "
-                f"or `builder`."
+                f"Representation {self.name!r}: provide either "
+                f"`builder` or `fields`, not both."
             )
             raise ValueError(msg)
 
@@ -1005,16 +1116,14 @@ class ResourceConfig(BaseModel):
     """Dotted import path to the consumer's SQLAlchemy model class,
     e.g. ``"myapp.models.Article"``."""
 
-    pk: str = "id"
-    """Primary-key attribute name on the model."""
-
-    pk_type: FieldType = "uuid"
-    """Type of the primary key, used to generate the correct path
-    parameter."""
+    pk: ColumnRef = Field(default_factory=ColumnRef)
+    """Primary-key column on the model.  ``{name, type}`` -- defaults
+    to ``{name: "id", type: "uuid"}``."""
 
     route_prefix: str | None = None
     """URL prefix for this resource's router, e.g. ``"/articles"``.
-    Defaults to ``"/{model_lower}s"`` (simple lowercase + 's').
+    Defaults to ``"/{model_slug}s"`` (hyphenated lowercase + 's',
+    e.g. ``"/articles"`` / ``"/notification-preferences"``).
     """
 
     db_key: str | None = None
@@ -1062,28 +1171,74 @@ class ResourceConfig(BaseModel):
     searchable: bool = False
     """When ``True``, generate ``POST /{prefix}/_values`` — a
     resource-level search endpoint returning items shaped by the
-    resource's :attr:`link` schema.  Powers ``ref`` filter inputs
-    on other resources and any FE "search this table" affordance.
-    Requires :attr:`link` to be set."""
+    resource's default representation.  Powers ``ref`` filter
+    inputs on other resources and any FE "search this table"
+    affordance.  Requires :attr:`default_representation`."""
 
     search: SearchConfig | None = None
     """Search-field configuration for the resource-level
     ``_values`` endpoint.  When unset, the endpoint ILIKE's the
-    resource's :attr:`LinkConfig.name` column (or skips
-    ``q``-filtering entirely for builder-only / id-only links).
-    Set to override with an explicit list of model attributes —
-    e.g. when the consumer wants free-text search across both
-    ``sku`` and ``name``.  Only meaningful when :attr:`searchable`
-    is on."""
+    first ``str``-typed field on the default representation (or
+    skips ``q``-filtering entirely for builder-only / empty
+    representations).  Set to override with an explicit list of
+    model attributes — e.g. when the consumer wants free-text
+    search across both ``sku`` and ``name``.  Only meaningful
+    when :attr:`searchable` is on."""
 
-    link: LinkConfig | None = None
-    """How this resource serializes as a link.  Required when
-    :attr:`searchable` is on, and when any other resource's
-    filter has ``values: "ref"`` pointing here."""
+    representations: list[RepresentationConfig] = Field(default_factory=list)
+    """Named serialization shapes for this resource.  Each entry
+    becomes a Pydantic class ``{Model}{NamePascal}`` that ops can
+    return as their response shape via
+    :attr:`OperationConfig.representation`.
+
+    The :attr:`default_representation` names the one used by
+    saved-view hydration / ``ref`` autocomplete / self-filter
+    values; required when those features are in play."""
+
+    default_representation: str | None = None
+    """Name of the representation used by saved-view hydration,
+    ``ref`` filter autocomplete, and ``values: "self"`` filters.
+    Must match one of :attr:`representations`.  Required when the
+    resource is :attr:`searchable`, has a self-filter, or is
+    referenced via a ``ref`` filter from another resource."""
 
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
+
+    @model_validator(mode="after")
+    def _representation_names_unique(self) -> ResourceConfig:
+        """Reject duplicate :attr:`RepresentationConfig.name` entries.
+
+        Each name maps to one generated Pydantic class; two entries
+        with the same name would race to register the same class.
+        """
+        _reject_duplicates(
+            ((rep.name, rep.name) for rep in self.representations),
+            message=(
+                f"Resource {self.model!r}: duplicate representation names"
+            ),
+        )
+        return self
+
+    @model_validator(mode="after")
+    def _default_representation_exists(self) -> ResourceConfig:
+        """Reject :attr:`default_representation` that doesn't match a rep."""
+        if self.default_representation is None:
+            return self
+
+        names = {rep.name for rep in self.representations}
+
+        if self.default_representation not in names:
+            msg = (
+                f"Resource {self.model!r}: "
+                f"default_representation={self.default_representation!r} "
+                f"is not declared in `representations` (have: "
+                f"{sorted(names)!r})"
+            )
+            raise ValueError(msg)
+
+        return self
 
     @model_validator(mode="after")
     def _reserve_actions_field_name(self) -> ResourceConfig:
@@ -1118,17 +1273,25 @@ class ResourceConfig(BaseModel):
 
         return self
 
+    @property
+    def slug(self) -> str:
+        """Snake-case identifier derived from the model class name.
 
-def _resource_class_lower(resource: ResourceConfig) -> str:
-    """Lower-cased class name of *resource*'s model.
+        Used as the resource's per-project key in:
 
-    Matches :func:`be.operations.routing._resource_module_slug`
-    so ``ref_resource`` strings resolve to the same identifier the
-    URL prefix uses.
-    """
-    _, model = Name.from_dotted(resource.model)
+        * the generated route module name (``{app}/routes/{slug}.py``);
+        * the URL prefix default (``"/<plural>"``);
+        * cross-resource ``ref_resource:`` filter targets;
+        * the saved-view / ref-autocomplete registries.
 
-    return model.lower
+        Two resources whose model class names snake to the same
+        slug collide on every one of these surfaces; the
+        project-level
+        :meth:`ProjectConfig._slugs_unique_across_apps` validator
+        catches that and points at the offending pair.
+        """
+        _, model = Name.from_dotted(self.model)
+        return model.snake
 
 
 class AppConfig(BaseModel):
@@ -1322,25 +1485,70 @@ class ProjectConfig(FoundryConfig):
                         )
                         raise ValueError(msg)
 
+                if resource.representations:
+                    msg = (
+                        f"Resource {resource.model!r} declares "
+                        f"`representations` but the project has no auth "
+                        f"configured.  Representation builders take a "
+                        f"``session`` argument; without auth the "
+                        f"generated handler has no session to pass.  "
+                        f"Configure project.auth or drop the "
+                        f"representations."
+                    )
+                    raise ValueError(msg)
+
         return self
 
     @model_validator(mode="after")
-    def _link_required_for_searchable_and_ref_targets(
+    def _default_representation_required_for_cross_resource(
         self,
     ) -> ProjectConfig:
-        """Reject opt-ins that need a link without one.
+        """Reject opt-ins that need a default representation without one.
 
-        ``searchable=True`` serializes results via the resource's
-        :class:`LinkConfig`; any other resource's filter using
-        ``values: "ref"`` to point here does the same on the
-        target side.  Each requires :attr:`ResourceConfig.link`.
+        ``searchable=True`` serves results shaped by the resource's
+        default representation; any other resource's filter using
+        ``values: "ref"`` to point here serialises the linked rows
+        the same way; ``values: "self"`` filters do too.  Each
+        requires :attr:`ResourceConfig.default_representation`
+        (which itself requires a matching entry in
+        :attr:`ResourceConfig.representations`).
         """
         ref_targets = _collect_ref_targets(self)
 
         for app in self.apps:
             for resource in app.config.resources:
-                _check_resource_link(resource, ref_targets)
+                _check_resource_default_representation(resource, ref_targets)
 
+        return self
+
+    @model_validator(mode="after")
+    def _slugs_unique_across_apps(self) -> ProjectConfig:
+        """Reject two resources that snake to the same slug.
+
+        Resource slugs (snake-cased model class names) key every
+        cross-resource surface: the route module name, the
+        ``ref_resource:`` filter target, the saved-view /
+        ref-autocomplete registry, the project-wide ``_values``
+        endpoint dispatch.  Two resources whose class names
+        collapse to the same slug -- ``app1.models.Customer`` and
+        ``app2.models.Customer``, ``Foo`` and ``foo`` -- collide on
+        all of them silently.  ``_reject_duplicates`` reports the
+        offending pair (slug + each resource's dotted model path)
+        so the error pinpoints which two classes need renaming.
+        """
+        _reject_duplicates(
+            (
+                (resource.slug, resource.model)
+                for app in self.apps
+                for resource in app.config.resources
+            ),
+            message=(
+                "resource slugs collide across apps "
+                "(rename one of the model classes; slugs key the "
+                "route module, ref filter target, saved-view "
+                "registry, and ``_values`` dispatch)"
+            ),
+        )
         return self
 
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
@@ -1429,16 +1637,16 @@ def _has_self_filter(resource: ResourceConfig) -> bool:
     return False
 
 
-def _check_resource_link(
+def _check_resource_default_representation(
     resource: ResourceConfig, ref_targets: set[str]
 ) -> None:
-    """Raise if *resource* needs a link config but doesn't have one."""
-    slug = _resource_class_lower(resource)
+    """Raise if *resource* needs ``default_representation`` but lacks it."""
+    slug = resource.slug
     referenced = slug in ref_targets
     has_self = _has_self_filter(resource)
-    needs_link = resource.searchable or referenced or has_self
+    needs_default = resource.searchable or referenced or has_self
 
-    if not needs_link or resource.link is not None:
+    if not needs_default or resource.default_representation is not None:
         return
 
     reasons: list[str] = []
@@ -1455,9 +1663,10 @@ def _check_resource_link(
         reasons.append('its own filters include `values: "self"`')
 
     msg = (
-        f"Resource {resource.model!r} requires `link` because "
-        f"{', '.join(reasons)}; set `link: {{ kind: ..., name: ... }}` "
-        f"or provide a `link.builder` dotted path."
+        f"Resource {resource.model!r} requires `default_representation` "
+        f"because {', '.join(reasons)}; declare an entry in "
+        f"`representations` (e.g. ``[{{name: 'default', fields: [...]}}]``) "
+        f"and set ``default_representation: 'default'``."
     )
     raise ValueError(msg)
 
@@ -1630,7 +1839,9 @@ class PaginateConfig(BaseModel):
     """Configuration for list pagination."""
 
     mode: Literal["keyset", "offset"] = "keyset"
-    cursor_field: str = "id"
-    cursor_type: FieldType = "uuid"
+    cursor: ColumnRef = Field(default_factory=ColumnRef)
+    """Cursor column for keyset pagination.  ``{name, type}`` --
+    defaults to ``{name: "id", type: "uuid"}``.  Ignored when
+    :attr:`mode` is ``"offset"``."""
     max_page_size: int = 100
     default_page_size: int = 20

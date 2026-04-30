@@ -32,9 +32,9 @@ from be.config.schema import (
     AppConfig,
     AuthConfig,
     DatabaseConfig,
-    LinkConfig,
     OperationConfig,
     ProjectConfig,
+    RepresentationConfig,
     ResourceConfig,
 )
 from be.target import target
@@ -65,12 +65,21 @@ _SAVED_VIEW_FIELDS = [
 ]
 
 
+_DEFAULT_LINK_FIELDS = [
+    {"name": "id", "type": "uuid"},
+    {"name": "name", "type": "str"},
+]
+
+
 def _customer() -> ResourceConfig:
     return ResourceConfig(
         model="inventory.models.Customer",
         route_prefix="/customers",
         searchable=True,
-        link=LinkConfig(kind="id_name", name="name"),
+        representations=[
+            RepresentationConfig(name="default", fields=_DEFAULT_LINK_FIELDS),
+        ],
+        default_representation="default",
         operations=[
             OperationConfig(name="list", fields=_CUSTOMER_FIELDS),
         ],
@@ -79,11 +88,15 @@ def _customer() -> ResourceConfig:
 
 def _product() -> ResourceConfig:
     """Product references Customer via a ref filter; Customer
-    therefore needs a link by the cross-resource validator."""
+    therefore needs a default_representation by the cross-resource
+    validator."""
     return ResourceConfig(
         model="inventory.models.Product",
         route_prefix="/products",
-        link=LinkConfig(kind="id_name", name="name"),
+        representations=[
+            RepresentationConfig(name="default", fields=_DEFAULT_LINK_FIELDS),
+        ],
+        default_representation="default",
         operations=[
             OperationConfig(
                 name="list",
@@ -118,8 +131,7 @@ def _saved_view() -> ResourceConfig:
     """
     return ResourceConfig(
         model="inventory.models.SavedView",
-        pk="id",
-        pk_type="str",
+        pk={"name": "id", "type": "str"},
         route_prefix="/saved-views",
         require_auth=True,
         operations=[
@@ -199,25 +211,27 @@ def test_every_generated_python_file_parses(files: dict[str, str]) -> None:
 
 
 def test_links_registry_emitted(files: dict[str, str]) -> None:
-    """Linked resources show up in inventory/links.py with builders
-    *and* ref resolvers, importing per-resource link schemas."""
+    """Resources with a default representation show up in
+    ``inventory/links.py`` with builders *and* ref resolvers,
+    importing the per-resource representation schema (named after
+    the default representation, e.g. ``CustomerDefault``)."""
     links = files["inventory/links.py"]
 
-    # Per-resource link schemas imported from generated schemas.
+    # Per-resource default-rep schemas imported from generated schemas.
     assert (
-        "from _generated.inventory.schemas.customer import CustomerLink"
+        "from _generated.inventory.schemas.customer import CustomerDefault"
         in links
     )
     assert (
-        "from _generated.inventory.schemas.product import ProductLink" in links
+        "from _generated.inventory.schemas.product import ProductDefault"
+        in links
     )
     assert "from inventory.models import Customer, Product" in links
-    # Generated link builders for shorthand entries return the
-    # per-resource link schema (typed by Literal[<slug>]).
+    # Generated builders return the typed default representation.
     assert "async def _link_customer(" in links
-    assert "-> CustomerLink:" in links
+    assert "-> CustomerDefault:" in links
     assert "async def _link_product(" in links
-    assert "-> ProductLink:" in links
+    assert "-> ProductDefault:" in links
     # Per-resource ref resolvers used by saved-view hydration.
     assert "async def _resolve_customer_refs(" in links
     assert "async def _resolve_product_refs(" in links
@@ -226,21 +240,22 @@ def test_links_registry_emitted(files: dict[str, str]) -> None:
     assert '"customer": _resolve_customer_refs' in links
 
 
-def test_link_schema_emitted_in_resource_schemas(
+def test_representation_schema_emitted_in_resource_schemas(
     files: dict[str, str],
 ) -> None:
-    """Each linked resource's schemas file gains ``{Model}Link`` —
-    ``type`` is a ``Literal[<slug>]`` so the FE-side OpenAPI gets
-    a proper discriminator."""
+    """Each declared representation produces a Pydantic class.  The
+    ``type`` field is a ``Literal[<slug>]`` discriminator so payloads
+    can be narrowed in cross-resource unions (saved views, ref
+    autocomplete)."""
     customer_schemas = files["inventory/schemas/customer.py"]
 
-    assert "class CustomerLink(BaseModel):" in customer_schemas
+    assert "class CustomerDefault(BaseModel):" in customer_schemas
     assert 'type: Literal["customer"] = "customer"' in customer_schemas
     assert "id: uuid.UUID" in customer_schemas
     assert "name: str" in customer_schemas
 
     product_schemas = files["inventory/schemas/product.py"]
-    assert "class ProductLink(BaseModel):" in product_schemas
+    assert "class ProductDefault(BaseModel):" in product_schemas
     assert 'type: Literal["product"] = "product"' in product_schemas
 
 
@@ -255,7 +270,9 @@ def test_searchable_contributes_search_columns(
     assert '@router.post("/_values"' not in routes
 
     registry = files["resources/__init__.py"]
-    # Customer entry exists with default search columns from link.name.
+    # Customer entry exists.  Default search columns fall back to
+    # the first ``str``-typed entry in the default representation's
+    # ``fields`` (``name``).
     assert '"customer": ResourceEntry(' in registry
     assert "search_columns=('name'" in registry
     # No SearchSpec / LINKS plumbing in the registry anymore.
@@ -279,7 +296,7 @@ def test_custom_serializer_replaces_auto_dump(
 ) -> None:
     """SavedView's get/list ops call the user's serializer with
     (obj, session, db) and drop response_model."""
-    routes = files["inventory/routes/savedview.py"]
+    routes = files["inventory/routes/saved_view.py"]
 
     # Custom serializer imported by its dotted path, not from the
     # auto-generated serializers module.
@@ -297,8 +314,15 @@ def test_auto_serializer_still_works_when_not_overridden(
     files: dict[str, str],
 ) -> None:
     """Resources that *don't* set ``serializer:`` keep the
-    auto-generated dump path."""
+    auto-generated dump path.
+
+    Customer's list op carries its own ``fields:`` so it uses the
+    ad-hoc legacy path -- the rendered handler imports
+    ``to_customer_list_item`` from the auto-generated serializers.
+    The resource's ``default_representation`` is reserved for
+    cross-resource hydration (saved-view, ref autocomplete) and
+    doesn't silently override per-op response shapes.
+    """
     customer_routes = files["inventory/routes/customer.py"]
 
-    # The auto-generated list_item serializer is imported normally.
     assert "to_customer_list_item" in customer_routes

@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase
 
 from be.config.schema import (
@@ -30,6 +29,7 @@ from ingot.rate_limit import (
     build_limiter,
     default_key_func,
 )
+from ingot.utils import compile_query
 
 # ---------------------------------------------------------------------------
 # Schema validation
@@ -561,10 +561,7 @@ class TestPostgresStorageSql:
         assert result == 7
         # Inspect the SQL passed to ``session.execute``.
         stmt = session.execute.call_args[0][0]
-        compiled = stmt.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
-        sql = str(compiled)
+        sql = compile_query(stmt, dialect="postgres")
         assert "INSERT INTO rate_limit_buckets_test" in sql
         assert "ON CONFLICT" in sql
         assert "RETURNING" in sql
@@ -590,12 +587,7 @@ class TestPostgresStorageSql:
         storage, _, session = self._storage()
         storage.clear("k")
         stmt = session.execute.call_args[0][0]
-        sql = str(
-            stmt.compile(
-                dialect=postgresql.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
-        )
+        sql = compile_query(stmt, dialect="postgres")
         assert "DELETE FROM rate_limit_buckets_test" in sql
         assert "WHERE" in sql
         session.commit.assert_called_once()
@@ -606,12 +598,7 @@ class TestPostgresStorageSql:
         result = storage.reset()
         assert result == 3
         stmt = session.execute.call_args[0][0]
-        sql = str(
-            stmt.compile(
-                dialect=postgresql.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
-        )
+        sql = compile_query(stmt, dialect="postgres")
         assert "DELETE FROM rate_limit_buckets_test" in sql
         # No WHERE clause -- reset wipes the whole table.
         assert "WHERE" not in sql

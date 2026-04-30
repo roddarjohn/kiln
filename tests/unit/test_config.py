@@ -11,9 +11,9 @@ from be.config.schema import (
     DatabaseConfig,
     FieldSpec,
     FilterConfig,
-    LinkConfig,
     OperationConfig,
     ProjectConfig,
+    RepresentationConfig,
     ResourceConfig,
     StructuredFilterField,
 )
@@ -93,7 +93,7 @@ def test_auth_config_empty_sources_rejected():
 
 
 def test_auth_config_duplicate_sources_rejected():
-    with pytest.raises(ValueError, match="duplicates"):
+    with pytest.raises(ValueError, match="must not repeat"):
         AuthConfig(
             credentials_schema="myapp.auth.LoginCredentials",
             session_schema="myapp.auth.Session",
@@ -222,8 +222,8 @@ def test_project_config_action_framework_with_auth_validates():
 
 def test_resource_config_defaults():
     r = ResourceConfig(model="myapp.models.User")
-    assert r.pk == "id"
-    assert r.pk_type == "uuid"
+    assert r.pk.name == "id"
+    assert r.pk.type == "uuid"
     assert r.route_prefix is None
     assert r.db_key is None
     assert r.require_auth is True
@@ -262,8 +262,18 @@ def test_resource_config_custom_route_prefix():
 
 
 def test_resource_config_int_pk():
-    r = ResourceConfig(model="myapp.models.Tag", pk="id", pk_type="int")
-    assert r.pk_type == "int"
+    r = ResourceConfig(
+        model="myapp.models.Tag",
+        pk={"name": "id", "type": "int"},
+    )
+    assert r.pk.type == "int"
+    assert r.pk.name == "id"
+
+
+def test_resource_config_pk_defaults_to_id_uuid():
+    r = ResourceConfig(model="myapp.models.Article")
+    assert r.pk.name == "id"
+    assert r.pk.type == "uuid"
 
 
 def test_operation_config_basic():
@@ -354,11 +364,14 @@ def test_operation_config_hooks_on_update_allowed():
 def test_operation_config_hooks_rejected_on_read_only_ops(op_name):
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+    with pytest.raises(ValidationError, match="hooks are only"):
         OperationConfig(name=op_name, pre="myapp.hooks.h")
 
-    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+    with pytest.raises(ValidationError, match="hooks are only"):
         OperationConfig(name=op_name, post="myapp.hooks.h")
+
+    with pytest.raises(ValidationError, match="hooks are only"):
+        OperationConfig(name=op_name, dump="myapp.hooks.dump_body")
 
 
 def test_operation_config_hooks_rejected_on_action_ops():
@@ -600,45 +613,79 @@ def test_field_spec_enum_with_nested_fields_rejected() -> None:
         )
 
 
-def test_link_config_builder_with_shorthand_rejected() -> None:
+def test_representation_builder_with_fields_rejected() -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match="provide either `builder` or"):
-        LinkConfig(
-            kind="id_name",
-            name="title",
+        RepresentationConfig(
+            name="default",
+            fields=[{"name": "title", "type": "str"}],
             builder="app.links.build_project_link",
         )
 
 
-def test_link_config_kind_name_requires_name_attr() -> None:
-    from pydantic import ValidationError
+def test_representation_fields_only_is_valid() -> None:
+    cfg = RepresentationConfig(
+        name="default",
+        fields=[
+            {"name": "id", "type": "uuid"},
+            {"name": "title", "type": "str"},
+        ],
+    )
+    assert cfg.builder is None
+    assert [f.name for f in cfg.fields] == ["id", "title"]
+    assert [f.type for f in cfg.fields] == ["uuid", "str"]
 
-    with pytest.raises(ValidationError, match="requires either"):
-        LinkConfig(kind="name")
 
-
-def test_link_config_kind_id_name_requires_name_attr() -> None:
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError, match="requires either"):
-        LinkConfig(kind="id_name")
-
-
-def test_link_config_builder_only_is_valid() -> None:
-    cfg = LinkConfig(kind="id_name", builder="app.links.build_link")
+def test_representation_builder_only_is_valid() -> None:
+    cfg = RepresentationConfig(name="default", builder="app.links.build_link")
     assert cfg.builder == "app.links.build_link"
-    assert cfg.name is None
-    assert cfg.id is None
+    assert cfg.fields == []
 
 
-def test_searchable_resource_without_link_rejected() -> None:
+def test_representation_empty_fields_is_valid() -> None:
+    # Empty fields = schema with just the ``type`` discriminator;
+    # occasionally useful for ``ref`` filters that only need the
+    # resource-type identity.
+    cfg = RepresentationConfig(name="lite")
+    assert cfg.fields == []
+    assert cfg.builder is None
+
+
+def test_resource_default_representation_must_be_declared() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="default_representation="):
+        ResourceConfig(
+            model="app.models.Item",
+            representations=[
+                RepresentationConfig(name="lite"),
+            ],
+            default_representation="missing",
+        )
+
+
+def test_resource_representation_names_must_be_unique() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="duplicate representation"):
+        ResourceConfig(
+            model="app.models.Item",
+            representations=[
+                RepresentationConfig(name="default"),
+                RepresentationConfig(name="default"),
+            ],
+        )
+
+
+def test_searchable_resource_without_default_representation_rejected() -> None:
     from pydantic import ValidationError
 
     resource = ResourceConfig(model="app.models.Item", searchable=True)
 
     with pytest.raises(
-        ValidationError, match=r"requires `link`.*searchable=True"
+        ValidationError,
+        match=r"requires `default_representation`.*searchable=True",
     ):
         ProjectConfig(
             **_project_with(
@@ -652,7 +699,7 @@ def test_searchable_resource_without_link_rejected() -> None:
         )
 
 
-def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
+def test_resource_referenced_by_ref_without_default_rep_rejected() -> None:
     from pydantic import ValidationError
 
     target = ResourceConfig(model="app.models.Customer")
@@ -677,7 +724,10 @@ def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
         ],
     )
 
-    with pytest.raises(ValidationError, match=r"requires `link`.*ref_resource"):
+    with pytest.raises(
+        ValidationError,
+        match=r"requires `default_representation`.*ref_resource",
+    ):
         ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
             apps=[
@@ -695,7 +745,7 @@ def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
         )
 
 
-def test_self_filter_without_link_rejected() -> None:
+def test_self_filter_without_default_representation_rejected() -> None:
     from pydantic import ValidationError
 
     resource = ResourceConfig(
@@ -713,8 +763,56 @@ def test_self_filter_without_link_rejected() -> None:
         ],
     )
 
-    with pytest.raises(ValidationError, match=r'requires `link`.*"self"'):
+    with pytest.raises(
+        ValidationError, match=r'requires `default_representation`.*"self"'
+    ):
         ProjectConfig(**_project_with(resource))
+
+
+def test_resource_slug_collision_across_apps_rejected() -> None:
+    """Two resources whose models snake-case to the same slug must
+    fail loudly at config-load time -- they'd collide on the route
+    module, ref filter target, and saved-view registry."""
+    from pydantic import ValidationError
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"slugs collide.*'customer' \(between "
+            r"'billing\.models\.Customer' and 'support\.models\.Customer'\)"
+        ),
+    ):
+        ProjectConfig(
+            databases=[DatabaseConfig(key="primary", default=True)],
+            apps=[
+                {
+                    "config": {
+                        "module": "billing",
+                        "resources": [
+                            {"model": "billing.models.Customer"},
+                        ],
+                    },
+                    "prefix": "/billing",
+                },
+                {
+                    "config": {
+                        "module": "support",
+                        "resources": [
+                            {"model": "support.models.Customer"},
+                        ],
+                    },
+                    "prefix": "/support",
+                },
+            ],
+        )
+
+
+def test_resource_slug_property_snakes_class_name() -> None:
+    """The slug exposed for cross-resource use is the snake-cased
+    class name -- ``NotificationPreference`` ->
+    ``notification_preference``."""
+    r = ResourceConfig(model="app.models.NotificationPreference")
+    assert r.slug == "notification_preference"
 
 
 # ---------------------------------------------------------------------------

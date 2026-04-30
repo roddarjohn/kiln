@@ -68,11 +68,22 @@ class Auth:
         # ``searchable`` is included because the resource-level
         # ``_values`` endpoint passes ``session`` through to the
         # link builder, and any consumer using a ``serializer:``
-        # hook also expects session in scope.
+        # hook also expects session in scope.  Representations are
+        # included for the same reason: every rep builder takes
+        # ``session`` and ops that point at one (directly or via
+        # ``default_representation``) need it in scope to call the
+        # builder.
+        uses_representation = (
+            ctx.instance.default_representation is not None
+            or any(
+                op.representation is not None for op in ctx.instance.operations
+            )
+        )
         force_session = (
             ctx.instance.include_actions_in_dump
             or ctx.instance.permissions_endpoint
             or ctx.instance.searchable
+            or uses_representation
         )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):

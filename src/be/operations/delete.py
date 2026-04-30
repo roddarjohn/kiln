@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     "delete",
     scope="operation",
     dispatch_on="name",
-    requires=["update"],
 )
 class Delete:
     """DELETE /{pk} -- delete a resource."""
@@ -58,17 +57,17 @@ class Delete:
 
         yield RouteHandler(
             method="DELETE",
-            path=f"/{{{resource.pk}}}",
-            function_name=f"delete_{model.lower}",
+            path=f"/{{{resource.pk.name}}}",
+            function_name=f"delete_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 )
             ],
             status_code=204,
-            doc=f"Delete a {model.pascal} by {resource.pk}.",
+            doc=f"Delete a {model.pascal} by {resource.pk.name}.",
             body_template="fastapi/ops/delete.py.j2",
             body_context=gate_ctx,
             extra_imports=[
@@ -82,7 +81,7 @@ class Delete:
         yield TestCase(
             op_name="delete",
             method="delete",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             status_success=204,
             status_not_found=404,
         )

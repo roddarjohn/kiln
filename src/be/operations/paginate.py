@@ -48,19 +48,19 @@ class Paginate:
         """
         model = resource_model(ctx)
 
+        result = ctx.store.output_under_ancestor(
+            ctx.instance_id, "operation", ListResult
+        )
+
         page_name = model.suffixed("Page")
         yield SchemaClass(
             name=page_name,
             body_template="fastapi/schema_parts/page.py.j2",
             body_context={
                 "model_name": model.pascal,
-                "item_type": f"{model.pascal}ListItem",
+                "item_type": result.item_type,
                 "mode": options.mode,
             },
-        )
-
-        result = ctx.store.output_under_ancestor(
-            ctx.instance_id, "operation", ListResult
         )
 
         handler = result.handler
@@ -68,7 +68,7 @@ class Paginate:
         handler.return_type = page_name
         handler.body_context["pagination_mode"] = options.mode
         handler.body_context["max_page_size"] = options.max_page_size
-        handler.body_context["cursor_field"] = options.cursor_field
+        handler.body_context["cursor_field"] = options.cursor.name
         handler.extra_imports.append(
             (
                 "ingot.pagination",

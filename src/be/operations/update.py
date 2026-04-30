@@ -8,6 +8,7 @@ from be.operations.renderers import (
     gate_wiring,
     hooks_wiring,
 )
+from be.operations.representations import pick_representation
 from be.operations.types import (
     Field,
     FieldsOptions,
@@ -35,10 +36,17 @@ if TYPE_CHECKING:
     "update",
     scope="operation",
     dispatch_on="name",
-    requires=["create"],
 )
 class Update:
-    """PATCH /{pk} -- partially update a resource."""
+    """PATCH /{pk} -- partially update a resource.
+
+    Same response semantics as :class:`~be.operations.create.Create`:
+    set :attr:`OperationConfig.representation` to capture the
+    updated row via ``.returning(Model)`` and return the rep
+    through its builder; leave it unset for today's no-body 200.
+    Write ops do not inherit
+    :attr:`ResourceConfig.default_representation`.
+    """
 
     Options = FieldsOptions
 
@@ -47,17 +55,7 @@ class Update:
         ctx: BuildContext[OperationConfig, ProjectConfig],
         options: FieldsOptions,
     ) -> Iterable[object]:
-        """Produce output for PATCH /{pk}.
-
-        Args:
-            ctx: Build context for the ``"update"`` operation entry.
-            options: Parsed :class:`~be.operations.types.FieldsOptions`.
-
-        Yields:
-            The ``{Model}UpdateRequest`` schema (all fields
-            optional), the route handler, and a test case.
-
-        """
+        """Produce output for PATCH /{pk}."""
         resource = cast(
             "ResourceConfig",
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
@@ -84,22 +82,34 @@ class Update:
         )
         hook_ctx, hook_imports = hooks_wiring(ctx.instance)
 
+        spec = pick_representation(ctx)
+        rep_ctx = (
+            {"serialize_response_call": spec.serializer_fn}
+            if spec is not None
+            else {}
+        )
+
         yield RouteHandler(
             method="PATCH",
-            path=f"/{{{resource.pk}}}",
-            function_name=f"update_{model.lower}",
+            path=f"/{{{resource.pk.name}}}",
+            function_name=f"update_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 ),
                 RouteParam(name="body", annotation=request_schema),
             ],
-            doc=f"Update a {model.pascal} by {resource.pk}.",
+            response_model=spec.schema_class if spec else None,
+            response_schema_module=spec.schema_module if spec else None,
+            return_type=spec.schema_class if spec else None,
+            serializer_fn=spec.serializer_fn if spec else None,
+            serializer_fn_module=spec.serializer_fn_module if spec else None,
+            doc=f"Update a {model.pascal} by {resource.pk.name}.",
             request_schema=request_schema,
             body_template="fastapi/ops/update.py.j2",
-            body_context={**gate_ctx, **hook_ctx},
+            body_context={**gate_ctx, **hook_ctx, **rep_ctx},
             extra_imports=[
                 ("sqlalchemy", "select"),
                 ("sqlalchemy", "update"),
@@ -112,7 +122,7 @@ class Update:
         yield TestCase(
             op_name="update",
             method="patch",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             status_success=200,
             status_not_found=404,
             status_invalid=422,

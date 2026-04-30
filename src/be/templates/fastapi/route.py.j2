@@ -2,7 +2,7 @@
 {{ file_header("FastAPI routes for " ~ model_name) }}
 
 {{ import_block }}
-router = APIRouter(prefix="{{ route_prefix }}", tags=["{{ model_name | lower }}"])
+router = APIRouter(prefix="{{ route_prefix }}", tags=["{{ model_snake }}"])
 
 # ---------------------------------------------------------------------------
 # Routes

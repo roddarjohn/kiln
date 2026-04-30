@@ -3,7 +3,6 @@
 from typing import TYPE_CHECKING, cast
 
 from be.operations.types import RouteHandler
-from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -72,7 +71,7 @@ class Router:
         if not mounted:
             return
 
-        slugs = [_resource_module_slug(resource) for resource in mounted]
+        slugs = [resource.slug for resource in mounted]
         yield StaticFile(
             path=f"{module}/routes/__init__.py",
             template="fastapi/router.py.j2",
@@ -171,24 +170,3 @@ def _has_resource_registry(config: ProjectConfig) -> bool:
                     return True
 
     return False
-
-
-def _resource_module_slug(resource: ResourceConfig) -> str:
-    """Return the Python-module slug derived from *resource*'s model.
-
-    The slug names the generated ``{app}/routes/{slug}.py`` file
-    and its router alias ``{slug}_router``.  It is derived from
-    the class name of ``resource.model`` (lowercased) rather than
-    the store's instance id — the latter is opaque and must not
-    leak into generated code.
-
-    Args:
-        resource: Resource config entry.
-
-    Returns:
-        Lowercase class name, e.g. ``"article"`` for
-        ``"blog.models.Article"``.
-
-    """
-    _, model = Name.from_dotted(resource.model)
-    return model.lower

@@ -71,11 +71,11 @@ class Action:
         fn_name = fn_name_obj.raw
 
         if info.is_object_action:
-            path = f"/{{{resource.pk}}}/{action_name.slug}"
+            path = f"/{{{resource.pk.name}}}/{action_name.slug}"
             params = [
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 ),
             ]
             extra_imports = [

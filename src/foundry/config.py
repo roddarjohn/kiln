@@ -6,9 +6,9 @@ targets can ship their own libsonnet helpers under a registered
 prefix (e.g. ``import 'be/auth/jwt.libsonnet'``).
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from foundry import jsonnet
 from foundry.errors import ConfigError
@@ -39,6 +39,27 @@ class FoundryConfig(BaseModel):
     """
 
     package_prefix: str = ""
+
+
+class ExtensibleConfig(BaseModel):
+    """Base for config nodes whose extra keys feed an op's options.
+
+    Targets that dispatch ops by a field value (``name``, ``type``,
+    ...) and pass every other key through to the op's own
+    ``Options`` model can subclass this to inherit
+    ``extra="allow"`` plus the :attr:`options` accessor instead of
+    re-spelling them per config class.  be uses it for
+    :class:`be.config.schema.OperationConfig` and
+    :class:`be.config.schema.ModifierConfig`; other targets that
+    need the same dispatch shape can do the same.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def options(self) -> dict[str, Any]:
+        """Op-specific options (every key not declared on the model)."""
+        return self.model_extra or {}
 
 
 def load_config(

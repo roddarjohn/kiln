@@ -103,13 +103,13 @@ class Permissions:
         # ------------------------------------------------------------
         object_handler = RouteHandler(
             method="GET",
-            path=f"/{{{resource.pk}}}/permissions",
-            function_name=f"permissions_{model.lower}_object",
+            path=f"/{{{resource.pk.name}}}/permissions",
+            function_name=f"permissions_{model.snake}_object",
             op_name="permissions",
             params=[
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 ),
             ],
             response_model="list[ActionRef]",
@@ -134,7 +134,7 @@ class Permissions:
         collection_handler = RouteHandler(
             method="GET",
             path="/permissions",
-            function_name=f"permissions_{model.lower}_collection",
+            function_name=f"permissions_{model.snake}_collection",
             op_name="permissions",
             params=[],
             response_model="list[ActionRef]",
@@ -157,7 +157,7 @@ class Permissions:
         yield TestCase(
             op_name="permissions",
             method="get",
-            path=f"/{{{resource.pk}}}/permissions",
+            path=f"/{{{resource.pk.name}}}/permissions",
             status_success=200,
             status_not_found=404,
             action_name="permissions",
