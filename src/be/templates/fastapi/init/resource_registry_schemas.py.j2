@@ -64,7 +64,7 @@ class {{ field.class_name }}(BaseModel):
     """``{{ entry.slug }}.{{ field.field_name }}`` filter discovery payload."""
 
     field: Literal[{{ field.field_name | tojson }}] = {{ field.field_name | tojson }}
-    operators: list[str]
+    operators: list[FilterOperator]
     values: {{ field.values_class }}
 
 
