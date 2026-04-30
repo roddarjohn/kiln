@@ -29,7 +29,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, literal, or_, select, union_all
 
 from ingot.filter_values import FilterValuesRequest, resolved_limit
-from ingot.pagination import apply_keyset_pagination
 from ingot.values_table import values_table
 
 if TYPE_CHECKING:
