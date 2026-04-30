@@ -1,7 +1,6 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% from "fastapi/ops/_gate.py.j2" import gate %}
 {% block body %}
-
 {% if pre_hook_call|default(none) %}
     body = await {{ pre_hook_call }}(body, db=db)
 {% endif %}
