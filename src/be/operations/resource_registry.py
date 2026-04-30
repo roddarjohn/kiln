@@ -102,14 +102,31 @@ class ResourceRegistry:
 
         # Per-resource per-field schema specs are derived from the
         # same FilterField list that drives the registry entries.
-        # Computed on a parallel pass so the schemas template gets
-        # a tidy data structure (avoids repeating the introspection
-        # in Jinja).
-        schema_imports: list[tuple[str, str]] = []
-        schema_entries = [
-            _build_schema_entry(resource, schema_imports)
-            for _, resource in _iter_contributing_resources(config)
-        ]
+        # One file per resource (under each app's tree) keeps the
+        # generated schemas browsable as the resource count grows.
+        schema_entries = []
+        resource_imports: list[str] = []
+
+        for app, resource in _iter_contributing_resources(config):
+            entry = _build_schema_entry(resource)
+            schema_entries.append(entry)
+            module_path = (
+                prefix_import(
+                    package_prefix, app.module, "resources", entry["slug"]
+                )
+            )
+            resource_imports.append(
+                f"from {module_path} import "
+                f"{entry['resource_class']}, {entry['filter_union']}, "
+                f"{entry['pascal']}FieldRef"
+            )
+
+            yield StaticFile(
+                path=f"{app.module}/resources/{entry['slug']}.py",
+                template="fastapi/init/resource_schema.py.j2",
+                context={"entry": entry},
+            )
+
         union_sources = _format_top_level_unions(schema_entries)
 
         yield StaticFile(
@@ -125,7 +142,7 @@ class ResourceRegistry:
             path="resources/schemas.py",
             template="fastapi/init/resource_registry_schemas.py.j2",
             context={
-                "extra_imports": _format_imports(schema_imports),
+                "resource_imports": resource_imports,
                 "entries": schema_entries,
                 **union_sources,
             },
@@ -346,19 +363,15 @@ client knows that, e.g., ``ProjectIdFilter.values`` is always
 
 def _build_schema_entry(
     resource: ResourceConfig,
-    imports: list[tuple[str, str]],
 ) -> dict[str, object]:
     """Build the schema-template context for one resource.
 
-    Mirrors :func:`_build_entry`'s shape but stays focused on the
-    schema codegen — collects the per-field class names, narrowed
-    ``values`` descriptor type, and per-resource union/class
-    names.  *imports* accumulates any additional ``(module, name)``
-    pairs the schemas file needs (today: nothing extra; left
-    plumbed for future per-field enum-class re-imports if we want
-    to inline choices in the schema).
+    Collects the per-field class names, narrowed ``values``
+    descriptor type, per-resource union/class names, and the
+    minimal set of ``ValuesDescriptor`` subclasses to import (only
+    the ones actually referenced by this resource's fields, so
+    each generated module imports just what it needs).
     """
-    del imports  # reserved for future enum-class re-imports
     _, model = Name.from_dotted(resource.model)
     slug = model.lower
     pascal = model.pascal
@@ -366,19 +379,22 @@ def _build_schema_entry(
     field_schemas: list[dict[str, object]] = []
     member_class_names: list[str] = []
     field_literals: list[str] = []
+    descriptor_imports: set[str] = set()
 
     for field in _resource_filter_fields(resource):
         field_pascal = Name(field.name).pascal
         class_name = f"{pascal}{field_pascal}Filter"
+        descriptor_class = _VALUES_DESCRIPTOR_BY_KIND[field.values]
         field_schemas.append(
             {
                 "class_name": class_name,
                 "field_name": field.name,
-                "values_class": _VALUES_DESCRIPTOR_BY_KIND[field.values],
+                "values_class": descriptor_class,
             }
         )
         member_class_names.append(class_name)
         field_literals.append(repr(field.name))
+        descriptor_imports.add(descriptor_class)
 
     field_literal_src = ", ".join(field_literals) if field_literals else None
     # ``Annotated[X, Field(discriminator=...)]`` only makes sense for
@@ -399,6 +415,7 @@ def _build_schema_entry(
         "filter_union_src": filter_union_src,
         "field_literal_src": field_literal_src,
         "has_search": resource.searchable,
+        "descriptor_imports": sorted(descriptor_imports),
     }
 
 
