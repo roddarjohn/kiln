@@ -492,10 +492,10 @@ Filtering, search, and saved views
 ----------------------------------
 
 be ships an opt-in surface for table-style UIs: structured
-filter specs, BE-powered value providers, a per-resource search
+filter specs, BE-powered value providers, a project-wide search
 endpoint, and a serializer hook saved-view resources can use for
-ref hydration.  See :doc:`design/filtering` for the design doc;
-the rest of this section is the user-facing surface.
+ref hydration.  The rest of this section is the user-facing
+surface.
 
 Structured filter blocks
 ^^^^^^^^^^^^^^^^^^^^^^^^

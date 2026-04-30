@@ -136,7 +136,7 @@ be.operations
 .. automodule:: be.operations.links
    :members:
 
-.. automodule:: be.operations.searchable
+.. automodule:: be.operations.resource_registry
    :members:
 
 .. automodule:: ingot
@@ -170,6 +170,9 @@ be.operations
    :members:
 
 .. automodule:: ingot.rate_limit
+   :members:
+
+.. automodule:: ingot.resource_registry
    :members:
 
 .. automodule:: ingot.saved_views

@@ -437,10 +437,10 @@ def _join_union(members: list[str]) -> str:
 
 
 def _default_search_fields(link: object) -> list[str]:
-    """Mirror :class:`~be.operations.searchable.Searchable`'s old default.
+    """Default search columns for a resource that opts into search.
 
-    When a resource opts into ``searchable`` without an explicit
-    :attr:`SearchConfig.fields`, the resource-level search uses the
+    When a resource sets ``searchable`` without an explicit
+    :attr:`SearchConfig.fields`, the project-wide search uses the
     link's ``name`` column (when shorthand and named) and skips
     ``q``-filtering otherwise.
     """

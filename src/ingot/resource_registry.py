@@ -93,7 +93,7 @@ class FreeText:
     name: str
     operators: tuple[str, ...] = ("eq", "contains", "starts_with")
     column: str | None = None
-    """Override when the searchable column differs from :attr:`name`."""
+    """Override when the searchable column differs from ``name``."""
     kind: Literal["free_text"] = "free_text"
 
 
@@ -102,8 +102,9 @@ class Ref:
     """Filter pointing at another resource (or this one).
 
     The trigram subquery scores against the target's first
-    :attr:`ResourceEntry.search_columns` entry; targets without
-    any search columns fall back to the stringified pk.
+    ``search_columns`` entry on its :class:`ResourceEntry`;
+    targets without any search columns fall back to the
+    stringified pk.
     """
 
     name: str
@@ -402,11 +403,11 @@ class ResourceRegistry:
         """Run a value-provider request.
 
         Empty ``fields`` defaults to the resource's
-        :attr:`ResourceEntry.search_columns`, so the same multi-
-        column trigram pipeline serves both generic search and
-        per-filter narrowing.  The FE already has every enum
-        member from discovery, so a no-``q`` request for an enum
-        field returning nothing isn't a regression.
+        ``search_columns`` (see :class:`ResourceEntry`), so the
+        same multi-column trigram pipeline serves both generic
+        search and per-filter narrowing.  The FE already has every
+        enum member from discovery, so a no-``q`` request for an
+        enum field returning nothing isn't a regression.
         """
         entry = self._require_entry(resource)
         names = list(fields) if fields else list(entry.search_columns)

@@ -7,12 +7,12 @@ a list op.  Emits the
 handler so the generated route calls
 :func:`ingot.filters.apply_filters` against the parsed filter tree.
 
-Discovery (``GET /_filters``) and value providers
-(``POST /_values/{field}``) are *not* emitted here — those land
-on the project-wide filter router in :mod:`be.operations.filter_registry`,
+Discovery (``POST /_filters``) and value providers
+(``POST /_values``) are *not* emitted here — those land on the
+project-wide router in :mod:`be.operations.resource_registry`,
 which walks every resource's filter modifier at project scope and
-emits a single :class:`ingot.filter_registry.FilterRegistry`-backed
-endpoint set.
+emits a single :class:`ingot.resource_registry.ResourceRegistry`-
+backed endpoint set.
 """
 
 from typing import TYPE_CHECKING
