@@ -1,0 +1,66 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Per-field discriminated filter classes plus the resource container
+that lists them.  Imports the per-kind ``ValuesDescriptor`` types
+from :mod:`ingot.resource_registry`; that's where the discriminator
+on ``values.kind`` is defined.
+{% endset %}
+{{ file_header(entry.pascal ~ " resource discovery schemas", extra=_extra) }}
+
+
+from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+from ingot.resource_registry import (
+{% for descriptor in entry.descriptor_imports %}
+    {{ descriptor }},
+{% endfor %}
+    FilterOperator,
+)
+
+
+{% for field in entry.field_schemas %}
+class {{ field.class_name }}(BaseModel):
+    """``{{ entry.slug }}.{{ field.field_name }}`` filter discovery payload."""
+
+    field: Literal[{{ field.field_name | tojson }}] = {{ field.field_name | tojson }}
+    operators: list[FilterOperator]
+    values: {{ field.values_class }}
+
+
+{% endfor %}
+{% if entry.filter_union_src %}
+{{ entry.filter_union }} = Annotated[
+    {{ entry.filter_union_src }},
+    Field(discriminator="field"),
+]
+"""Discriminated union of every {{ entry.pascal }} filter field."""
+{% elif entry.field_schemas | length == 1 %}
+{{ entry.filter_union }} = {{ entry.field_schemas[0].class_name }}
+"""Sole filter field on {{ entry.pascal }} (no discrimination needed)."""
+{% else %}
+# {{ entry.pascal }} declares no filter fields; ``filters`` is empty.
+{{ entry.filter_union }} = type[BaseModel]  # placeholder; never instantiated
+{% endif %}
+
+
+class {{ entry.resource_class }}(BaseModel):
+    """Discovery payload for the ``{{ entry.slug }}`` resource."""
+
+    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
+    filters: list[{{ entry.filter_union }}]
+    supports_search: bool = {{ entry.has_search }}
+
+
+class {{ entry.pascal }}FieldRef(BaseModel):
+    """Pointer to one filter field on ``{{ entry.slug }}``."""
+
+    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
+{% if entry.field_literal_src %}
+    field: Literal[{{ entry.field_literal_src }}]
+{% else %}
+    field: str
+{% endif %}

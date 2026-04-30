@@ -1,19 +1,13 @@
 {% from "_macros.j2" import file_header %}
 {% set _extra %}
-The discovery surface is fully discriminated:
+Each resource's per-field filter classes and resource container
+live in their own ``{app}/resources/{slug}.py``; this module
+imports them and assembles the project-wide discriminated unions
+plus the request/response shapes the router endpoints reference.
 
-* Each resource gets a :class:`{{ entries[0].resource_class }}`-style
-  Pydantic class with a ``Literal["<slug>"]`` ``resource`` field.
-* Each filter field gets its own subclass with a ``Literal["<field>"]``
-  discriminator and a narrowed ``values`` descriptor.
-* The top-level :data:`RegisteredResource` and per-resource filter
-  unions use ``Field(discriminator=...)``, so an OpenAPI client
-  reading these schemas narrows on ``resource`` / ``field`` / ``kind``
-  without a runtime type check.
-
-Generated at codegen time from each resource's filter modifier and
-its ``searchable`` opt-in.  Re-run ``foundry generate`` after
-adding a resource or field.
+The split keeps any single file small even as the resource count
+grows, and lets consumers import a per-resource module directly
+when they only care about one resource's schema.
 {% endset %}
 {{ file_header("Project-wide resource discovery schemas", extra=_extra) }}
 
@@ -24,20 +18,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from ingot.resource_registry import (
-    BoolValuesDescriptor,
-    Choice,
-    EnumValuesDescriptor,
-    FieldDiscoveryRequest,
-    FieldRef,
-    FilterDiscoveryRequest,
-    FilterOperator,
-    FreeTextValuesDescriptor,
-    LiteralValuesDescriptor,
-    RefValuesDescriptor,
-    ValuesDescriptor,
-)
-{% for line in extra_imports %}
+{% for line in resource_imports %}
 {{ line }}
 {% endfor %}
 
@@ -45,65 +26,16 @@ from ingot.resource_registry import (
 # -------------------------------------------------------------------
 # Resource slug literal — the set of resource keys the registry
 # knows about.  Used as the discriminator on
-# :class:`RegisteredResource` and as the element type of
-# :attr:`FilterDiscoveryRequest.resources`.
+# :data:`RegisteredResource` and as the element type of
+# :class:`ProjectFilterDiscoveryRequest.resources`.
 # -------------------------------------------------------------------
 
 
-ResourceSlug = Literal[{% for entry in entries %}{{ entry.slug | tojson }}{% if not loop.last %}, {% endif %}{% endfor %}]
-
-
-{% for entry in entries %}
-# -------------------------------------------------------------------
-# {{ entry.pascal }} — per-field filter shapes + resource container.
-# -------------------------------------------------------------------
-
-
-{% for field in entry.field_schemas %}
-class {{ field.class_name }}(BaseModel):
-    """``{{ entry.slug }}.{{ field.field_name }}`` filter discovery payload."""
-
-    field: Literal[{{ field.field_name | tojson }}] = {{ field.field_name | tojson }}
-    operators: list[FilterOperator]
-    values: {{ field.values_class }}
-
-
-{% endfor %}
-{% if entry.filter_union_src %}
-{{ entry.filter_union }} = Annotated[
-    {{ entry.filter_union_src }},
-    Field(discriminator="field"),
+ResourceSlug = Literal[
+{%- for entry in entries %} {{ entry.slug | tojson }}{% if not loop.last %},{% endif %}{% endfor %}
 ]
-"""Discriminated union of every {{ entry.pascal }} filter field."""
-{% elif entry.field_schemas | length == 1 %}
-{{ entry.filter_union }} = {{ entry.field_schemas[0].class_name }}
-"""Sole filter field on {{ entry.pascal }} (no discrimination needed)."""
-{% else %}
-# {{ entry.pascal }} declares no filter fields; ``filters`` is empty.
-{{ entry.filter_union }} = ValuesDescriptor  # placeholder; never instantiated
-{% endif %}
 
 
-class {{ entry.resource_class }}(BaseModel):
-    """Discovery payload for the ``{{ entry.slug }}`` resource."""
-
-    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
-    filters: list[{{ entry.filter_union }}]
-    supports_search: bool = {{ entry.has_search }}
-
-
-class {{ entry.pascal }}FieldRef(BaseModel):
-    """Pointer to one filter field on ``{{ entry.slug }}``."""
-
-    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
-{% if entry.field_literal_src %}
-    field: Literal[{{ entry.field_literal_src }}]
-{% else %}
-    field: str
-{% endif %}
-
-
-{% endfor %}
 # -------------------------------------------------------------------
 # Top-level discriminated unions + project-wide payloads.
 # -------------------------------------------------------------------
