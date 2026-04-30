@@ -330,7 +330,10 @@ _VALUES_DESCRIPTOR_BY_KIND: dict[str, str] = {
     "enum": "EnumValuesDescriptor",
     "free_text": "FreeTextValuesDescriptor",
     "ref": "RefValuesDescriptor",
-    "self": "SelfValuesDescriptor",
+    # ``values: "self"`` is a config-side spelling for "Ref pointing
+    # at this resource's own slug" — the registry-side descriptor is
+    # the same RefValuesDescriptor.
+    "self": "RefValuesDescriptor",
     "literal": "LiteralValuesDescriptor",
     "bool": "BoolValuesDescriptor",
 }
@@ -338,7 +341,7 @@ _VALUES_DESCRIPTOR_BY_KIND: dict[str, str] = {
 ingot ``ValuesDescriptor`` subclass.  Used to emit a narrowed
 ``values`` annotation per generated field schema — so the FE
 client knows that, e.g., ``ProjectIdFilter.values`` is always
-``SelfValuesDescriptor`` rather than the open union."""
+``RefValuesDescriptor`` rather than the open union."""
 
 
 def _build_schema_entry(
@@ -508,13 +511,13 @@ def _render_field(
         )
 
     if field.values == "self":
-        # ``type`` is the enclosing resource's slug, baked in at
-        # codegen time so the FE knows which resource the
-        # autocomplete is tied to.
+        # ``self`` is a config-side spelling of "Ref pointing at my
+        # own slug" — codegen translates it to a Ref so the
+        # registry only ever sees one shape.
         return (
-            f"SelfRef({field.name!r}, type={resource_slug!r}, "
+            f"Ref({field.name!r}, target={resource_slug!r}, "
             f"operators={operators_src})",
-            "SelfRef",
+            "Ref",
         )
 
     if field.values == "literal":

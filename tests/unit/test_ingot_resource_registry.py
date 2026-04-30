@@ -31,13 +31,13 @@ from ingot.resource_registry import (
     FieldDiscoveryRequest,
     FieldRef,
     FilterDiscoveryRequest,
+    FilterOperator,
     FreeText,
     LiteralField,
     Ref,
     ResourceEntry,
     ResourceRegistry,
     SearchSpec,
-    SelfRef,
 )
 
 if TYPE_CHECKING:
@@ -105,6 +105,7 @@ class _ExecuteCapture:
         self.statements.append(stmt)
         result = MagicMock()
         result.scalars.return_value.all.return_value = self.rows
+        result.all.return_value = self.rows
         return result
 
 
@@ -119,7 +120,9 @@ def _registry() -> ResourceRegistry:
                     Enum("status", _Status),
                     FreeText("name"),
                     Ref("owner_id", target="owner"),
-                    SelfRef("id", type="item"),
+                    # ``self`` filter — codegen would translate
+                    # ``values: "self"`` into ``Ref(target=<self_slug>)``.
+                    Ref("id", target="item"),
                     LiteralField("count", type="int"),
                     Bool("active"),
                 ),
@@ -156,15 +159,16 @@ def test_filter_discovery_full_payload() -> None:
     assert slugs == {"item"}
 
 
-def test_filter_discovery_subset() -> None:
+def test_filter_discovery_subset_supports_search_flag() -> None:
     payload = _registry().filter_discovery(
         FilterDiscoveryRequest(resources=["item"])
     )
     assert len(payload.resources) == 1
     item_payload = payload.resources[0]
     assert item_payload.resource == "item"
-    assert item_payload.search is not None
-    assert item_payload.search.endpoint == "/_values/item"
+    # ``supports_search`` replaces the old ``search: SearchDiscovery |
+    # None`` — endpoint URL is implicit (``/_values/<slug>``).
+    assert item_payload.supports_search is True
     fields = {entry.field: entry for entry in item_payload.filters}
     assert set(fields) == {
         "status",
@@ -174,6 +178,21 @@ def test_filter_discovery_subset() -> None:
         "count",
         "active",
     }
+
+
+def test_supports_search_false_when_entry_lacks_search() -> None:
+    registry = ResourceRegistry(
+        {
+            "owner": ResourceEntry(
+                model=_Item,
+                pk="id",
+                fields=(FreeText("name"),),
+                search=None,
+            ),
+        }
+    )
+    payload = registry.filter_discovery(FilterDiscoveryRequest())
+    assert payload.resources[0].supports_search is False
 
 
 def test_filter_discovery_empty_list_returns_no_resources() -> None:
@@ -202,18 +221,33 @@ def test_field_discovery_enum_includes_choices_and_endpoint() -> None:
     assert descriptor.kind == "enum"
     labels = {choice.label for choice in descriptor.choices}
     assert labels == {"DRAFT", "PUBLISHED", "ARCHIVED"}
-    assert descriptor.endpoint == "/_values/item/status"
+    assert descriptor.endpoint == "/_values/status"
 
 
-def test_field_discovery_self_includes_endpoint_when_searchable() -> None:
+def test_field_discovery_self_renders_as_ref() -> None:
+    """``values: "self"`` configs land as Ref descriptors targeting
+    the resource's own slug."""
     response = _registry().field_discovery(
         FieldDiscoveryRequest(
             fields=[FieldRef(resource="item", field="id")],
         )
     )
     descriptor = response.fields[0].values
-    assert descriptor.kind == "self"
+    assert descriptor.kind == "ref"
+    assert descriptor.target == "item"
     assert descriptor.endpoint == "/_values/item"
+
+
+def test_field_discovery_operators_use_filter_operator_enum() -> None:
+    response = _registry().field_discovery(
+        FieldDiscoveryRequest(
+            fields=[FieldRef(resource="item", field="status")],
+        )
+    )
+    operators = response.fields[0].operators
+    assert all(isinstance(op, FilterOperator) for op in operators)
+    assert FilterOperator.EQ in operators
+    assert FilterOperator.IN in operators
 
 
 def test_field_discovery_preserves_request_order() -> None:
@@ -238,7 +272,10 @@ def test_field_discovery_unknown_field_404() -> None:
     assert ei.value.status_code == 404
 
 
-def test_field_discovery_ref_to_unknown_target_omits_endpoint() -> None:
+def test_field_discovery_ref_endpoint_always_set() -> None:
+    """Ref descriptor always exposes an endpoint — the registry
+    serves a search when configured and falls back to a pk-ordered
+    page otherwise, so the FE always has a URL to call."""
     response = _registry().field_discovery(
         FieldDiscoveryRequest(
             fields=[FieldRef(resource="item", field="owner_id")],
@@ -246,8 +283,8 @@ def test_field_discovery_ref_to_unknown_target_omits_endpoint() -> None:
     )
     descriptor = response.fields[0].values
     assert descriptor.kind == "ref"
-    assert descriptor.type == "owner"
-    assert descriptor.endpoint is None
+    assert descriptor.target == "owner"
+    assert descriptor.endpoint == "/_values/owner"
 
 
 # -------------------------------------------------------------------
@@ -256,19 +293,41 @@ def test_field_discovery_ref_to_unknown_target_omits_endpoint() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enum_values_dispatch_is_in_memory() -> None:
-    """Enum fields don't touch the DB at all."""
+async def test_enum_values_run_through_postgres_values_clause() -> None:
+    """Enum values now go through the same SQL pipeline as everything
+    else — a ``VALUES (...)`` clause is built and queried."""
     db = _ExecuteCapture(rows=[])
-    page = await _registry().values(
+    await _registry().values(
         resource="item",
         field="status",
         request=FilterValuesRequest(),
         db=db,  # type: ignore[arg-type]
     )
 
-    labels = {item["label"] for item in page.results}
-    assert labels == {"DRAFT", "PUBLISHED", "ARCHIVED"}
-    assert db.statements == []  # no SQL issued
+    sql = _sql(db.statements[0])
+    assert "VALUES" in sql
+    # All three enum members should show up in the values clause.
+    assert "'draft'" in sql
+    assert "'DRAFT'" in sql
+    assert "'PUBLISHED'" in sql
+    assert "'ARCHIVED'" in sql
+
+
+@pytest.mark.asyncio
+async def test_enum_values_with_q_filters_via_ilike() -> None:
+    """A query narrows the VALUES table via ILIKE on label."""
+    db = _ExecuteCapture(rows=[])
+    await _registry().values(
+        resource="item",
+        field="status",
+        request=FilterValuesRequest(q="draft"),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    sql = _sql(db.statements[0])
+    # PG dialect doubles ``%`` literals for psycopg parameter
+    # substitution.
+    assert "ILIKE '%%draft%%'" in sql
 
 
 @pytest.mark.asyncio
@@ -283,21 +342,19 @@ async def test_free_text_values_no_q_uses_keyset_pagination() -> None:
     )
 
     sql = _sql(db.statements[0])
-    # Distinct column select.
     assert "SELECT DISTINCT" in sql
-    assert (
-        '"_filter_registry_test_items".name' in sql
-        or "_filter_registry_test_items.name" in sql
-    )
-    # Keyset over-fetch: LIMIT 3 (2 + 1).
+    assert "_filter_registry_test_items.name" in sql
     assert "LIMIT 3" in sql
-    # No ILIKE without a query.
-    assert "ILIKE" not in sql.upper() or "LIKE" not in sql.upper() or True
+    assert "ILIKE" not in sql.upper()
 
 
 @pytest.mark.asyncio
-async def test_free_text_values_with_q_orders_by_relevance_bucket() -> None:
-    """A query adds the relevance ``CASE`` and the ``ILIKE`` filter."""
+async def test_free_text_values_with_q_filters_no_bucket() -> None:
+    """A query just adds the ILIKE WHERE; no bucket-relevance CASE.
+
+    Single-column ordering keeps the SQL simple — no ``CASE WHEN``
+    relevance bucket, no compound keyset.
+    """
     db = _ExecuteCapture(rows=["apple", "apricot"])
     await _registry().values(
         resource="item",
@@ -307,21 +364,14 @@ async def test_free_text_values_with_q_orders_by_relevance_bucket() -> None:
     )
 
     sql = _sql(db.statements[0])
-    # PG dialect escapes ``%`` literals to ``%%`` for psycopg
-    # parameter substitution; that's the wire-format we'd ship.
-    # Outer ILIKE %q% selects matching rows.
     assert "ILIKE '%%ap%%'" in sql
-    # Relevance CASE bucketing — starts-with hits are in the 0
-    # bucket, sorted ahead of the rest.
-    assert "ILIKE 'ap%%'" in sql
-    assert "CASE WHEN" in sql.upper()
+    assert "CASE WHEN" not in sql.upper()
 
 
 @pytest.mark.asyncio
 async def test_free_text_values_keyset_cursor_round_trip() -> None:
-    """Keyset cursor produced by the registry decodes back into a
-    ``WHERE col > prev`` clause on a follow-up call."""
-    db = _ExecuteCapture(rows=["apple", "apricot", "banana"])  # over-fetch
+    """Keyset cursor decodes back into a ``WHERE col > prev`` clause."""
+    db = _ExecuteCapture(rows=["apple", "apricot", "banana"])
     page1 = await _registry().values(
         resource="item",
         field="name",
@@ -341,8 +391,6 @@ async def test_free_text_values_keyset_cursor_round_trip() -> None:
     )
 
     sql2 = _sql(db2.statements[0])
-    # Cursor decoded back into a ``> previous`` clause on the
-    # ordering column (the keyset prefix is stripped).
     assert "> 'apricot'" in sql2
 
 
@@ -371,16 +419,10 @@ async def test_search_resource_with_tsvector_column_uses_ts_rank() -> None:
         db=db,  # type: ignore[arg-type]
     )
 
-    # The tsvector path uses ``websearch_to_tsquery('english', ...)``
-    # which is typed as ``REGCONFIG`` and has no literal-value
-    # renderer; compile parameterised here.
     sql = str(db.statements[0].compile(dialect=postgresql.dialect())).replace(
         "\n", " "
     )
 
-    # tsvector match operator + websearch_to_tsquery + ts_rank
-    # ordering — and crucially, no ILIKE on the columns list
-    # (vector_column overrides the ILIKE fallback).
     assert "@@" in sql
     assert "websearch_to_tsquery" in sql
     assert "ts_rank" in sql
@@ -389,7 +431,7 @@ async def test_search_resource_with_tsvector_column_uses_ts_rank() -> None:
 
 @pytest.mark.asyncio
 async def test_search_resource_without_vector_column_keeps_ilike() -> None:
-    """Without vector_column the ILIKE fallback still fires."""
+    """Without vector_column the ILIKE fallback fires, keyset on pk."""
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
@@ -402,6 +444,8 @@ async def test_search_resource_without_vector_column_keeps_ilike() -> None:
     assert "@@" not in sql
     assert "ts_rank" not in sql
     assert "ILIKE" in sql.upper()
+    # Single-column ordering: pk, no relevance bucket.
+    assert "CASE WHEN" not in sql.upper()
 
 
 @pytest.mark.asyncio
@@ -416,8 +460,6 @@ async def test_search_resource_with_q_or_ilikes_every_search_column() -> None:
     )
 
     sql = _sql(db.statements[0])
-    # OR across both name and sku via ILIKE %q% (PG dialect doubles
-    # the ``%`` for parameter substitution, hence ``%%``).
     assert "ILIKE '%%ap%%'" in sql
     assert " OR " in sql.upper()
 
@@ -446,19 +488,38 @@ async def test_self_ref_field_dispatches_to_resource_search() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ref_field_dispatches_to_target_resource_search() -> None:
-    """Ref field hits the *target* resource's search.  When the
-    target isn't registered, 404."""
+async def test_ref_to_unsearched_resource_falls_back_to_pk_only() -> None:
+    """Ref to a target without a SearchSpec returns the first N rows
+    by pk — no 404, no search query.  Gives the FE something to
+    render even when the consumer hasn't wired a real search."""
+    registry = ResourceRegistry(
+        {
+            "item": ResourceEntry(
+                model=_Item,
+                pk="id",
+                fields=(Ref("owner_id", target="owner"),),
+            ),
+            "owner": ResourceEntry(
+                model=_Item,  # reuse for the test
+                pk="id",
+                fields=(),
+                search=None,  # crucial: no SearchSpec
+            ),
+        }
+    )
     db = _ExecuteCapture(rows=[])
-    with pytest.raises(HTTPException) as ei:
-        await _registry().values(
-            resource="item",
-            field="owner_id",
-            request=FilterValuesRequest(),
-            db=db,  # type: ignore[arg-type]
-        )
-    assert ei.value.status_code == 404
-    assert "owner" in str(ei.value.detail).lower()
+    await registry.values(
+        resource="item",
+        field="owner_id",
+        request=FilterValuesRequest(),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    sql = _sql(db.statements[0])
+    assert "ORDER BY" in sql.upper()
+    assert "_filter_registry_test_items.id" in sql
+    # No q-filtering — fallback ignores it entirely.
+    assert "ILIKE" not in sql.upper()
 
 
 @pytest.mark.asyncio
