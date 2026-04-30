@@ -365,6 +365,151 @@ class RateLimitConfig(BaseModel):
     """Emit ``X-RateLimit-*`` response headers (slowapi default on)."""
 
 
+class TemplateSource(BaseModel):
+    """Pointer to a file containing a template.
+
+    Used as one half of the ``str | TemplateSource`` union on
+    :attr:`CommTypeConfig.subject_template` and
+    :attr:`CommTypeConfig.body_template`: bare strings are treated
+    as inline template source, instances of this model are read
+    from disk at scaffold time and the contents inlined into the
+    generated module.
+
+    The path is resolved relative to the directory in which
+    ``foundry generate`` is invoked.  Reading happens once at
+    build time -- the generated tree carries no runtime file
+    dependency and re-running ``foundry generate`` is the only
+    way template-file edits propagate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    """Filesystem path to the template, relative to the current
+    working directory at generate time (or absolute)."""
+
+
+TemplateLike = str | TemplateSource
+"""Either an inline template string or a :class:`TemplateSource`."""
+
+
+class CommTypeConfig(BaseModel):
+    """Declaration of one named communication.
+
+    Wraps the same fields as :class:`ingot.comms.CommType`, but with
+    the context schema given as a dotted import path so the spec can
+    live in jsonnet alongside the rest of the project.  The
+    :class:`~be.operations.comms_scaffold.CommsScaffold` op resolves
+    the path to a real Pydantic class in the generated
+    ``comms.py``.
+
+    Templates are interpreted by the configured renderer (default:
+    :class:`ingot.comms.JinjaRenderer`).  Either template can be the
+    empty string for methods where it doesn't apply (SMS / push have
+    no subject), or a :class:`TemplateSource` pointing at a file on
+    disk -- the file is read at build time and inlined.
+    """
+
+    name: str
+    """Stable registry key, e.g. ``"order_shipped"``.  Stored on the
+    message row and used by callers to pick the type at send time."""
+
+    context_schema: str
+    """Dotted import path to the Pydantic model the templates render
+    against, e.g. ``"myapp.comms.OrderShippedContext"``."""
+
+    subject_template: TemplateLike = ""
+    """Subject template -- inline source string or
+    :class:`TemplateSource`.  Empty string when the method has no
+    subject (SMS, push)."""
+
+    body_template: TemplateLike
+    """Body template -- inline source string or
+    :class:`TemplateSource`.  Required."""
+
+    default_methods: list[str] = Field(default_factory=list)
+    """Methods to deliver on by default.  Documentation hint today;
+    the platform always uses caller-supplied recipients, but
+    declaring the intended fan-out keeps the spec discoverable."""
+
+
+class CommsConfig(BaseModel):
+    """Project-level communication-platform config.
+
+    Opting in scaffolds a ``comms.py`` module exposing the registry
+    of declared types, a pre-bound ``send_comm`` helper, and a
+    pgqueuer ``dispatch`` worker handler.  Storage and delivery
+    classes are consumer-provided dotted paths -- the platform
+    doesn't generate models or transports.
+
+    No HTTP routes are emitted: triggering a send is the consumer's
+    own concern (action handler, webhook receiver, scheduled job,
+    ...).
+    """
+
+    message_model: str
+    """Dotted import path to the consumer's :class:`~ingot.comms.MessageMixin`
+    subclass, e.g. ``"myapp.models.CommMessage"``."""
+
+    recipient_model: str
+    """Dotted import path to the consumer's :class:`~ingot.comms.RecipientMixin`
+    subclass, e.g. ``"myapp.models.CommRecipient"``."""
+
+    types: list[CommTypeConfig] = Field(default_factory=list)
+    """Declared communication types.  Empty is legal (the registry
+    is built but stays empty); typically populated."""
+
+    transports: dict[str, str] = Field(default_factory=dict)
+    """Method -> dotted path to a :class:`~ingot.comms.Transport`
+    instance.  Keys (``"email"``, ``"sms"``, ...) match what
+    callers pass via :class:`~ingot.comms.RecipientSpec.method`.
+    Values resolve to *instances*, not classes -- the consumer's
+    module constructs them."""
+
+    renderer: str | None = None
+    """Optional dotted path to a :class:`~ingot.comms.Renderer`
+    instance.  ``None`` defers to :class:`~ingot.comms.JinjaRenderer`
+    at the call site.  Swap in to point a microservice renderer
+    (HTTP-call to a Node template service, MJML compiler, ...)
+    in for the default."""
+
+    preferences: str | None = None
+    """Optional dotted path to a :class:`~ingot.comms.PreferenceResolver`
+    instance.  ``None`` skips per-recipient opt-in checks."""
+
+    db_key: str | None = None
+    """Which configured database hosts the message / recipient
+    tables (and whose session factory the worker uses).  ``None``
+    selects the database marked ``default=True``."""
+
+    @model_validator(mode="after")
+    def _type_names_unique(self) -> CommsConfig:
+        """Reject duplicate :attr:`CommTypeConfig.name` entries.
+
+        The registry rejects duplicates at runtime too, but failing
+        at config-load time keeps the broken spec from ever reaching
+        template rendering -- and the duplicate-name error has no
+        useful diagnostic at runtime beyond "already registered".
+        """
+        seen: set[str] = set()
+        dupes: list[str] = []
+
+        for entry in self.types:
+            if entry.name in seen:
+                dupes.append(entry.name)
+
+            seen.add(entry.name)
+
+        if dupes:
+            msg = (
+                f"comm types must have unique names; duplicates: "
+                f"{sorted(set(dupes))!r}"
+            )
+            raise ValueError(msg)
+
+        return self
+
+
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -808,6 +953,11 @@ class ProjectConfig(FoundryConfig):
     generated app emits zero rate-limit references; set to a
     :class:`RateLimitConfig` to opt in.  Per-resource and per-op
     ``rate_limit`` overrides are only allowed when this is set."""
+    comms: CommsConfig | None = None
+    """Communication-platform configuration.  ``None`` (the default)
+    means the generator emits no ``comms.py``; set to a
+    :class:`CommsConfig` to scaffold the registry + worker dispatch
+    handler."""
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,
@@ -869,6 +1019,19 @@ class ProjectConfig(FoundryConfig):
         # ``resolve_database`` raises with a clear message when the
         # key is missing or no default is set.
         self.resolve_database(self.rate_limit.db_key)
+        return self
+
+    @model_validator(mode="after")
+    def _comms_db_key_resolves(self) -> ProjectConfig:
+        """``comms.db_key`` must match a configured database.
+
+        Same shape as :meth:`_rate_limit_db_key_resolves`: catch the
+        bad key at config-load time so the scaffold op never sees it.
+        """
+        if self.comms is None:
+            return self
+
+        self.resolve_database(self.comms.db_key)
         return self
 
     @model_validator(mode="after")
