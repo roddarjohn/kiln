@@ -89,7 +89,7 @@ class {{ entry.resource_class }}(BaseModel):
 
     resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
     filters: list[{{ entry.filter_union }}]
-    search: SearchDiscovery | None = None
+    supports_search: bool = {{ entry.has_search }}
 
 
 class {{ entry.pascal }}FieldRef(BaseModel):
