@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1](https://github.com/roddarjohn/kiln/compare/kiln-v0.9.0...kiln-v0.9.1) (2026-04-30)
+
+
+### Features
+
+* comm ([#65](https://github.com/roddarjohn/kiln/issues/65)) ([df17136](https://github.com/roddarjohn/kiln/commit/df171366f0aee8b95c72be3ebfa5559c160fb785))
+* FE ([#59](https://github.com/roddarjohn/kiln/issues/59)) ([3a39fc9](https://github.com/roddarjohn/kiln/commit/3a39fc9d70b09a61e7b8c360a8c2384124ed3988))
+* filter and searchable ([#62](https://github.com/roddarjohn/kiln/issues/62)) ([64af671](https://github.com/roddarjohn/kiln/commit/64af67145d63889f04bd061846df21f459cc9a6a))
+* generic permissions ([#60](https://github.com/roddarjohn/kiln/issues/60)) ([b44a403](https://github.com/roddarjohn/kiln/commit/b44a403498211e5eda7ad56690864edd2f09a886))
+* pre / post hooks ([#63](https://github.com/roddarjohn/kiln/issues/63)) ([0c992ae](https://github.com/roddarjohn/kiln/commit/0c992ae017f5c9ee691e4ccd495c2d62b6804b64))
+* rate limit ([#64](https://github.com/roddarjohn/kiln/issues/64)) ([87e8ed6](https://github.com/roddarjohn/kiln/commit/87e8ed67d0de436e432f7c73951537e953ac7540))
+
 ## [0.9.0](https://github.com/roddarjohn/kiln/compare/kiln-v0.8.4...kiln-v0.9.0) (2026-04-28)
 
 
