@@ -64,6 +64,24 @@ def test_root_config_option_flags_default_off():
     assert cfg.pgcraft is False
     assert cfg.pgqueuer is False
     assert cfg.editable is False
+    assert cfg.rate_limit is False
+    assert cfg.comms is False
+
+
+def test_root_config_comms_requires_pgqueuer():
+    # The comms dispatch path is pgqueuer-backed; ``comms=True``
+    # without ``pgqueuer=True`` would scaffold a worker that
+    # can't run.  Reject the combination at config-load time.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="comms=True requires pgqueuer"):
+        RootConfig(comms=True)
+
+
+def test_root_config_comms_with_pgqueuer_validates():
+    cfg = RootConfig(comms=True, pgqueuer=True)
+    assert cfg.comms is True
+    assert cfg.pgqueuer is True
 
 
 # -------------------------------------------------------------------
@@ -464,6 +482,126 @@ def test_pgqueuer_on_emits_queue_recipes_using_module():
     # The worker recipe must point at the user's app module so
     # ``just worker`` actually runs the right pgqueuer entrypoint.
     assert "uv run pgq run tracker.queue.main:main" in just
+
+
+# -------------------------------------------------------------------
+# rate_limit flag
+# -------------------------------------------------------------------
+
+
+def test_rate_limit_off_omits_extra_and_block():
+    files = _build_files(RootConfig())
+
+    py = files["pyproject.toml"]
+    project = files["config/project.jsonnet"]
+
+    assert "rate-limit" not in py
+    assert "rate_limit.slowapi" not in project
+    assert "be/rate_limit/rate_limit.libsonnet" not in project
+
+
+def test_rate_limit_on_adds_extra():
+    py = _build_files(RootConfig(rate_limit=True))["pyproject.toml"]
+
+    assert '"kiln-generator[rate-limit]"' in py
+
+
+def test_rate_limit_on_emits_block_in_project_jsonnet():
+    project = _build_files(
+        RootConfig(rate_limit=True, module="tracker"),
+    )["config/project.jsonnet"]
+
+    assert (
+        'local rate_limit = import "be/rate_limit/rate_limit.libsonnet"'
+        in project
+    )
+    # The dotted path follows the user's module so the bootstrap
+    # is a coherent starting point even before any models exist.
+    assert (
+        'rate_limit: rate_limit.slowapi("tracker.models.RateLimitBucket")'
+        in project
+    )
+
+
+def test_rate_limit_combines_with_other_extras():
+    # Multiple extras must end up on a single ``kiln-generator[a,b,c]``
+    # line -- pip / uv can't merge separate kiln-generator entries.
+    py = _build_files(
+        RootConfig(opentelemetry=True, files=True, rate_limit=True),
+    )["pyproject.toml"]
+
+    assert '"kiln-generator[opentelemetry,files,rate-limit]"' in py
+    assert py.count('"kiln-generator') == 1
+
+
+# -------------------------------------------------------------------
+# comms flag
+# -------------------------------------------------------------------
+
+
+def test_comms_off_omits_comms_py_and_block():
+    files = _build_files(RootConfig())
+
+    assert "comms.py" not in files
+    project = files["config/project.jsonnet"]
+    assert "comms.platform" not in project
+    assert "be/comms/comms.libsonnet" not in project
+
+
+def test_comms_on_emits_comms_py_skeleton():
+    files = _build_files(RootConfig(comms=True, pgqueuer=True))
+
+    assert "comms.py" in files
+    comms_py = files["comms.py"]
+    assert "class WelcomeContext" in comms_py
+    # Stub raises so a forgotten swap-out fails loudly.
+    assert "NotImplementedError" in comms_py
+    # The dotted symbols the project.jsonnet block points at:
+    assert "email_transport = " in comms_py
+    assert "resolver = " in comms_py
+
+
+def test_comms_on_emits_comms_block_in_project_jsonnet():
+    # The block must point at ``comms.<symbol>`` (matching the
+    # dotted paths the comms.py skeleton declares); otherwise be's
+    # introspector fails to resolve them.
+    project = _build_files(
+        RootConfig(comms=True, pgqueuer=True, module="tracker"),
+    )["config/project.jsonnet"]
+
+    assert 'local comms = import "be/comms/comms.libsonnet"' in project
+    assert 'message_model: "tracker.models.CommMessage"' in project
+    assert 'recipient_model: "tracker.models.CommRecipient"' in project
+    assert 'email: "comms.email_transport"' in project
+    assert 'preferences: "comms.resolver"' in project
+    assert 'context_schema: "comms.WelcomeContext"' in project
+    # Jinja-escape: the rendered jsonnet must contain literal {{ name }}
+    # for the comm-type's templates (consumed at runtime by
+    # ingot.comms.JinjaRenderer, not at codegen time).
+    assert "{{ name }}" in project
+
+
+def test_comms_py_is_skip_so_real_transports_survive_rebootstrap():
+    # The same foot-gun as auth.py -- a re-bootstrap that resets
+    # the user's real transport implementation would silently
+    # break delivery.  Lock the policy in.
+    cfg = RootConfig(comms=True, pgqueuer=True)
+    files = generate(cfg, root_target)
+
+    comms_file = next(f for f in files if f.path == "comms.py")
+    assert comms_file.if_exists == "skip"
+
+
+def test_comms_on_keeps_pgqueuer_recipes():
+    # The validator forces pgqueuer=True alongside comms=True; the
+    # justfile must therefore emit the queue-install / worker
+    # recipes the comms worker depends on.
+    just = _build_files(
+        RootConfig(comms=True, pgqueuer=True, module="tracker"),
+    )["justfile"]
+
+    assert "queue-install:" in just
+    assert "worker:" in just
 
 
 def test_justfile_includes_openapi_recipe():

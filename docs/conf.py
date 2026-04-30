@@ -82,6 +82,10 @@ nitpick_ignore = [
     ("py:class", "pgqueuer.PgQueuer"),
     ("py:meth", "pgqueuer.Queries.enqueue"),
     ("py:class", "pgqueuer.adapters.persistence.queries.Queries"),
+    # Job lives at pgqueuer.models.Job at import time but pgqueuer's
+    # internal module path resolves to pgqueuer.domain.models.Job.
+    ("py:class", "pgqueuer.models.Job"),
+    ("py:class", "pgqueuer.domain.models.Job"),
     ("py:class", "AsyncpgDriver"),
     # FastAPI exposes HTTPException via runtime imports but its
     # docs site doesn't ship an objects.inv with API-level entries.

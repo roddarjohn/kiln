@@ -502,7 +502,8 @@ A :class:`~ingot.comms.RecipientSpec` with ``method='fax'`` requires
 a transport keyed ``'fax'`` in your config.  Mismatches are caught
 at dispatch time, not config time -- the recipient row gets stamped
 ``status='failed'`` with ``error='no transport for method ...'``.
-This is intentional: a comm-type's :attr:`default_methods` is just
+This is intentional: a comm-type's
+:attr:`~be.config.schema.CommTypeConfig.default_methods` is just
 a hint, and you may want to add new methods independently of the
 comm-type registry.
 

@@ -8,12 +8,12 @@ push, ...) using pgqueuer as the transactional outbox.  The pieces:
   strings (subject + body); :class:`CommRegistry` holds the set the
   consumer's app supports.
 
-* :class:`Renderer` (Protocol) -- turns a :class:`CommType` plus a
-  validated context into a rendered ``(subject, body)`` pair.  The
-  default :class:`JinjaRenderer` is in-process; the same surface
-  fits an HTTP-call renderer that defers to a separate template
-  service (a node renderer, MJML compiler, anything) without
-  changing the platform's call site.
+* :class:`Renderer` -- a Protocol that turns a :class:`CommType`
+  plus a validated context into a rendered subject + body pair.
+  The default :class:`JinjaRenderer` is in-process; the same
+  surface fits an HTTP-call renderer that defers to a separate
+  template service (a node renderer, MJML compiler, anything)
+  without changing the platform's call site.
 
 * :class:`MessageMixin` / :class:`RecipientMixin` /
   :class:`NotificationPreferenceMixin` -- SQLAlchemy mixins
@@ -22,17 +22,17 @@ push, ...) using pgqueuer as the transactional outbox.  The pieces:
   the file / rate-limit mixins: consumer owns the table, we own
   the columns.
 
-* :class:`Transport` (Protocol) -- a method-specific delivery
-  adapter.  One per supported method (``email``, ``sms``, ...).
-  Implementations live in consumer code or third-party adapters;
-  this module ships :class:`LoggingTransport` for tests and local
-  development.
+* :class:`Transport` -- a Protocol implemented per delivery
+  method.  One adapter per supported method, e.g. ``email``,
+  ``sms``.  Implementations live in consumer code or third-party
+  adapters; this module ships :class:`LoggingTransport` for tests
+  and local development.
 
-* :class:`PreferenceResolver` (Protocol) -- "should this recipient
-  receive this comm-type via this method?"  Looked up once per
-  recipient inside :func:`send_communication`; an opted-out
-  recipient yields no row and no job (the message row still records
-  the attempt for audit).
+* :class:`PreferenceResolver` -- a Protocol that answers
+  "should this recipient receive this comm-type via this method?"
+  Looked up once per recipient inside :func:`send_communication`;
+  an opted-out recipient yields no row and no job (the message
+  row still records the attempt for audit).
 
 * :func:`send_communication` -- the producer entry point.  Validates
   context against the :class:`CommType` schema, renders the
@@ -362,7 +362,7 @@ class RecipientMixin:
     The mixin deliberately doesn't declare a foreign key to the
     consumer's :class:`MessageMixin` table -- the consumer names
     that table, so the FK has to come from their own subclass via
-    :class:`~sqlalchemy.ForeignKey` on the ``message_id`` column.
+    a ``sqlalchemy.ForeignKey`` on the ``message_id`` column.
     Keeping the mixin FK-free means the same class works regardless
     of where the consumer mounts the message table.
     """
@@ -541,7 +541,7 @@ class LoggingTransport:
     """
 
     def __init__(self) -> None:
-        """Build a transport with an empty :attr:`sent` log."""
+        """Build a transport with an empty ``self.sent`` log."""
         self.sent: list[tuple[uuid.UUID, str, str]] = []
 
     async def send(
@@ -550,7 +550,7 @@ class LoggingTransport:
         message: MessageMixin,
         recipient: RecipientMixin,
     ) -> None:
-        """Record ``(message_id, address, body)`` into :attr:`sent`."""
+        """Record ``(message_id, address, body)`` into ``self.sent``."""
         self.sent.append((message.id, recipient.address, message.body))
 
 
@@ -695,7 +695,7 @@ def make_dispatch_entrypoint(
     """Build the worker-side handler for :data:`DISPATCH_ENTRYPOINT`.
 
     Returns an ``async (job) -> None`` callable suitable for
-    :meth:`pgqueuer.PgQueuer.entrypoint`.  Per job:
+    ``pgqueuer.PgQueuer.entrypoint``.  Per job:
 
     1. Decode the recipient id from ``job.payload``.
     2. Open a session from *session_factory*; load the recipient

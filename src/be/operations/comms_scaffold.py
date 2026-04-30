@@ -18,7 +18,7 @@ No HTTP routes are emitted -- triggering a send is the consumer's
 own concern.
 
 Mirrors :class:`~be.operations.rate_limit_scaffold.RateLimitScaffold`
-in shape (project-scope, gated by a :meth:`when` predicate so a
+in shape (project-scope, gated by a ``when`` predicate so a
 project without ``comms`` produces zero references to it).
 """
 

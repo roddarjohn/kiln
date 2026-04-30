@@ -10,7 +10,9 @@ emitted -- so a default-defaulted bootstrap drops you into a
 sensible FastAPI shape without a mountain of dead config.
 """
 
-from pydantic import Field
+from __future__ import annotations
+
+from pydantic import Field, model_validator
 
 from foundry.config import FoundryConfig
 
@@ -75,6 +77,25 @@ class RootConfig(FoundryConfig):
             ``../be`` / ``../pgcraft``.  Right for local
             development against unreleased changes; flip off
             when publishing.
+        rate_limit: When ``True``, request the
+            ``kiln-generator[rate-limit]`` extra (slowapi +
+            limits) *and* stamp a default
+            ``rate_limit: rate_limit.slowapi('...')`` block into
+            ``config/project.jsonnet`` pointing at a placeholder
+            bucket model dotted path.  The user owns the bucket
+            model class and the migration -- be_root only stamps
+            the wiring.
+        comms: When ``True``, scaffold the communication-platform
+            wiring: stamp a default ``comms: comms.platform({...})``
+            block into ``config/project.jsonnet`` and emit a
+            starter ``comms.py`` at the project root with stub
+            context schemas, a stub transport, and a stub
+            preference resolver.  Requires ``pgqueuer=True`` --
+            the comms dispatch path is pgqueuer-backed, and the
+            validator rejects the combination at config-load time.
+            ``comms.py`` is ``if_exists="skip"`` like every other
+            be_root output, so re-bootstrap won't reset the
+            user's edits.
 
     """
 
@@ -90,3 +111,29 @@ class RootConfig(FoundryConfig):
     pgcraft: bool = Field(default=False)
     pgqueuer: bool = Field(default=False)
     editable: bool = Field(default=False)
+    rate_limit: bool = Field(default=False)
+    comms: bool = Field(default=False)
+
+    @model_validator(mode="after")
+    def _comms_requires_pgqueuer(self) -> RootConfig:
+        """Reject ``comms=True`` without ``pgqueuer=True``.
+
+        The comms platform's dispatch path is pgqueuer-backed
+        (see :class:`ingot.comms.send_communication` and
+        :func:`ingot.comms.make_dispatch_entrypoint`), so a
+        ``comms`` bootstrap without the queue-install + worker
+        recipes the ``pgqueuer`` flag emits would produce a
+        broken bootstrap.  Fail at config-load time so the bad
+        flag combination is caught before any files are written.
+        """
+        if self.comms and not self.pgqueuer:
+            msg = (
+                "comms=True requires pgqueuer=True (the comms "
+                "dispatch path is pgqueuer-backed; without it, "
+                "the bootstrap would scaffold a worker that "
+                "can't run).  Set pgqueuer: true in the bootstrap "
+                "config."
+            )
+            raise ValueError(msg)
+
+        return self
