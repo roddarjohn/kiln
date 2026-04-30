@@ -66,6 +66,7 @@ def test_root_config_option_flags_default_off():
     assert cfg.editable is False
     assert cfg.rate_limit is False
     assert cfg.comms is False
+    assert cfg.notification_preferences is False
 
 
 def test_root_config_comms_requires_pgqueuer():
@@ -82,6 +83,28 @@ def test_root_config_comms_with_pgqueuer_validates():
     cfg = RootConfig(comms=True, pgqueuer=True)
     assert cfg.comms is True
     assert cfg.pgqueuer is True
+
+
+def test_root_config_notification_preferences_requires_comms():
+    # The preference-resolver scaffold extends the comms platform;
+    # without ``comms``, the resolver and resource would point at
+    # nothing.  Reject at config-load time.
+    from pydantic import ValidationError
+
+    with pytest.raises(
+        ValidationError,
+        match="notification_preferences=True requires comms",
+    ):
+        RootConfig(notification_preferences=True)
+
+
+def test_root_config_notification_preferences_with_comms_validates():
+    cfg = RootConfig(
+        notification_preferences=True,
+        comms=True,
+        pgqueuer=True,
+    )
+    assert cfg.notification_preferences is True
 
 
 # -------------------------------------------------------------------
@@ -602,6 +625,167 @@ def test_comms_on_keeps_pgqueuer_recipes():
 
     assert "queue-install:" in just
     assert "worker:" in just
+
+
+# -------------------------------------------------------------------
+# notification_preferences flag
+# -------------------------------------------------------------------
+
+
+def test_notification_preferences_off_emits_stub_resolver():
+    # Default comms scaffold: stub resolver that opts everyone in.
+    files = _build_files(RootConfig(comms=True, pgqueuer=True))
+
+    comms_py = files["comms.py"]
+    assert "_StubPreferenceResolver" in comms_py
+    assert "DbPreferenceResolver" not in comms_py
+    # The stub doesn't query a model; no model import or
+    # session-factory import sneaks in.  (The ``Mixin`` reference
+    # in the file's docstring is the design-doc guidance; it's
+    # always present.)
+    assert "from app.models import NotificationPreference" not in comms_py
+    assert "_session_factory" not in comms_py
+    # And the per-app jsonnet doesn't get a preferences resource.
+    app_jsonnet = files["config/app.jsonnet"]
+    assert "notification-preferences" not in app_jsonnet
+
+
+def test_notification_preferences_on_emits_real_resolver():
+    files = _build_files(
+        RootConfig(
+            comms=True,
+            pgqueuer=True,
+            notification_preferences=True,
+            module="tracker",
+        ),
+    )
+
+    comms_py = files["comms.py"]
+    # Real resolver replaces the stub.
+    assert "DbPreferenceResolver" in comms_py
+    assert "_StubPreferenceResolver" not in comms_py
+    # Imports the consumer's NotificationPreference model from the
+    # user's models module.
+    assert "from tracker.models import NotificationPreference" in comms_py
+    # And the sessionmaker from the generated tree.
+    assert "_session_factory" in comms_py
+    assert "from _generated.db.primary_session" in comms_py
+    # The query uses the three columns the mixin guarantees.
+    assert "NotificationPreference.subject_key" in comms_py
+    assert "NotificationPreference.comm_type" in comms_py
+    assert "NotificationPreference.method" in comms_py
+    # ``resolver`` symbol is still exposed -- the project.jsonnet
+    # block points at ``comms.resolver`` regardless of which
+    # implementation is in place.
+    assert "resolver = DbPreferenceResolver()" in comms_py
+
+
+def test_notification_preferences_on_emits_resource_jsonnet_file():
+    files = _build_files(
+        RootConfig(
+            comms=True,
+            pgqueuer=True,
+            notification_preferences=True,
+            module="tracker",
+        ),
+    )
+
+    # Resource lives in its own file under config/resources/ so it
+    # composes with both inline-resource and import-resource shapes
+    # of the per-app jsonnet.
+    assert "config/resources/notification_preference.jsonnet" in files
+    resource = files["config/resources/notification_preference.jsonnet"]
+
+    assert 'model: "tracker.models.NotificationPreference"' in resource
+    assert 'route_prefix: "/notification-preferences"' in resource
+    assert "require_auth: true" in resource
+
+    # All five CRUD ops emitted.
+    assert 'name: "get"' in resource
+    assert 'name: "list"' in resource
+    assert 'name: "create"' in resource
+    assert 'name: "update"' in resource
+    assert 'name: "delete"' in resource
+
+    # The four mixin columns are dumped on get/list and writeable
+    # on create.  Update only mutates ``enabled`` -- the natural-
+    # key triple identifies the row.
+    assert 'name: "subject_key"' in resource
+    assert 'name: "comm_type"' in resource
+    assert 'name: "method"' in resource
+    assert 'name: "enabled"' in resource
+
+
+def test_notification_preferences_on_app_jsonnet_imports_the_resource():
+    app_jsonnet = _build_files(
+        RootConfig(
+            comms=True,
+            pgqueuer=True,
+            notification_preferences=True,
+            module="tracker",
+        ),
+    )["config/tracker.jsonnet"]
+
+    # The per-app jsonnet imports the resource file rather than
+    # inlining the (verbose) operation list -- keeps the file
+    # short and matches the real-app pattern of one resource per
+    # ``config/resources/`` file.
+    assert 'import "resources/notification_preference.jsonnet"' in app_jsonnet
+
+
+def test_notification_preferences_on_emits_model_file():
+    files = _build_files(
+        RootConfig(
+            comms=True,
+            pgqueuer=True,
+            notification_preferences=True,
+            module="tracker",
+        ),
+    )
+
+    # Model is emitted under the user's app package so it's
+    # discoverable alongside their other models.
+    assert "tracker/models/notification_preference.py" in files
+    model = files["tracker/models/notification_preference.py"]
+
+    assert "class NotificationPreference" in model
+    assert "from ingot.comms import NotificationPreferenceMixin" in model
+    # ``Base`` is imported from ``db.base`` to match the
+    # pgcraft scaffold's ``migrations/env.py`` (the comment in the
+    # file points non-pgcraft users at where to adjust).
+    assert "from db.base import Base" in model
+    # Unique constraint on the natural-key triple.
+    assert "UniqueConstraint" in model
+    assert '"subject_key"' in model
+    assert '"comm_type"' in model
+    assert '"method"' in model
+
+
+def test_notification_preferences_off_emits_no_extra_files():
+    files = _build_files(RootConfig())
+
+    assert "config/resources/notification_preference.jsonnet" not in files
+    assert "app/models/notification_preference.py" not in files
+    app_jsonnet = files["config/app.jsonnet"]
+    assert "NotificationPreference" not in app_jsonnet
+    assert "notification-preferences" not in app_jsonnet
+    assert "resources/notification_preference.jsonnet" not in app_jsonnet
+
+
+def test_notification_preferences_on_keeps_comms_block_pointing_at_resolver():
+    # Sanity: the project.jsonnet ``comms`` block still references
+    # "comms.resolver" -- the dotted path doesn't change between
+    # stub and real, so the wiring stays the same end-to-end.
+    project = _build_files(
+        RootConfig(
+            comms=True,
+            pgqueuer=True,
+            notification_preferences=True,
+            module="tracker",
+        ),
+    )["config/project.jsonnet"]
+
+    assert 'preferences: "comms.resolver"' in project
 
 
 def test_justfile_includes_openapi_recipe():

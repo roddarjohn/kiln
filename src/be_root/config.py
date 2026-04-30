@@ -96,6 +96,18 @@ class RootConfig(FoundryConfig):
             ``comms.py`` is ``if_exists="skip"`` like every other
             be_root output, so re-bootstrap won't reset the
             user's edits.
+        notification_preferences: When ``True``, scaffold a
+            database-backed preference layer for the comms
+            platform: the generated ``comms.py`` swaps its stub
+            :class:`~ingot.comms.PreferenceResolver` for a real
+            :class:`DbPreferenceResolver` that queries
+            ``{module}.models.NotificationPreference`` (a
+            user-supplied SQLAlchemy class mixing in
+            :class:`ingot.comms.NotificationPreferenceMixin`),
+            and the per-app ``config/{module}.jsonnet`` gains a
+            full-CRUD resource for managing those rows.
+            Requires ``comms=True``; the validator rejects
+            ``notification_preferences`` without ``comms``.
 
     """
 
@@ -113,6 +125,7 @@ class RootConfig(FoundryConfig):
     editable: bool = Field(default=False)
     rate_limit: bool = Field(default=False)
     comms: bool = Field(default=False)
+    notification_preferences: bool = Field(default=False)
 
     @model_validator(mode="after")
     def _comms_requires_pgqueuer(self) -> RootConfig:
@@ -133,6 +146,29 @@ class RootConfig(FoundryConfig):
                 "the bootstrap would scaffold a worker that "
                 "can't run).  Set pgqueuer: true in the bootstrap "
                 "config."
+            )
+            raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def _notification_preferences_requires_comms(self) -> RootConfig:
+        """Reject ``notification_preferences=True`` without ``comms=True``.
+
+        The notification-preferences scaffold extends the comms
+        platform (real :class:`~ingot.comms.PreferenceResolver`,
+        plus the per-app CRUD resource that manages the rows the
+        resolver queries).  Without ``comms``, neither
+        ``comms.py`` nor the project.jsonnet ``comms`` block
+        exists, so the resolver and the resource would point at
+        nothing.
+        """
+        if self.notification_preferences and not self.comms:
+            msg = (
+                "notification_preferences=True requires comms=True "
+                "(the preferences scaffold extends the comms "
+                "platform; without comms there's no resolver to "
+                "wire).  Set comms: true in the bootstrap config."
             )
             raise ValueError(msg)
 

@@ -347,6 +347,31 @@ An opted-out recipient yields **no** ``RecipientMixin`` row and
 **no** pgqueuer job.  The :class:`~ingot.comms.MessageMixin` row
 still records the attempt so the audit trail is honest.
 
+be_root scaffold for the preference layer
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you bootstrapped with ``be_root`` and set
+``notification_preferences: true`` (requires ``comms: true``), the
+generator emits all of this for you:
+
+* The stub :class:`~ingot.comms.PreferenceResolver` in ``comms.py``
+  is replaced by a real ``DbPreferenceResolver`` that queries
+  ``{module}.models.NotificationPreference``.  Default policy:
+  absent row reads as **opt-in** -- flip the fallback in
+  ``is_enabled`` if your project defaults to opt-out.
+* The per-app ``config/{module}.jsonnet`` gains a full-CRUD
+  resource at ``/notification-preferences`` so users can manage
+  their own preferences over HTTP.  The resource is auth-required
+  but otherwise open; add a ``can_list`` guard scoped to
+  ``session.sub`` to restrict each session to its own rows.
+
+You still own the ``NotificationPreference`` SQLAlchemy class
+itself -- subclass :class:`~ingot.comms.NotificationPreferenceMixin`
+on your project's ``Base`` and migrate the table.  The bootstrap
+points the resolver and the resource at
+``{module}.models.NotificationPreference``; place the class there
+or update both dotted paths to match.
+
 .. _comms-sending:
 
 Sending

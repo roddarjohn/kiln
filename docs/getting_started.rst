@@ -92,6 +92,7 @@ optional bits to enable:
      editable: false,
      rate_limit: false,
      comms: false,
+     notification_preferences: false,
    }
 
 Setting ``rate_limit: true`` adds the ``kiln-generator[rate-limit]``
@@ -106,6 +107,17 @@ schemas, a stub :class:`~ingot.comms.Transport`, and a stub
 ``pgqueuer: true`` -- the bootstrap rejects the combination
 otherwise so the broken state is caught at config-load time.  See
 :doc:`comms` for the runtime surface.
+
+Setting ``notification_preferences: true`` (requires ``comms: true``)
+upgrades the comms scaffold: the stub
+:class:`~ingot.comms.PreferenceResolver` is replaced by a real
+``DbPreferenceResolver`` querying
+``{module}.models.NotificationPreference``, and the per-app
+``config/{module}.jsonnet`` gains a full-CRUD resource for
+managing the preference rows.  You still own the
+``NotificationPreference`` SQLAlchemy class -- subclass
+:class:`~ingot.comms.NotificationPreferenceMixin` on your
+project's ``Base`` and migrate the table.
 
 Then run::
 

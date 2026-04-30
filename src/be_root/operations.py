@@ -87,6 +87,7 @@ class RootScaffold:
             "editable": config.editable,
             "rate_limit": config.rate_limit,
             "comms": config.comms,
+            "notification_preferences": config.notification_preferences,
             "kiln_extras": kiln_extras,
         }
 
@@ -163,6 +164,32 @@ class RootScaffold:
             yield StaticFile(
                 path="comms.py",
                 template="comms.py.j2",
+                context=ctx_vars,
+                if_exists="skip",
+            )
+
+        if config.notification_preferences:
+            # The model file is consumer territory but tedious to
+            # write by hand: the columns come from the mixin, the
+            # only project-specific bits are the table name and
+            # the ``Base`` import path.  Scaffold both with a
+            # ``# adjust this import`` comment for non-pgcraft
+            # projects.  ``if_exists="skip"`` keeps re-bootstrap
+            # from clobbering migration-tracked customizations.
+            yield StaticFile(
+                path=f"{config.module}/models/notification_preference.py",
+                template="notification_preference_model.py.j2",
+                context=ctx_vars,
+                if_exists="skip",
+            )
+            # Resource as its own file so it composes with both
+            # styles of per-app jsonnet (inline resources or
+            # ``import "resources/..."``-based).  The default
+            # ``app.jsonnet`` template emits the import line, but
+            # users with the inline shape can adapt.
+            yield StaticFile(
+                path="config/resources/notification_preference.jsonnet",
+                template="config/resources/notification_preference.jsonnet.j2",
                 context=ctx_vars,
                 if_exists="skip",
             )
