@@ -28,9 +28,14 @@ Two operations live here:
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
+from be.operations.representations import (
+    build_representation_spec,
+    representation_class_name,
+    representation_fn_name,
+)
 from be.operations.types import Field, SchemaClass, SerializerFn
 from foundry.imports import ImportCollector
-from foundry.naming import Name, prefix_import
+from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -42,7 +47,6 @@ if TYPE_CHECKING:
     from be.config.schema import (
         App,
         ProjectConfig,
-        RepresentationConfig,
         ResourceConfig,
     )
     from foundry.engine import BuildContext
@@ -80,9 +84,10 @@ class RepresentationSchemas:
         slug = model.snake
 
         for rep in resource.representations:
-            class_name = _representation_class_name(model, rep.name)
+            class_name = representation_class_name(model, rep.name)
             rep_fields = [] if rep.builder is not None else rep.fields
 
+            # The schema is identical regardless of fields vs builder.
             yield SchemaClass(
                 name=class_name,
                 body_template="fastapi/schema_parts/representation.py.j2",
@@ -95,6 +100,13 @@ class RepresentationSchemas:
                     ],
                 },
                 extra_imports=[("typing", "Literal")],
+            )
+
+            # Yield a typed handle every downstream op can fetch
+            # via ``be.operations.representations.pick_representation``
+            # rather than re-deriving the schema/serializer naming.
+            yield build_representation_spec(
+                rep, resource, model, ctx.package_prefix
             )
 
             if rep.builder is not None:
@@ -174,24 +186,6 @@ class Links:
         )
 
 
-def _representation_class_name(model: Name, rep_name: str) -> str:
-    """Compute the Pydantic class name for one representation.
-
-    ``Article`` + ``"default"`` -> ``"ArticleDefault"``;
-    ``Article`` + ``"detail_view"`` -> ``"ArticleDetailView"``.
-    """
-    return f"{model.pascal}{Name(rep_name).pascal}"
-
-
-def representation_fn_name(model: Name, rep_name: str) -> str:
-    """Compute the auto-generated serializer name for one representation.
-
-    ``Article`` + ``"default"`` -> ``"to_article_default"``;
-    ``Article`` + ``"detail_view"`` -> ``"to_article_detail_view"``.
-    """
-    return f"to_{model.snake}_{Name(rep_name).snake}"
-
-
 def _build_entry(
     resource: ResourceConfig,
     package_prefix: str,
@@ -208,77 +202,42 @@ def _build_entry(
         msg = "Resource has no default_representation"
         raise AssertionError(msg)
 
-    rep = _find_representation(resource, rep_name)
+    rep = next(r for r in resource.representations if r.name == rep_name)
 
     model_module, model_name = Name.from_dotted(resource.model)
     slug = model_name.snake
-    rep_class = _representation_class_name(model_name, rep.name)
-    schema_module = prefix_import(
-        package_prefix,
-        Name.parent_path(resource.model, levels=2),
-        "schemas",
-        slug,
-    )
-    imports.add_from(schema_module, rep_class)
+    spec = build_representation_spec(rep, resource, model_name, package_prefix)
 
+    imports.add_from(spec.schema_module, spec.schema_class)
     # Always import the model — the ref resolver fetches rows by
     # id even when the builder is user-supplied.
     imports.add_from(model_module, model_name.pascal)
+
     pk_attr = resource.pk.name
     resolver_fn_name = f"_resolve_{slug}_refs"
 
     if rep.builder is not None:
-        try:
-            builder_module, builder_name_obj = Name.from_dotted(rep.builder)
-
-        except ValueError as exc:
-            msg = (
-                f"representation builder for {resource.model!r} "
-                f"({rep.name!r}) must be a dotted path "
-                f"(got {rep.builder!r})"
-            )
-            raise ValueError(msg) from exc
-
-        builder_name = builder_name_obj.raw
-        imports.add_from(builder_module, builder_name)
+        # User builder: import it under its real name and let the
+        # template emit the registry entry pointing at it.
+        assert spec.serializer_fn_module is not None  # noqa: S101 -- builder
+        imports.add_from(spec.serializer_fn_module, spec.serializer_fn)
         return {
             "slug": slug,
-            "fn_name": builder_name,
+            "fn_name": spec.serializer_fn,
             "is_user_builder": True,
             "model_class": model_name.pascal,
-            "rep_class": rep_class,
+            "rep_class": spec.schema_class,
             "pk_attr": pk_attr,
             "resolver_fn_name": resolver_fn_name,
         }
 
-    fn_name = f"_link_{slug}"
-
     return {
         "slug": slug,
-        "fn_name": fn_name,
+        "fn_name": f"_link_{slug}",
         "is_user_builder": False,
         "model_class": model_name.pascal,
-        "rep_class": rep_class,
+        "rep_class": spec.schema_class,
         "fields": [{"name": f.name} for f in rep.fields],
         "pk_attr": pk_attr,
         "resolver_fn_name": resolver_fn_name,
     }
-
-
-def _find_representation(
-    resource: ResourceConfig, name: str
-) -> RepresentationConfig:
-    """Locate a representation by name on *resource*.
-
-    The resource-level validator already checked the name resolves,
-    so a missing entry here is a programmer error.
-    """
-    for rep in resource.representations:
-        if rep.name == name:
-            return rep
-
-    msg = (
-        f"representation {name!r} not declared on {resource.model!r} "
-        "(should have been caught by ResourceConfig validator)"
-    )
-    raise AssertionError(msg)

@@ -1,12 +1,65 @@
 """Pydantic models for be configuration."""
 
-from typing import Annotated, Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from foundry.config import ExtensibleConfig, FoundryConfig
 from foundry.naming import Name
 from foundry.scope import Scoped
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
+def _reject_duplicates(
+    keys: Iterable[str],
+    *,
+    message: str,
+) -> None:
+    """Raise ``ValueError`` if *keys* repeats any value.
+
+    Shared backend for the recurring "no duplicates in this list"
+    check across configs (e.g. :attr:`AuthConfig.sources`,
+    :attr:`CommsConfig.types`, :attr:`ResourceConfig.representations`).
+    The message is suffixed with the sorted list of offenders so
+    the error pinpoints which entries collided rather than just
+    flagging "some duplicate exists".
+
+    Typed for string keys -- every dup-check in this module is
+    over identifier-shaped strings (transport names, comm-type
+    names, representation names, ...) and stringy ``Literal`` enum
+    values.  Generalize when a non-string surface appears.
+
+    Args:
+        keys: Pre-extracted comparison keys.  Callers pass the
+            list itself for plain-value uniqueness checks, or
+            ``(entry.name for entry in items)`` for
+            uniqueness-by-attribute.
+        message: Human-readable preamble for the exception --
+            typically names the surface being validated
+            (``"comm types must have unique names"``).
+
+    Raises:
+        ValueError: With ``f"{message}: {sorted(set(dupes))!r}"``
+            when *keys* contains repeats.
+
+    """
+    seen: set[str] = set()
+    dupes: list[str] = []
+
+    for key in keys:
+        if key in seen:
+            dupes.append(key)
+
+        seen.add(key)
+
+    if dupes:
+        msg = f"{message}: {sorted(set(dupes))!r}"
+        raise ValueError(msg)
+
 
 NESTED: Literal["nested"] = "nested"
 """Sentinel value for :attr:`FieldSpec.type` that marks a field as a
@@ -197,10 +250,7 @@ class AuthConfig(BaseModel):
 
     @model_validator(mode="after")
     def _sources_unique(self) -> AuthConfig:
-        if len(set(self.sources)) != len(self.sources):
-            msg = f"sources must not contain duplicates: {self.sources}"
-            raise ValueError(msg)
-
+        _reject_duplicates(self.sources, message="sources must not repeat")
         return self
 
     @model_validator(mode="after")
@@ -576,22 +626,10 @@ class CommsConfig(BaseModel):
         template rendering -- and the duplicate-name error has no
         useful diagnostic at runtime beyond "already registered".
         """
-        seen: set[str] = set()
-        dupes: list[str] = []
-
-        for entry in self.types:
-            if entry.name in seen:
-                dupes.append(entry.name)
-
-            seen.add(entry.name)
-
-        if dupes:
-            msg = (
-                f"comm types must have unique names; duplicates: "
-                f"{sorted(set(dupes))!r}"
-            )
-            raise ValueError(msg)
-
+        _reject_duplicates(
+            (entry.name for entry in self.types),
+            message="comm types must have unique names",
+        )
         return self
 
 
@@ -1155,22 +1193,12 @@ class ResourceConfig(BaseModel):
         Each name maps to one generated Pydantic class; two entries
         with the same name would race to register the same class.
         """
-        seen: set[str] = set()
-        dupes: list[str] = []
-
-        for rep in self.representations:
-            if rep.name in seen:
-                dupes.append(rep.name)
-
-            seen.add(rep.name)
-
-        if dupes:
-            msg = (
-                f"Resource {self.model!r}: duplicate representation "
-                f"names {sorted(set(dupes))!r}"
-            )
-            raise ValueError(msg)
-
+        _reject_duplicates(
+            (rep.name for rep in self.representations),
+            message=(
+                f"Resource {self.model!r}: duplicate representation names"
+            ),
+        )
         return self
 
     @model_validator(mode="after")
@@ -1225,17 +1253,25 @@ class ResourceConfig(BaseModel):
 
         return self
 
+    @property
+    def slug(self) -> str:
+        """Snake-case identifier derived from the model class name.
 
-def _resource_class_snake(resource: ResourceConfig) -> str:
-    """Snake-cased class name of *resource*'s model.
+        Used as the resource's per-project key in:
 
-    Matches :func:`be.operations.routing._resource_module_slug`
-    so ``ref_resource`` strings resolve to the same identifier the
-    URL prefix uses.
-    """
-    _, model = Name.from_dotted(resource.model)
+        * the generated route module name (``{app}/routes/{slug}.py``);
+        * the URL prefix default (``"/<plural>"``);
+        * cross-resource ``ref_resource:`` filter targets;
+        * the saved-view / ref-autocomplete registries.
 
-    return model.snake
+        Two resources whose model class names snake to the same
+        slug collide on every one of these surfaces; the
+        project-level
+        :meth:`ProjectConfig._slugs_unique_across_apps` validator
+        catches that and points at the offending pair.
+        """
+        _, model = Name.from_dotted(self.model)
+        return model.snake
 
 
 class AppConfig(BaseModel):
@@ -1465,6 +1501,42 @@ class ProjectConfig(FoundryConfig):
 
         return self
 
+    @model_validator(mode="after")
+    def _slugs_unique_across_apps(self) -> ProjectConfig:
+        """Reject two resources that snake to the same slug.
+
+        Resource slugs (snake-cased model class names) key every
+        cross-resource surface: the route module name, the
+        ``ref_resource:`` filter target, the saved-view /
+        ref-autocomplete registry, the project-wide ``_values``
+        endpoint dispatch.  Two resources with class names that
+        collapse to the same slug -- ``app1.models.Customer`` and
+        ``app2.models.Customer``, ``Foo`` and ``foo`` -- collide on
+        all of them silently.  Catch the collision at config-load
+        time with a message naming both offenders.
+        """
+        seen: dict[str, str] = {}
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                slug = resource.slug
+                first = seen.get(slug)
+
+                if first is not None:
+                    msg = (
+                        f"Resource slug {slug!r} collides between "
+                        f"{first!r} and {resource.model!r}.  Slugs "
+                        f"are derived from the model class name "
+                        f"(snake-cased) and key cross-resource "
+                        f"surfaces (routes, ref filters, saved "
+                        f"views).  Rename one of the model classes."
+                    )
+                    raise ValueError(msg)
+
+                seen[slug] = resource.model
+
+        return self
+
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
         """Return the :class:`DatabaseConfig` selected by *db_key*.
 
@@ -1555,7 +1627,7 @@ def _check_resource_default_representation(
     resource: ResourceConfig, ref_targets: set[str]
 ) -> None:
     """Raise if *resource* needs ``default_representation`` but lacks it."""
-    slug = _resource_class_snake(resource)
+    slug = resource.slug
     referenced = slug in ref_targets
     has_self = _has_self_filter(resource)
     needs_default = resource.searchable or referenced or has_self

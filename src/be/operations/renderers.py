@@ -28,6 +28,7 @@ from be.operations._naming import (
     object_specs_const,
 )
 from be.operations.list import ListResult
+from be.operations.representations import RepresentationSpec
 from be.operations.types import (
     EnumClass,
     Field,
@@ -569,6 +570,24 @@ def _list_result_fragment(
     The individual outputs it references (ListItem / SearchRequest /
     handler / etc.) are yielded separately by the list op and
     rendered through their own registered renderers.
+    """
+    return iter(())
+
+
+@registry.renders(RepresentationSpec)
+def _representation_spec_fragment(
+    _spec: RepresentationSpec, _ctx: RenderCtx
+) -> Iterator[Fragment]:
+    """RepresentationSpec is an internal handle; emit nothing.
+
+    Yielded by :class:`~be.operations.links.RepresentationSchemas`
+    so per-op builders (get / list / create / update) can fetch
+    the resolved schema-class + serializer wiring from the build
+    store via
+    :func:`~be.operations.representations.pick_representation`.
+    The schema class itself is rendered through the
+    :class:`~be.operations.types.SchemaClass` output the same op
+    yields alongside this spec.
     """
     return iter(())
 

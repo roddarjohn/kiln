@@ -93,7 +93,7 @@ def test_auth_config_empty_sources_rejected():
 
 
 def test_auth_config_duplicate_sources_rejected():
-    with pytest.raises(ValueError, match="duplicates"):
+    with pytest.raises(ValueError, match="must not repeat"):
         AuthConfig(
             credentials_schema="myapp.auth.LoginCredentials",
             session_schema="myapp.auth.Session",
@@ -767,6 +767,46 @@ def test_self_filter_without_default_representation_rejected() -> None:
         ValidationError, match=r'requires `default_representation`.*"self"'
     ):
         ProjectConfig(**_project_with(resource))
+
+
+def test_resource_slug_collision_across_apps_rejected() -> None:
+    """Two resources whose models snake-case to the same slug must
+    fail loudly at config-load time -- they'd collide on the route
+    module, ref filter target, and saved-view registry."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=r"slug 'customer' collides"):
+        ProjectConfig(
+            databases=[DatabaseConfig(key="primary", default=True)],
+            apps=[
+                {
+                    "config": {
+                        "module": "billing",
+                        "resources": [
+                            {"model": "billing.models.Customer"},
+                        ],
+                    },
+                    "prefix": "/billing",
+                },
+                {
+                    "config": {
+                        "module": "support",
+                        "resources": [
+                            {"model": "support.models.Customer"},
+                        ],
+                    },
+                    "prefix": "/support",
+                },
+            ],
+        )
+
+
+def test_resource_slug_property_snakes_class_name() -> None:
+    """The slug exposed for cross-resource use is the snake-cased
+    class name -- ``NotificationPreference`` ->
+    ``notification_preference``."""
+    r = ResourceConfig(model="app.models.NotificationPreference")
+    assert r.slug == "notification_preference"
 
 
 # ---------------------------------------------------------------------------

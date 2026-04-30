@@ -10,18 +10,17 @@ than searching the store by name or shape.
 """
 
 from dataclasses import dataclass
+from dataclasses import field as dc_field
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
 
 from be.config.schema import FieldSpec  # noqa: TC001
-from be.operations._naming import (
-    collection_specs_const,
-)
-from be.operations.links import (
-    _representation_class_name,
-    representation_fn_name,
+from be.operations._naming import collection_specs_const
+from be.operations.representations import (
+    RepresentationSpec,
+    pick_representation,
 )
 from be.operations.types import (
     RouteHandler,
@@ -41,9 +40,9 @@ if TYPE_CHECKING:
         ModifierConfig,
         OperationConfig,
         ProjectConfig,
-        RepresentationConfig,
         ResourceConfig,
     )
+    from be.operations.types import _DumpOutputs
     from foundry.engine import BuildContext
 
 
@@ -65,10 +64,8 @@ class ListResult:
     list_item: SchemaClass | None
     serializer: SerializerFn | None
     item_type: str
-    """Pydantic class name of one list row -- e.g.
-    ``"ProductListItem"`` (legacy ad-hoc fields) or
-    ``"ProductDefault"`` (representation).  Used by the Paginate
-    modifier to wrap the response in a ``{Model}Page``."""
+    """Pydantic class name of one list row.  Used by Paginate to
+    wrap the response in a ``{Model}Page``."""
     search_request: SchemaClass
     handler: RouteHandler
     test_case: TestCase
@@ -80,59 +77,41 @@ class List:
 
     Always emits:
 
-    * ``{Model}ListItem`` response schema + matching serializer.
     * ``{Model}SearchRequest`` request schema (empty unless an
       extension op — Filter / Order / Paginate — fills it in).
     * ``POST /search`` route handler and its test case.
 
-    Extension ops run after this one (they declare
-    ``requires=["list"]``) and amend the SearchRequest + handler
-    in place.
+    Plus, when no rep applies, the ad-hoc ``{Model}ListItem``
+    schema and serializer.  Extension ops run after this one
+    and amend the SearchRequest + handler in place.
     """
 
     class Options(BaseModel):
         """Options for the list operation.
 
         ``fields`` is optional because the op can alternatively
-        select a representation (via ``OperationConfig.representation``
-        or the resource's ``default_representation``); the build
-        method resolves which path applies.
+        select a representation; the build method picks which path
+        applies.
         """
 
         fields: list[FieldSpec] = PydanticField(default_factory=list)
 
-    def build(  # noqa: PLR0915
+    def build(
         self,
         ctx: BuildContext[OperationConfig, ProjectConfig],
         options: Options,
     ) -> Iterable[object]:
-        """Emit the list schemas, serializer, handler, and test case.
-
-        Yields:
-            For the legacy ad-hoc-fields path: ListItem schema,
-            its serializer, SearchRequest, route handler, test
-            case, and a :class:`ListResult`.
-
-            For the representation path: SearchRequest, route
-            handler, test case, and a :class:`ListResult` (the
-            schema + serializer come from
-            :class:`~be.operations.links.RepresentationSchemas`).
-
-        """
+        """Emit the list outputs."""
         resource = cast(
             "ResourceConfig",
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
         model_module, model = Name.from_dotted(resource.model)
-        pk_name = resource.pk.name
-        include_actions = resource.include_actions_in_dump
         custom_serializer = ctx.instance.serializer
+        spec = pick_representation(ctx, fall_back_to_default=True)
 
-        rep = _resolve_representation(ctx.instance, resource)
-
-        search_request_name = model.suffixed("SearchRequest")
         search_request = SchemaClass(
-            name=search_request_name,
+            name=model.suffixed("SearchRequest"),
             body_template="fastapi/schema_parts/search_request.py.j2",
             body_context={
                 "model_name": model.pascal,
@@ -143,84 +122,59 @@ class List:
             },
         )
 
-        if rep is not None:
-            yield from _build_with_representation(
-                ctx,
-                resource,
-                rep,
-                model,
-                pk_name=pk_name,
-                search_request=search_request,
-                custom_serializer=custom_serializer,
-            )
-            return
-
-        if not options.fields:
-            msg = (
-                f"Operation {ctx.instance.name!r}: no response shape "
-                f"configured.  Set `representation:`, declare a "
-                f"`default_representation` on the resource, or pass "
-                f"an explicit `fields:` list."
-            )
-            raise ValueError(msg)
-
-        dump = _construct_dump(
-            model,
-            model_module,
-            options.fields,
-            suffix="ListItem",
-            stem="list_item",
-            include_actions=include_actions,
-        )
-        list_item = dump.main_schema
-        serializer = dump.main_serializer
-
-        if custom_serializer is not None:
-            try:
-                ser_module, ser_name_obj = Name.from_dotted(custom_serializer)
-
-            except ValueError as exc:
+        if spec is None:
+            if not options.fields:
                 msg = (
-                    f"Operation {ctx.instance.name!r}: serializer "
-                    f"must be a dotted path (got "
-                    f"{custom_serializer!r})"
+                    f"Operation {ctx.instance.name!r}: no response "
+                    f"shape configured.  Set `representation:`, "
+                    f"declare a `default_representation` on the "
+                    f"resource, or pass an explicit `fields:` list."
                 )
-                raise ValueError(msg) from exc
+                raise ValueError(msg)
 
-            serializer_fn = ser_name_obj.raw
-            serializer_fn_module: str | None = ser_module
-            response_model: str | None = None
-            return_type = "list[dict[str, Any]]"
+            dump = _construct_dump(
+                model,
+                model_module,
+                options.fields,
+                suffix="ListItem",
+                stem="list_item",
+                include_actions=resource.include_actions_in_dump,
+            )
 
         else:
-            serializer_fn = serializer.function_name
-            serializer_fn_module = None
-            response_model = f"list[{list_item.name}]"
-            return_type = response_model
+            dump = None
+
+        wiring = _ListWiring.resolve(
+            spec=spec,
+            dump=dump,
+            include_actions=resource.include_actions_in_dump,
+            custom_serializer=custom_serializer,
+            op_name=ctx.instance.name,
+        )
 
         body_context: dict[str, object] = {
             "has_filter": False,
             "has_sort": False,
             "pagination_mode": None,
-            "default_sort_field": pk_name,
+            "default_sort_field": resource.pk.name,
             "default_sort_dir": "asc",
             "max_page_size": 100,
-            "cursor_field": pk_name,
-            "load_options": dump.load_options,
-            "serializer_async": include_actions,
-            "custom_serializer": custom_serializer is not None,
-            "include_actions": include_actions,
+            "cursor_field": resource.pk.name,
+            "load_options": wiring.load_options,
+            "serializer_async": wiring.serializer_async,
+            "custom_serializer": wiring.is_custom,
+            "include_actions": wiring.include_actions,
         }
 
         extra_imports: list[tuple[str, str]] = [
             ("sqlalchemy", "select"),
-            *dump.load_imports,
+            *wiring.load_imports,
         ]
 
-        if custom_serializer is not None:
+        if wiring.is_custom:
             extra_imports.append(("typing", "Any"))
 
-        if include_actions:
+        if wiring.include_actions:
             actions_module = prefix_import(
                 ctx.package_prefix,
                 Name.parent_path(resource.model, levels=2),
@@ -242,13 +196,14 @@ class List:
             function_name=f"list_{model.snake}s",
             op_name=ctx.instance.name,
             params=[
-                RouteParam(name="body", annotation=search_request_name),
+                RouteParam(name="body", annotation=search_request.name),
             ],
-            response_model=response_model,
-            return_type=return_type,
-            serializer_fn=serializer_fn,
-            serializer_fn_module=serializer_fn_module,
-            request_schema=search_request_name,
+            response_model=wiring.response_model,
+            response_schema_module=wiring.response_schema_module,
+            return_type=wiring.return_type,
+            serializer_fn=wiring.serializer_fn,
+            serializer_fn_module=wiring.serializer_fn_module,
+            request_schema=search_request.name,
             doc=f"List {model.pascal} records.",
             body_template="fastapi/ops/search.py.j2",
             body_context=body_context,
@@ -261,197 +216,125 @@ class List:
             path="/search",
             status_success=200,
             has_request_body=True,
-            request_schema=search_request_name,
+            request_schema=search_request.name,
             is_list_response=True,
         )
 
-        # Nested sub-schemas / sub-serializers are ordered deepest-first
-        # so they render before the parent class that references them.
-        yield from dump.nested_schemas
-        yield list_item
+        # Ad-hoc-fields path emits the per-op schema + serializer
+        # alongside the always-present search machinery.  Nested
+        # sub-schemas / sub-serializers come deepest-first so they
+        # render before the parent.
+        if dump is not None:
+            yield from dump.nested_schemas
+            yield dump.main_schema
 
-        if custom_serializer is None:
-            yield from dump.nested_serializers
-            yield serializer
+            if custom_serializer is None:
+                yield from dump.nested_serializers
+                yield dump.main_serializer
 
         yield search_request
         yield handler
         yield test_case
         yield ListResult(
-            list_item=list_item,
-            serializer=serializer,
-            item_type=list_item.name,
+            list_item=dump.main_schema if dump is not None else None,
+            serializer=dump.main_serializer if dump is not None else None,
+            item_type=wiring.item_type,
             search_request=search_request,
             handler=handler,
             test_case=test_case,
         )
 
 
-def _resolve_representation(
-    op: OperationConfig,
-    resource: ResourceConfig,
-) -> RepresentationConfig | None:
-    """Pick the representation a list/get op should use, if any.
-
-    Mirrors :func:`be.operations.get._resolve_representation`;
-    duplicated to avoid a cross-module import cycle (``get``
-    imports ``list`` via :class:`ListResult` rendering).
-    """
-    explicit = op.representation
-
-    if explicit is not None:
-        for rep in resource.representations:
-            if rep.name == explicit:
-                return rep
-
-        names = [r.name for r in resource.representations]
-        msg = (
-            f"Operation {op.name!r}: representation={explicit!r} "
-            f"not declared on {resource.model!r} (have: {names!r})"
-        )
-        raise ValueError(msg)
-
-    default = resource.default_representation
-
-    if default is None:
-        return None
-
-    for rep in resource.representations:
-        if rep.name == default:
-            return rep
-
-    msg = (  # pragma: no cover -- ResourceConfig validator catches this
-        f"Resource {resource.model!r}: default_representation="
-        f"{default!r} not in representations."
-    )
-    raise AssertionError(msg)
+# -------------------------------------------------------------------
+# Wiring
+# -------------------------------------------------------------------
 
 
-def _build_with_representation(  # noqa: PLR0913
-    ctx: BuildContext[OperationConfig, ProjectConfig],
-    resource: ResourceConfig,
-    rep: RepresentationConfig,
-    model: Name,
-    *,
-    pk_name: str,
-    search_request: SchemaClass,
-    custom_serializer: str | None,
-) -> Iterable[object]:
-    """List handler + test + ListResult wired to a representation."""
-    schema_name = _representation_class_name(model, rep.name)
+@dataclass
+class _ListWiring:
+    """Resolved response wiring for the list handler."""
 
-    if custom_serializer is not None:
+    response_model: str | None
+    response_schema_module: str | None
+    return_type: str
+    serializer_fn: str
+    serializer_fn_module: str | None
+    item_type: str
+    """Pydantic class name of one row -- carried into
+    :class:`ListResult` so :class:`~be.operations.paginate.Paginate`
+    can wrap it in a ``{Model}Page``."""
+    load_options: list[str] = dc_field(default_factory=list)
+    load_imports: list[tuple[str, str]] = dc_field(default_factory=list)
+    serializer_async: bool = False
+    include_actions: bool = False
+    is_custom: bool = False
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        spec: RepresentationSpec | None,
+        dump: _DumpOutputs | None,
+        include_actions: bool,
+        custom_serializer: str | None,
+        op_name: str,
+    ) -> _ListWiring:
+        """Pick the wiring shape from the inputs."""
+        if spec is not None:
+            wiring = cls(
+                response_model=f"list[{spec.schema_class}]",
+                response_schema_module=spec.schema_module,
+                return_type=f"list[{spec.schema_class}]",
+                serializer_fn=spec.serializer_fn,
+                serializer_fn_module=spec.serializer_fn_module,
+                item_type=spec.schema_class,
+                serializer_async=True,
+            )
+
+        else:
+            assert dump is not None  # noqa: S101 -- caller invariant
+            wiring = cls(
+                response_model=f"list[{dump.main_schema.name}]",
+                response_schema_module=None,
+                return_type=f"list[{dump.main_schema.name}]",
+                serializer_fn=dump.main_serializer.function_name,
+                serializer_fn_module=None,
+                item_type=dump.main_schema.name,
+                load_options=dump.load_options,
+                load_imports=list(dump.load_imports),
+                serializer_async=include_actions,
+                include_actions=include_actions,
+            )
+
+        if custom_serializer is None:
+            return wiring
+
         try:
             ser_module, ser_name_obj = Name.from_dotted(custom_serializer)
 
         except ValueError as exc:
             msg = (
-                f"Operation {ctx.instance.name!r}: serializer "
-                f"must be a dotted path (got {custom_serializer!r})"
+                f"Operation {op_name!r}: serializer must be a dotted "
+                f"path (got {custom_serializer!r})"
             )
             raise ValueError(msg) from exc
 
-        serializer_fn = ser_name_obj.raw
-        serializer_fn_module: str | None = ser_module
-        response_model: str | None = None
-        return_type = "list[dict[str, Any]]"
-        serializer_async = False
-
-    elif rep.builder is not None:
-        try:
-            builder_module, builder_name_obj = Name.from_dotted(rep.builder)
-
-        except ValueError as exc:
-            msg = (
-                f"Representation {rep.name!r} on {resource.model!r}: "
-                f"builder must be a dotted path (got {rep.builder!r})"
-            )
-            raise ValueError(msg) from exc
-
-        serializer_fn = builder_name_obj.raw
-        serializer_fn_module = builder_module
-        response_model = f"list[{schema_name}]"
-        return_type = response_model
-        serializer_async = True
-
-    else:
-        serializer_fn = representation_fn_name(model, rep.name)
-        serializer_fn_module = None
-        response_model = f"list[{schema_name}]"
-        return_type = response_model
-        serializer_async = True
-
-    body_context: dict[str, object] = {
-        "has_filter": False,
-        "has_sort": False,
-        "pagination_mode": None,
-        "default_sort_field": pk_name,
-        "default_sort_dir": "asc",
-        "max_page_size": 100,
-        "cursor_field": pk_name,
-        "load_options": [],
-        "serializer_async": serializer_async,
-        "custom_serializer": custom_serializer is not None,
-        "include_actions": False,
-    }
-
-    extra_imports: list[tuple[str, str]] = [("sqlalchemy", "select")]
-
-    if custom_serializer is not None:
-        extra_imports.append(("typing", "Any"))
-
-    response_schema_module = (
-        prefix_import(
-            ctx.package_prefix,
-            Name.parent_path(resource.model, levels=2),
-            "schemas",
-            model.snake,
+        # Custom serializer drops ``response_model`` so FastAPI
+        # doesn't validate against the auto schema; the function
+        # is responsible for the dict shape it returns.
+        return _ListWiring(
+            response_model=None,
+            response_schema_module=None,
+            return_type="list[dict[str, Any]]",
+            serializer_fn=ser_name_obj.raw,
+            serializer_fn_module=ser_module,
+            item_type=wiring.item_type,
+            load_options=wiring.load_options,
+            load_imports=wiring.load_imports,
+            serializer_async=False,
+            include_actions=False,
+            is_custom=True,
         )
-        if response_model and not response_model.startswith("list[dict")
-        else None
-    )
-
-    handler = RouteHandler(
-        method="POST",
-        path="/search",
-        function_name=f"list_{model.snake}s",
-        op_name=ctx.instance.name,
-        params=[
-            RouteParam(name="body", annotation=search_request.name),
-        ],
-        response_model=response_model,
-        response_schema_module=response_schema_module,
-        return_type=return_type,
-        serializer_fn=serializer_fn,
-        serializer_fn_module=serializer_fn_module,
-        request_schema=search_request.name,
-        doc=f"List {model.pascal} records.",
-        body_template="fastapi/ops/search.py.j2",
-        body_context=body_context,
-        extra_imports=extra_imports,
-    )
-
-    test_case = TestCase(
-        op_name="list",
-        method="post",
-        path="/search",
-        status_success=200,
-        has_request_body=True,
-        request_schema=search_request.name,
-        is_list_response=True,
-    )
-
-    yield search_request
-    yield handler
-    yield test_case
-    yield ListResult(
-        list_item=None,
-        serializer=None,
-        item_type=schema_name,
-        search_request=search_request,
-        handler=handler,
-        test_case=test_case,
-    )
 
 
 # -------------------------------------------------------------------
