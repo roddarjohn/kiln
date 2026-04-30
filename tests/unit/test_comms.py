@@ -18,7 +18,6 @@ from be.config.schema import (
 from be.operations.comms_scaffold import (
     CommsScaffold,
     _resolve_template,
-    _split,
 )
 from foundry.engine import BuildContext
 from foundry.env import create_jinja_env, render_template
@@ -124,23 +123,6 @@ class TestProjectConfigComms:
         )
         # No exception means the default-DB lookup worked.
         assert cfg.comms is not None
-
-
-# ---------------------------------------------------------------------------
-# _split helper
-# ---------------------------------------------------------------------------
-
-
-class TestSplit:
-    def test_splits_dotted_path(self):
-        assert _split("a.b.C") == ("a.b", "C")
-
-    def test_two_part_path(self):
-        assert _split("a.B") == ("a", "B")
-
-    def test_no_dot_raises(self):
-        with pytest.raises(ValueError, match="dotted path"):
-            _split("noModule")
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ project without ``comms`` produces zero references to it).
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from foundry.naming import prefix_import
+from foundry.naming import prefix_import, split_dotted_class
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -76,21 +76,6 @@ def _resolve_template(source: TemplateLike, *, kind: str, name: str) -> str:
         raise FileNotFoundError(msg) from exc
 
 
-def _split(dotted: str) -> tuple[str, str]:
-    """Split ``"pkg.mod.Name"`` into ``("pkg.mod", "Name")``.
-
-    Centralises the rsplit so every dotted path on the config
-    surface goes through one path -- a missing dot raises a
-    ``ValueError`` from ``rsplit`` rather than silently producing
-    an unimportable module name.
-    """
-    if "." not in dotted:
-        msg = f"expected dotted path, got {dotted!r}"
-        raise ValueError(msg)
-
-    return tuple(dotted.rsplit(".", 1))  # type: ignore[return-value]
-
-
 @operation("comms_scaffold", scope="project")
 class CommsScaffold:
     """Generate ``comms.py``.
@@ -134,8 +119,12 @@ class CommsScaffold:
         comms = config.comms
         assert comms is not None  # noqa: S101 -- guaranteed by when()
 
-        message_module, message_class = _split(comms.message_model)
-        recipient_module, recipient_class = _split(comms.recipient_model)
+        message_module, message_class = split_dotted_class(
+            comms.message_model,
+        )
+        recipient_module, recipient_class = split_dotted_class(
+            comms.recipient_model,
+        )
 
         # Per-type context-schema imports.  Two types whose context
         # schemas live in the same module share a single ``from x
@@ -144,7 +133,7 @@ class CommsScaffold:
         types_ctx: list[dict[str, Any]] = []
 
         for entry in comms.types:
-            ctx_module, ctx_class = _split(entry.context_schema)
+            ctx_module, ctx_class = split_dotted_class(entry.context_schema)
             types_ctx.append(
                 {
                     "name": entry.name,
@@ -167,7 +156,7 @@ class CommsScaffold:
         transports_ctx: list[dict[str, str]] = []
 
         for method, dotted in comms.transports.items():
-            mod, name = _split(dotted)
+            mod, name = split_dotted_class(dotted)
             transports_ctx.append(
                 {"method": method, "module": mod, "name": name},
             )
@@ -176,13 +165,15 @@ class CommsScaffold:
         renderer_name: str | None = None
 
         if comms.renderer is not None:
-            renderer_module, renderer_name = _split(comms.renderer)
+            renderer_module, renderer_name = split_dotted_class(comms.renderer)
 
         preferences_module: str | None = None
         preferences_name: str | None = None
 
         if comms.preferences is not None:
-            preferences_module, preferences_name = _split(comms.preferences)
+            preferences_module, preferences_name = split_dotted_class(
+                comms.preferences,
+            )
 
         database = config.resolve_database(comms.db_key)
 
