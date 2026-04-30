@@ -1,11 +1,15 @@
 """Generated link registry for app `{{ module }}`.
 
-Maps each opted-in resource's slug (lowercase model class name)
-to an async builder ``(instance, session) -> {Model}Link`` and
-to a ref resolver ``(ids, db, session) -> (items, dropped)``.
+Maps each resource's slug to an async builder
+``(instance, session) -> {Model}{DefaultRep}`` and to a ref
+resolver ``(ids, db, session) -> (items, dropped)``.
+
+The builder uses the resource's
+:attr:`~be.config.schema.ResourceConfig.default_representation`
+as the response shape.
 
 * The ``LINKS`` mapping powers ``_values`` endpoints and any
-  user code that wants the resource's link shape.
+  user code that wants the resource's reference shape.
 * The ``REF_RESOLVERS`` mapping powers saved-view hydration and
   any user-supplied serializer that resolves stored ref ids
   through :func:`ingot.saved_views.hydrate_view`.
@@ -26,16 +30,15 @@ from {{ module }} import {{ names | join(", ") }}
 {% if not entry.is_user_builder %}
 
 
-async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ entry.link_schema_class }}:
-{% if entry.kind == "name" %}
-    return {{ entry.link_schema_class }}(name=obj.{{ entry.name_attr }})
-{% elif entry.kind == "id" %}
-    return {{ entry.link_schema_class }}(id=obj.{{ entry.id_attr }})
-{% else %}
-    return {{ entry.link_schema_class }}(
-        id=obj.{{ entry.id_attr }},
-        name=obj.{{ entry.name_attr }},
+async def {{ entry.fn_name }}(obj: {{ entry.model_class }}, session: Any) -> {{ entry.rep_class }}:
+{% if entry.fields %}
+    return {{ entry.rep_class }}(
+{% for field in entry.fields %}
+        {{ field.name }}=obj.{{ field.name }},
+{% endfor %}
     )
+{% else %}
+    return {{ entry.rep_class }}()
 {% endif %}
 {% endif %}
 

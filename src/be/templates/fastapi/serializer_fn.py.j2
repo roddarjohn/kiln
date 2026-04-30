@@ -19,6 +19,17 @@ async def {{ function_name }}(
             *await available_actions(None, session, {{ collection_specs_const }}),
         ],
     )
+{% elif representation %}
+async def {{ function_name }}(
+    obj: {{ model_name }},
+    session: Any,
+) -> {{ schema_name }}:
+    """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""
+    return {{ schema_name }}(
+{% for f in fields %}
+        {{ f.name }}=obj.{{ f.name }},
+{% endfor %}
+    )
 {% else %}
 def {{ function_name }}(obj: {{ model_name }}) -> {{ schema_name }}:
     """Serialize a {{ model_name }} instance to :class:`{{ schema_name }}`."""

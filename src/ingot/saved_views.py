@@ -56,7 +56,16 @@ class SavedViewMixin:
         {
           model: "myapp.models.Product",
           saved_views: { model: "myapp.models.SavedView" },
-          link: { kind: "id_name", name: "name" },
+          representations: [
+            {
+              name: "default",
+              fields: [
+                { name: "id", type: "uuid" },
+                { name: "name", type: "str" },
+              ],
+            },
+          ],
+          default_representation: "default",
           // ...
         }
 

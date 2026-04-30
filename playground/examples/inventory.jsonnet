@@ -27,9 +27,20 @@ local resource = import "be/resources/presets.libsonnet";
       pk: { name: "id", type: "uuid" },
       route_prefix: "/products",
       require_auth: false,
-      // Link config required because the list filter below uses
-      // ``values: "self"`` (which serialises Product as a link).
-      link: { kind: "id_name", name: "name" },
+      // The list filter below uses ``values: "self"``, which means
+      // Product gets serialised through its default representation
+      // (and saved-view hydration / ref autocomplete will too if
+      // anyone references this resource).
+      representations: [
+        {
+          name: "default",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "name", type: "str" },
+          ],
+        },
+      ],
+      default_representation: "default",
 
       operations: [
         {

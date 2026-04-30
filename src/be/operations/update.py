@@ -3,6 +3,10 @@
 from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
+from be.operations.create import (
+    _representation_response_wiring,
+    _resolve_response_representation,
+)
 from be.operations.renderers import (
     FETCH_OR_404_IMPORT,
     gate_wiring,
@@ -83,6 +87,17 @@ class Update:
         )
         hook_ctx, hook_imports = hooks_wiring(ctx.instance)
 
+        rep = _resolve_response_representation(ctx.instance, resource)
+        rep_ctx, rep_imports, response_model, response_schema_module = (
+            _representation_response_wiring(
+                ctx,
+                resource,
+                rep,
+                model,
+                package_prefix=ctx.package_prefix,
+            )
+        )
+
         yield RouteHandler(
             method="PATCH",
             path=f"/{{{resource.pk.name}}}",
@@ -95,16 +110,20 @@ class Update:
                 ),
                 RouteParam(name="body", annotation=request_schema),
             ],
+            response_model=response_model,
+            response_schema_module=response_schema_module,
+            return_type=response_model,
             doc=f"Update a {model.pascal} by {resource.pk.name}.",
             request_schema=request_schema,
             body_template="fastapi/ops/update.py.j2",
-            body_context={**gate_ctx, **hook_ctx},
+            body_context={**gate_ctx, **hook_ctx, **rep_ctx},
             extra_imports=[
                 ("sqlalchemy", "select"),
                 ("sqlalchemy", "update"),
                 FETCH_OR_404_IMPORT,
                 *gate_imports,
                 *hook_imports,
+                *rep_imports,
             ],
         )
 

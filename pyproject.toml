@@ -99,7 +99,7 @@ router = "be.operations.routing:Router"
 project_router = "be.operations.routing:ProjectRouter"
 actions = "be.operations.actions:Actions"
 permissions = "be.operations.permissions:Permissions"
-link_schema = "be.operations.links:LinkSchema"
+representation_schemas = "be.operations.links:RepresentationSchemas"
 links = "be.operations.links:Links"
 resource_registry = "be.operations.resource_registry:ResourceRegistry"
 

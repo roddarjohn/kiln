@@ -13,7 +13,8 @@
 {% set values_expr -%}
 {% if dump_call|default(none) %}{{ dump_call }}(body){% else %}body.model_dump(exclude_unset=True){% endif %}
 {%- endset %}
-{% if post_hook_call|default(none) %}
+{% set wants_returning = post_hook_call|default(none) or serialize_response_call|default(none) %}
+{% if wants_returning %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
@@ -22,7 +23,13 @@
     )
     obj = result.scalar_one()
     await db.commit()
+{% if post_hook_call|default(none) %}
     await {{ post_hook_call }}(obj, body, db=db)
+{% endif %}
+{% if serialize_response_call|default(none) %}
+
+    return await {{ serialize_response_call }}(obj, session)
+{% endif %}
 {% else %}
     await db.execute(
         update({{ model_name }})

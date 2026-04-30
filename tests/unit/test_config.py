@@ -11,9 +11,9 @@ from be.config.schema import (
     DatabaseConfig,
     FieldSpec,
     FilterConfig,
-    LinkConfig,
     OperationConfig,
     ProjectConfig,
+    RepresentationConfig,
     ResourceConfig,
     StructuredFilterField,
 )
@@ -613,45 +613,79 @@ def test_field_spec_enum_with_nested_fields_rejected() -> None:
         )
 
 
-def test_link_config_builder_with_shorthand_rejected() -> None:
+def test_representation_builder_with_fields_rejected() -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match="provide either `builder` or"):
-        LinkConfig(
-            kind="id_name",
-            name="title",
+        RepresentationConfig(
+            name="default",
+            fields=[{"name": "title", "type": "str"}],
             builder="app.links.build_project_link",
         )
 
 
-def test_link_config_kind_name_requires_name_attr() -> None:
-    from pydantic import ValidationError
+def test_representation_fields_only_is_valid() -> None:
+    cfg = RepresentationConfig(
+        name="default",
+        fields=[
+            {"name": "id", "type": "uuid"},
+            {"name": "title", "type": "str"},
+        ],
+    )
+    assert cfg.builder is None
+    assert [f.name for f in cfg.fields] == ["id", "title"]
+    assert [f.type for f in cfg.fields] == ["uuid", "str"]
 
-    with pytest.raises(ValidationError, match="requires either"):
-        LinkConfig(kind="name")
 
-
-def test_link_config_kind_id_name_requires_name_attr() -> None:
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError, match="requires either"):
-        LinkConfig(kind="id_name")
-
-
-def test_link_config_builder_only_is_valid() -> None:
-    cfg = LinkConfig(kind="id_name", builder="app.links.build_link")
+def test_representation_builder_only_is_valid() -> None:
+    cfg = RepresentationConfig(name="default", builder="app.links.build_link")
     assert cfg.builder == "app.links.build_link"
-    assert cfg.name is None
-    assert cfg.id is None
+    assert cfg.fields == []
 
 
-def test_searchable_resource_without_link_rejected() -> None:
+def test_representation_empty_fields_is_valid() -> None:
+    # Empty fields = schema with just the ``type`` discriminator;
+    # occasionally useful for ``ref`` filters that only need the
+    # resource-type identity.
+    cfg = RepresentationConfig(name="lite")
+    assert cfg.fields == []
+    assert cfg.builder is None
+
+
+def test_resource_default_representation_must_be_declared() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="default_representation="):
+        ResourceConfig(
+            model="app.models.Item",
+            representations=[
+                RepresentationConfig(name="lite"),
+            ],
+            default_representation="missing",
+        )
+
+
+def test_resource_representation_names_must_be_unique() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="duplicate representation"):
+        ResourceConfig(
+            model="app.models.Item",
+            representations=[
+                RepresentationConfig(name="default"),
+                RepresentationConfig(name="default"),
+            ],
+        )
+
+
+def test_searchable_resource_without_default_representation_rejected() -> None:
     from pydantic import ValidationError
 
     resource = ResourceConfig(model="app.models.Item", searchable=True)
 
     with pytest.raises(
-        ValidationError, match=r"requires `link`.*searchable=True"
+        ValidationError,
+        match=r"requires `default_representation`.*searchable=True",
     ):
         ProjectConfig(
             **_project_with(
@@ -665,7 +699,7 @@ def test_searchable_resource_without_link_rejected() -> None:
         )
 
 
-def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
+def test_resource_referenced_by_ref_without_default_rep_rejected() -> None:
     from pydantic import ValidationError
 
     target = ResourceConfig(model="app.models.Customer")
@@ -690,7 +724,10 @@ def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
         ],
     )
 
-    with pytest.raises(ValidationError, match=r"requires `link`.*ref_resource"):
+    with pytest.raises(
+        ValidationError,
+        match=r"requires `default_representation`.*ref_resource",
+    ):
         ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
             apps=[
@@ -708,7 +745,7 @@ def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
         )
 
 
-def test_self_filter_without_link_rejected() -> None:
+def test_self_filter_without_default_representation_rejected() -> None:
     from pydantic import ValidationError
 
     resource = ResourceConfig(
@@ -726,7 +763,9 @@ def test_self_filter_without_link_rejected() -> None:
         ],
     )
 
-    with pytest.raises(ValidationError, match=r'requires `link`.*"self"'):
+    with pytest.raises(
+        ValidationError, match=r'requires `default_representation`.*"self"'
+    ):
         ProjectConfig(**_project_with(resource))
 
 

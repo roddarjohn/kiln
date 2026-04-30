@@ -48,19 +48,19 @@ class Paginate:
         """
         model = resource_model(ctx)
 
+        result = ctx.store.output_under_ancestor(
+            ctx.instance_id, "operation", ListResult
+        )
+
         page_name = model.suffixed("Page")
         yield SchemaClass(
             name=page_name,
             body_template="fastapi/schema_parts/page.py.j2",
             body_context={
                 "model_name": model.pascal,
-                "item_type": f"{model.pascal}ListItem",
+                "item_type": result.item_type,
                 "mode": options.mode,
             },
-        )
-
-        result = ctx.store.output_under_ancestor(
-            ctx.instance_id, "operation", ListResult
         )
 
         handler = result.handler

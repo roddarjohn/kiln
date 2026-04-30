@@ -424,6 +424,13 @@ def _serializer_fragment(
     else:
         rendered_fields = ser.fields
 
+    if ser.representation:
+        # Representation-mode serializers take ``session: Any`` so
+        # they slot in wherever a builder is expected (LINKS
+        # registry, get/list response path) without forcing the
+        # caller to import the project's session schema.
+        imports.add_from("typing", "Any")
+
     yield FileFragment(
         path=ser_path,
         template="fastapi/serializer_outer.py.j2",
@@ -446,6 +453,7 @@ def _serializer_fragment(
                 for f in rendered_fields
             ],
             "include_actions": ser.include_actions,
+            "representation": ser.representation,
             **actions_context,
         },
         imports=imports,
