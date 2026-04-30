@@ -69,18 +69,26 @@ class {{ entry.pascal }}FieldRef(BaseModel):
 class {{ entry.pascal }}ValuesRequest(BaseModel):
     """Request body for ``POST /_values`` targeting ``{{ entry.slug }}``.
 
-    ``field`` is ``None`` for the resource-level search and a
-    field name (constrained to this resource's fields) for a
-    per-field value provider lookup.  The remaining fields are
-    the standard pagination/search params shared with
-    :class:`ingot.filter_values.FilterValuesRequest`.
+    ``fields`` is interpreted by ``len()``:
+
+    * empty — resource-level search using the configured
+      :class:`SearchSpec` (or a pk fallback when none).
+    * one element — per-field value provider for that field
+      (enum / free-text / ref dispatch).
+    * two or more — multi-column resource search ILIKE-OR'd
+      across the named columns.
+
+    Field names are constrained at codegen time to this
+    resource's filter fields.
     """
 
     resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
 {% if entry.field_literal_src %}
-    field: Literal[{{ entry.field_literal_src }}] | None = None
+    fields: list[Literal[{{ entry.field_literal_src }}]] = Field(
+        default_factory=list
+    )
 {% else %}
-    field: str | None = None
+    fields: list[str] = Field(default_factory=list)
 {% endif %}
     q: str | None = None
     cursor: str | None = None

@@ -297,9 +297,14 @@ class FilterDiscoveryRequest(BaseModel):
     * ``None`` (the default) — every registered resource.
     * empty list — none.
     * one or more slugs — that subset, in request order.
+
+    Typed as :class:`~collections.abc.Sequence` so codegen-side
+    callers can pass narrower lists (e.g. ``list[ResourceSlug]``
+    where ``ResourceSlug`` is a ``Literal`` over the registered
+    slugs) without an invariance error.
     """
 
-    resources: list[str] | None = None
+    resources: Sequence[str] | None = None
 
 
 class FieldRef(BaseModel):
@@ -517,29 +522,64 @@ class ResourceRegistry:
         self,
         *,
         resource: str,
-        field: str | None,
+        fields: Sequence[str],
         request: FilterValuesRequest,
         db: AsyncSession,
         session: Any = None,
     ) -> ValuesPage:
         """Dispatch a value-provider request to the right code path.
 
-        ``field=None`` runs the resource-level search; a named
-        field dispatches by :class:`FilterField` variant —
-        ``Enum`` and ``FreeText`` serve their own values, ``Ref``
-        recurses into the target resource's search, ``Bool`` and
-        ``LiteralField`` 404.
+        Three cases by ``len(fields)``:
+
+        * **0** — resource-level search using the configured
+          :class:`SearchSpec.columns` (or pk fallback).
+        * **1** — per-field dispatch.  ``Enum`` / ``FreeText``
+          serve their own value providers; ``Ref`` recurses
+          into the target resource's search; ``Bool`` /
+          ``LiteralField`` 404 (FE renders them natively).
+        * **2+** — resource search restricted to those
+          columns, ILIKE-OR'd on ``q``.  Lets the FE narrow an
+          autocomplete to a subset of the resource's
+          searchable columns without changing the resource's
+          configured defaults.
         """
         entry = self._require_entry(resource)
 
-        if field is None:
+        if not fields:
             return await self._search_resource(entry, request, db, session)
 
+        if len(fields) == 1:
+            return await self._dispatch_single_field(
+                entry=entry,
+                field_name=fields[0],
+                request=request,
+                db=db,
+                session=session,
+            )
+
+        return await _run_multi_column_search(
+            entry=entry,
+            fields=fields,
+            request=request,
+            db=db,
+            session=session,
+        )
+
+    async def _dispatch_single_field(
+        self,
+        *,
+        entry: ResourceEntry,
+        field_name: str,
+        request: FilterValuesRequest,
+        db: AsyncSession,
+        session: Any,
+    ) -> ValuesPage:
+        """Per-field value provider for the ``fields=[one]`` case."""
         spec = next(
             (
                 candidate
                 for candidate in entry.fields
-                if candidate.name == field
+                if candidate.name == field_name
             ),
             None,
         )
@@ -547,7 +587,7 @@ class ResourceRegistry:
         if spec is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"Unknown filter field: {field}",
+                detail=f"Unknown filter field: {field_name}",
             )
 
         if isinstance(spec, Enum):
@@ -565,7 +605,7 @@ class ResourceRegistry:
         # Bool / LiteralField: no values endpoint.
         raise HTTPException(
             status_code=404,
-            detail=f"Field {field!r} has no value provider",
+            detail=f"Field {field_name!r} has no value provider",
         )
 
     def _require_entry(self, resource: str) -> ResourceEntry:
@@ -656,25 +696,37 @@ class ResourceRegistry:
 async def _scalar_page(
     *,
     statement: Select[Any],
-    ordering_column: ColumnElement[Any],
     request: FilterValuesRequest,
     db: AsyncSession,
 ) -> tuple[list[Any], str | None]:
-    """Run *statement* with single-column keyset pagination.
+    """Run *statement* with offset pagination, returning scalar rows.
 
-    Adds ``WHERE col > previous_cursor`` (when a cursor is set),
-    ``ORDER BY col ASC``, and ``LIMIT n+1``.  Returns the page of
-    scalar rows plus the next cursor (encoded from the last row's
-    value) or ``None`` when the page exhausts the result set.
+    The cursor is just a stringified integer offset.  Offset is
+    fine here because both callers (enum and free-text values)
+    work over small, stable result sets where the ordering /
+    bookkeeping nuances of keyset don't pay off — and the
+    autocomplete UX rarely paginates past the first page anyway.
+
+    Caller is responsible for the ORDER BY (it knows what column
+    to sort on); this helper just appends ``OFFSET n LIMIT m+1``.
     """
     page_size = resolved_limit(request.limit)
 
-    if request.cursor:
-        statement = statement.where(ordering_column > request.cursor)
+    try:
+        offset = max(0, int(request.cursor or 0))
 
-    statement = statement.order_by(ordering_column.asc()).limit(page_size + 1)
-    rows = list((await db.execute(statement)).scalars().all())
-    return _finalise_scalar_page(rows, page_size)
+    except ValueError:
+        offset = 0
+
+    rows = list(
+        (await db.execute(statement.offset(offset).limit(page_size + 1)))
+        .scalars()
+        .all()
+    )
+    has_more = len(rows) > page_size
+    page = rows[:page_size]
+    next_cursor = str(offset + page_size) if has_more else None
+    return page, next_cursor
 
 
 # -------------------------------------------------------------------
@@ -738,6 +790,40 @@ async def _run_ilike_search(
         statement=select(entry.model).where(
             or_(*[column.ilike(f"%{query}%") for column in columns])
         ),
+        entry=entry,
+        search=search,
+        request=request,
+        db=db,
+        session=session,
+    )
+
+
+async def _run_multi_column_search(
+    *,
+    entry: ResourceEntry,
+    fields: Sequence[str],
+    request: FilterValuesRequest,
+    db: AsyncSession,
+    session: Any,
+) -> ValuesPage:
+    """Resource search restricted to the columns named in *fields*.
+
+    ``q`` ILIKE-ORs across the named columns (skipped when ``q``
+    is unset).  Results are shaped via the entry's link builder
+    when one's configured; falls back to
+    ``{value: pk, label: str(pk)}`` otherwise.
+    """
+    search = entry.search or _default_search_spec(entry)
+    columns = [getattr(entry.model, name) for name in fields]
+    statement = select(entry.model)
+
+    if request.q and columns:
+        statement = statement.where(
+            or_(*[column.ilike(f"%{request.q}%") for column in columns])
+        )
+
+    return await _run_model_search(
+        statement=statement,
         entry=entry,
         search=search,
         request=request,
