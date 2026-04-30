@@ -731,7 +731,21 @@ def make_dispatch_entrypoint(
         recipient_id = uuid.UUID(job.payload.decode("utf-8"))
 
         async with session_factory() as session:
-            recipient = await session.get(recipient_cls, recipient_id)
+            # ``SELECT ... FOR UPDATE SKIP LOCKED`` claims the row for
+            # this worker.  pgqueuer can fan a job out to multiple
+            # workers (concurrent consumers, retry on the same worker
+            # while another instance is mid-send); without the lock,
+            # two workers see ``status == PENDING`` and both call
+            # ``transport.send`` -- the user gets duplicate
+            # notifications.  ``skip_locked`` makes the second worker
+            # see no row rather than block, so it bails fast and
+            # leaves the in-flight worker to finish.
+            result = await session.execute(
+                select(recipient_cls)
+                .where(recipient_cls.id == recipient_id)
+                .with_for_update(skip_locked=True),
+            )
+            recipient = result.scalar_one_or_none()
 
             if recipient is None:
                 return

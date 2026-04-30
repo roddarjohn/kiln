@@ -111,8 +111,32 @@ def test_name_lower():
     assert Name("Article").lower == "article"
 
 
+def test_name_lower_does_not_split_pascal_case():
+    assert Name("NotificationPreference").lower == "notificationpreference"
+
+
+def test_name_snake_from_pascal():
+    assert Name("NotificationPreference").snake == "notification_preference"
+
+
+def test_name_snake_passes_snake_through():
+    assert Name("publish_article").snake == "publish_article"
+
+
+def test_name_snake_handles_acronyms():
+    assert Name("XMLParser").snake == "xml_parser"
+
+
+def test_name_snake_single_word():
+    assert Name("Article").snake == "article"
+
+
 def test_name_slug():
     assert Name("publish_article").slug == "publish-article"
+
+
+def test_name_slug_from_pascal():
+    assert Name("NotificationPreference").slug == "notification-preference"
 
 
 def test_name_suffixed():

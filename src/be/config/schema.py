@@ -717,7 +717,27 @@ class FieldSpec(BaseModel):
         return self.type == ENUM
 
 
-class ModifierConfig(BaseModel):
+class _ExtensibleConfig(BaseModel):
+    """Base for configs whose extra keys feed an op's ``Options`` model.
+
+    Both :class:`ModifierConfig` and :class:`OperationConfig` parse
+    a fixed discriminator (``type`` / ``name``) and collect every
+    other key into :attr:`options` via Pydantic's ``extra="allow"``.
+    The op class then validates ``options`` against its own
+    ``Options`` :class:`~pydantic.BaseModel`.  Hoisting the config
+    knob and the accessor here keeps the two leaf classes aligned
+    so adding a third extensible config later is a one-liner.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def options(self) -> dict[str, Any]:
+        """Op-specific options (every key not declared on the model)."""
+        return self.model_extra or {}
+
+
+class ModifierConfig(_ExtensibleConfig):
     """Configuration for an op modifier.
 
     Modifiers nest inside their parent op's config (under
@@ -734,17 +754,10 @@ class ModifierConfig(BaseModel):
     operation-scope entries.
     """
 
-    model_config = ConfigDict(extra="allow")
-
     type: str
 
-    @property
-    def options(self) -> dict[str, Any]:
-        """Modifier-specific options (all extra fields)."""
-        return self.model_extra or {}
 
-
-class OperationConfig(BaseModel):
+class OperationConfig(_ExtensibleConfig):
     """Configuration for a single operation.
 
     Known fields (``name``, ``require_auth``) are parsed normally.
@@ -774,8 +787,6 @@ class OperationConfig(BaseModel):
         # Custom third-party operation
         {"name": "bulk_create", "class": "my_pkg.ops.BulkOp", "max": 100}
     """
-
-    model_config = ConfigDict(extra="allow")
 
     name: str
     type: str | None = None
@@ -859,11 +870,6 @@ class OperationConfig(BaseModel):
     """Modifier entries that nest inside this op and augment its
     outputs.  Today only the list op consumes modifiers (Filter /
     Order / Paginate); every other op leaves this empty."""
-
-    @property
-    def options(self) -> dict[str, Any]:
-        """Operation-specific options (all extra fields)."""
-        return self.model_extra or {}
 
     @model_validator(mode="after")
     def _hooks_only_on_write_ops(self) -> OperationConfig:
@@ -1014,7 +1020,8 @@ class ResourceConfig(BaseModel):
 
     route_prefix: str | None = None
     """URL prefix for this resource's router, e.g. ``"/articles"``.
-    Defaults to ``"/{model_lower}s"`` (simple lowercase + 's').
+    Defaults to ``"/{model_slug}s"`` (hyphenated lowercase + 's',
+    e.g. ``"/articles"`` / ``"/notification-preferences"``).
     """
 
     db_key: str | None = None
@@ -1119,8 +1126,8 @@ class ResourceConfig(BaseModel):
         return self
 
 
-def _resource_class_lower(resource: ResourceConfig) -> str:
-    """Lower-cased class name of *resource*'s model.
+def _resource_class_snake(resource: ResourceConfig) -> str:
+    """Snake-cased class name of *resource*'s model.
 
     Matches :func:`be.operations.routing._resource_module_slug`
     so ``ref_resource`` strings resolve to the same identifier the
@@ -1128,7 +1135,7 @@ def _resource_class_lower(resource: ResourceConfig) -> str:
     """
     _, model = Name.from_dotted(resource.model)
 
-    return model.lower
+    return model.snake
 
 
 class AppConfig(BaseModel):
@@ -1433,7 +1440,7 @@ def _check_resource_link(
     resource: ResourceConfig, ref_targets: set[str]
 ) -> None:
     """Raise if *resource* needs a link config but doesn't have one."""
-    slug = _resource_class_lower(resource)
+    slug = _resource_class_snake(resource)
     referenced = slug in ref_targets
     has_self = _has_self_filter(resource)
     needs_link = resource.searchable or referenced or has_self

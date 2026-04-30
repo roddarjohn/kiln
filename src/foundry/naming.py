@@ -5,6 +5,11 @@ Provides :class:`Name` for deriving conventional identifiers
 for splitting and constructing Python dotted import paths.
 """
 
+import re
+
+_PASCAL_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_CAMEL_BOUNDARY = re.compile(r"([a-z\d])([A-Z])")
+
 
 class Name:
     """Derives conventional identifiers from a base string.
@@ -46,13 +51,49 @@ class Name:
 
     @property
     def lower(self) -> str:
-        """Fully lowercased form (for file/module names)."""
+        """Fully lowercased form, no separator inserted.
+
+        ``"Article"`` → ``"article"``,
+        ``"publish_article"`` → ``"publish_article"``.
+
+        Use :attr:`snake` instead when the result will become a
+        file/module/function name and the input is PascalCase --
+        ``Name("NotificationPreference").lower`` collapses to
+        ``"notificationpreference"`` whereas :attr:`snake` returns
+        ``"notification_preference"``.
+        """
         return self.raw.lower()
 
     @property
+    def snake(self) -> str:
+        """snake_case form (for file/module/function names).
+
+        ``"Article"`` → ``"article"``,
+        ``"NotificationPreference"`` → ``"notification_preference"``,
+        ``"XMLParser"`` → ``"xml_parser"``,
+        ``"publish_article"`` → ``"publish_article"``.
+
+        PascalCase / camelCase boundaries become underscores so
+        multi-word model classes produce readable identifiers.
+        Strings already containing underscores pass through
+        unchanged (only lowercased) on the assumption that the
+        caller chose their own boundaries.
+        """
+        if "_" in self.raw:
+            return self.raw.lower()
+
+        head = _PASCAL_BOUNDARY.sub(r"\1_\2", self.raw)
+        return _CAMEL_BOUNDARY.sub(r"\1_\2", head).lower()
+
+    @property
     def slug(self) -> str:
-        """Hyphenated slug form (for URL segments)."""
-        return self.raw.replace("_", "-")
+        """Hyphenated slug form (for URL segments).
+
+        ``"publish_article"`` → ``"publish-article"``,
+        ``"NotificationPreference"`` → ``"notification-preference"``
+        (PascalCase boundaries are split first via :attr:`snake`).
+        """
+        return self.snake.replace("_", "-")
 
     def suffixed(self, suffix: str) -> str:
         """PascalCase name with *suffix* appended.

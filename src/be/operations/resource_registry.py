@@ -268,7 +268,7 @@ def _build_entry(
     per-app ``REF_RESOLVERS`` registry when it needs link shapes.
     """
     model_module, model = Name.from_dotted(resource.model)
-    slug = model.lower
+    slug = model.snake
 
     imports.append((model_module, model.pascal))
 
@@ -342,7 +342,7 @@ def _build_schema_entry(
     each generated module imports just what it needs).
     """
     _, model = Name.from_dotted(resource.model)
-    slug = model.lower
+    slug = model.snake
     pascal = model.pascal
 
     field_schemas: list[dict[str, object]] = []

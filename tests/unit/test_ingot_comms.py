@@ -508,6 +508,36 @@ class _StubRecipient:
         self.status = status
 
 
+def _stub_session(
+    *,
+    recipient: _StubRecipient | None,
+    message: _StubMessage | None = None,
+) -> AsyncMock:
+    """Set up an AsyncMock session for the dispatch handler's flow.
+
+    ``recipient`` is returned from the locking ``select(...)``;
+    ``message`` from the subsequent ``session.get(message_cls, ...)``.
+    """
+    locked_recipient = MagicMock()
+    locked_recipient.scalar_one_or_none = MagicMock(return_value=recipient)
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=locked_recipient)
+    session.commit = AsyncMock()
+    session.get = AsyncMock(return_value=message)
+    return session
+
+
+def _last_execute_stmt(session: AsyncMock) -> Any:
+    """Return the SQLAlchemy statement of the most recent execute call."""
+    return session.execute.call_args_list[-1].args[0]
+
+
+def _compiled(stmt: Any) -> str:
+    """Compile *stmt* with literal binds for substring assertions."""
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
 class TestMakeDispatchEntrypoint:
     @pytest.mark.asyncio
     async def test_marks_sent_on_transport_success(self):
@@ -609,6 +639,46 @@ class TestMakeDispatchEntrypoint:
         )
         assert "'failed'" in compiled
         assert "no transport" in compiled
+
+    @pytest.mark.asyncio
+    async def test_locks_recipient_row_on_load(self):
+        """Two workers can't both transition the same recipient to SENT.
+
+        Concrete check: the recipient is loaded via
+        ``select(...).with_for_update(skip_locked=True)`` so a
+        concurrent worker holding the row sees no row and bails
+        out before the transport runs.
+        """
+        rid = uuid.uuid4()
+        mid = uuid.uuid4()
+        recipient = _StubRecipient(rid, mid, "email", "a@example.com")
+        message = _StubMessage(mid)
+
+        scalar_result = MagicMock()
+        scalar_result.scalar_one_or_none = MagicMock(return_value=recipient)
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=scalar_result)
+        session.commit = AsyncMock()
+        session.get = AsyncMock(return_value=message)
+
+        handler = make_dispatch_entrypoint(
+            session_factory=_stub_session_factory(session),
+            transports={"email": LoggingTransport()},
+            message_cls=_Message,
+            recipient_cls=_Recipient,
+        )
+
+        await handler(_job(str(rid).encode("utf-8")))
+
+        # First call to session.execute is the locking SELECT.  The
+        # second is the UPDATE that flips status to SENT.
+        select_stmt = session.execute.call_args_list[0].args[0]
+        compiled = str(
+            select_stmt.compile(compile_kwargs={"literal_binds": True}),
+        )
+        assert "FOR UPDATE" in compiled.upper()
+        assert "SKIP LOCKED" in compiled.upper()
 
     @pytest.mark.asyncio
     async def test_skips_when_recipient_missing(self):

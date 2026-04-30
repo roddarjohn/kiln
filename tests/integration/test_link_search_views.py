@@ -279,7 +279,7 @@ def test_custom_serializer_replaces_auto_dump(
 ) -> None:
     """SavedView's get/list ops call the user's serializer with
     (obj, session, db) and drop response_model."""
-    routes = files["inventory/routes/savedview.py"]
+    routes = files["inventory/routes/saved_view.py"]
 
     # Custom serializer imported by its dotted path, not from the
     # auto-generated serializers module.

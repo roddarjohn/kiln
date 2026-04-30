@@ -191,7 +191,7 @@ class List:
         handler = RouteHandler(
             method="POST",
             path="/search",
-            function_name=f"list_{model.lower}s",
+            function_name=f"list_{model.snake}s",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(name="body", annotation=search_request_name),

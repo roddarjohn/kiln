@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     "create",
     scope="operation",
     dispatch_on="name",
-    requires=["list"],
 )
 class Create:
     """POST / -- create a new resource."""
@@ -78,7 +77,7 @@ class Create:
         yield RouteHandler(
             method="POST",
             path="/",
-            function_name=f"create_{model.lower}",
+            function_name=f"create_{model.snake}",
             op_name=ctx.instance.name,
             params=[RouteParam(name="body", annotation=request_schema)],
             status_code=201,

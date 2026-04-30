@@ -104,7 +104,7 @@ class Permissions:
         object_handler = RouteHandler(
             method="GET",
             path=f"/{{{resource.pk}}}/permissions",
-            function_name=f"permissions_{model.lower}_object",
+            function_name=f"permissions_{model.snake}_object",
             op_name="permissions",
             params=[
                 RouteParam(
@@ -134,7 +134,7 @@ class Permissions:
         collection_handler = RouteHandler(
             method="GET",
             path="/permissions",
-            function_name=f"permissions_{model.lower}_collection",
+            function_name=f"permissions_{model.snake}_collection",
             op_name="permissions",
             params=[],
             response_model="list[ActionRef]",

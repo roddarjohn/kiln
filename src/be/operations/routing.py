@@ -178,7 +178,7 @@ def _resource_module_slug(resource: ResourceConfig) -> str:
 
     The slug names the generated ``{app}/routes/{slug}.py`` file
     and its router alias ``{slug}_router``.  It is derived from
-    the class name of ``resource.model`` (lowercased) rather than
+    the class name of ``resource.model`` (snake-cased) rather than
     the store's instance id — the latter is opaque and must not
     leak into generated code.
 
@@ -186,9 +186,10 @@ def _resource_module_slug(resource: ResourceConfig) -> str:
         resource: Resource config entry.
 
     Returns:
-        Lowercase class name, e.g. ``"article"`` for
-        ``"blog.models.Article"``.
+        snake_case class name, e.g. ``"article"`` for
+        ``"blog.models.Article"`` or ``"notification_preference"``
+        for ``"blog.models.NotificationPreference"``.
 
     """
     _, model = Name.from_dotted(resource.model)
-    return model.lower
+    return model.snake

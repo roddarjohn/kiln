@@ -77,7 +77,7 @@ class LinkSchema:
             body_template="fastapi/schema_parts/link.py.j2",
             body_context={
                 "schema_name": f"{model.pascal}Link",
-                "slug": model.lower,
+                "slug": model.snake,
                 "kind": link.kind,
                 "id_py_type": PYTHON_TYPES[resource.pk_type],
             },
@@ -163,7 +163,7 @@ def _build_entry(
         raise AssertionError(msg)
 
     model_module, model_name = Name.from_dotted(resource.model)
-    slug = model_name.lower
+    slug = model_name.snake
     link_schema_class = f"{model_name.pascal}Link"
     schema_module = prefix_import(
         package_prefix,

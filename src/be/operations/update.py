@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     "update",
     scope="operation",
     dispatch_on="name",
-    requires=["create"],
 )
 class Update:
     """PATCH /{pk} -- partially update a resource."""
@@ -87,7 +86,7 @@ class Update:
         yield RouteHandler(
             method="PATCH",
             path=f"/{{{resource.pk}}}",
-            function_name=f"update_{model.lower}",
+            function_name=f"update_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(

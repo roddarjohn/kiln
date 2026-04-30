@@ -110,7 +110,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
     route_prefix = getattr(resource, "route_prefix", None)
 
     if not route_prefix:
-        route_prefix = f"/{model.lower}s"
+        route_prefix = f"/{model.slug}s"
 
     auth = getattr(config, "auth", None)
     session_schema = getattr(auth, "session_schema", None) if auth else None
@@ -156,7 +156,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
       for common field types (uuid, datetime, date, Any).
     """
     info = _resource_info(ctx)
-    path = f"{info.app}/schemas/{info.model.lower}.py"
+    path = f"{info.app}/schemas/{info.model.snake}.py"
 
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
@@ -222,7 +222,7 @@ def _schema_fragment(schema: SchemaClass, ctx: RenderCtx) -> Iterator[Fragment]:
 @registry.renders(EnumClass)
 def _enum_fragment(enum: EnumClass, ctx: RenderCtx) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    path = f"{info.app}/schemas/{info.model.lower}.py"
+    path = f"{info.app}/schemas/{info.model.snake}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from("pydantic", "BaseModel")
@@ -254,7 +254,7 @@ def _handler_fragment(
     :func:`_render_handler_string`).
     """
     info = _resource_info(ctx)
-    path = f"{info.app}/routes/{info.model.lower}.py"
+    path = f"{info.app}/routes/{info.model.snake}.py"
 
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
@@ -271,7 +271,7 @@ def _handler_fragment(
         imports.add_from("starlette", "status")
 
     schema_mod = prefix_import(
-        info.package_prefix, info.app, "schemas", info.model.lower
+        info.package_prefix, info.app, "schemas", info.model.snake
     )
 
     if handler.request_schema:
@@ -286,7 +286,7 @@ def _handler_fragment(
 
     if handler.serializer_fn:
         serializer_mod = handler.serializer_fn_module or prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
+            info.package_prefix, info.app, "serializers", info.model.snake
         )
         imports.add_from(serializer_mod, handler.serializer_fn)
 
@@ -298,7 +298,7 @@ def _handler_fragment(
         template="fastapi/route.py.j2",
         context={
             "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
+            "model_snake": info.model.snake,
             "route_prefix": info.route_prefix,
         },
     )
@@ -353,7 +353,7 @@ def _handler_context(
         "request_schema": handler.request_schema,
         # Resource-derived context every op body may reference.
         "model_name": info.model.pascal,
-        "model_lower": info.model.lower,
+        "model_snake": info.model.snake,
         "pk_name": info.pk_name,
         "pk_py_type": info.pk_py_type,
         "get_db_fn": info.get_db_fn,
@@ -401,12 +401,12 @@ def _serializer_fragment(
     ser: SerializerFn, ctx: RenderCtx
 ) -> Iterator[Fragment]:
     info = _resource_info(ctx)
-    ser_path = f"{info.app}/serializers/{info.model.lower}.py"
+    ser_path = f"{info.app}/serializers/{info.model.snake}.py"
     imports = ImportCollector()
     imports.add_from("__future__", "annotations")
     imports.add_from(ser.model_module, ser.model_name)
     schema_mod = prefix_import(
-        info.package_prefix, info.app, "schemas", info.model.lower
+        info.package_prefix, info.app, "schemas", info.model.snake
     )
     imports.add_from(schema_mod, ser.schema_name)
 
@@ -455,12 +455,12 @@ def _serializer_fragment(
     # test template renders exactly one `test_to_{model}_resource_*`
     # function, so emitting from list_item too would duplicate the
     # mock-row assignments and assertions.
-    is_resource_ser = ser.function_name == f"to_{info.model.lower}_resource"
+    is_resource_ser = ser.function_name == f"to_{info.model.snake}_resource"
 
     if info.generate_tests and is_resource_ser:
-        test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+        test_path = f"tests/test_{info.app}_{info.model.snake}.py"
         ser_mod = prefix_import(
-            info.package_prefix, info.app, "serializers", info.model.lower
+            info.package_prefix, info.app, "serializers", info.model.snake
         )
         test_imports = ImportCollector()
         test_imports.add_from(ser_mod, ser.function_name)
@@ -496,9 +496,9 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
     if not info.generate_tests:
         return
 
-    test_path = f"tests/test_{info.app}_{info.model.lower}.py"
+    test_path = f"tests/test_{info.app}_{info.model.snake}.py"
     route_module = prefix_import(
-        info.package_prefix, info.app, "routes", info.model.lower
+        info.package_prefix, info.app, "routes", info.model.snake
     )
 
     imports = ImportCollector()
@@ -522,7 +522,7 @@ def _testcase_fragment(tc: TestCase, ctx: RenderCtx) -> Iterator[Fragment]:
         template="fastapi/test_outer.py.j2",
         context={
             "model_name": info.model.pascal,
-            "model_lower": info.model.lower,
+            "model_snake": info.model.snake,
             "pk_name": info.pk_name,
             "pk_py_type": info.pk_py_type,
             "route_prefix": info.route_prefix,

@@ -352,7 +352,7 @@ def _construct_dump(  # noqa: PLR0913
     the top-level resource, not its embedded relations.
     """
     main_schema_name = model.suffixed(suffix)
-    main_fn_name = f"to_{model.lower}_{stem}"
+    main_fn_name = f"to_{model.snake}_{stem}"
     expanded, nested_schemas, nested_sers, enum_imports = _expand_field_specs(
         fields,
         class_prefix=main_schema_name,

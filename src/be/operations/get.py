@@ -120,7 +120,7 @@ class Get:
         yield RouteHandler(
             method="GET",
             path=f"/{{{resource.pk}}}",
-            function_name=f"get_{model.lower}",
+            function_name=f"get_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(

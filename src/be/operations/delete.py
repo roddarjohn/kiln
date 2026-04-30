@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     "delete",
     scope="operation",
     dispatch_on="name",
-    requires=["update"],
 )
 class Delete:
     """DELETE /{pk} -- delete a resource."""
@@ -59,7 +58,7 @@ class Delete:
         yield RouteHandler(
             method="DELETE",
             path=f"/{{{resource.pk}}}",
-            function_name=f"delete_{model.lower}",
+            function_name=f"delete_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(

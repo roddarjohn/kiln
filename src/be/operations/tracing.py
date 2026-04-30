@@ -84,10 +84,11 @@ class Tracing:
                 disable=False,
             )
         }
-        # Lowercase model class -- dashboards read ``article.get``
-        # better than ``Article.get``.
+        # snake_case model class -- dashboards read ``article.get``
+        # (and ``notification_preference.get``) better than the
+        # PascalCase form.
         _, model = Name.from_dotted(resource.model)
-        label = model.lower
+        label = model.snake
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):
             if handler.op_name not in traced_ops:
