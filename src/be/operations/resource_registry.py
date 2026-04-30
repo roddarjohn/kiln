@@ -117,7 +117,7 @@ class ResourceRegistry:
             resource_imports.append(
                 f"from {module_path} import "
                 f"{entry['resource_class']}, {entry['filter_union']}, "
-                f"{entry['pascal']}FieldRef"
+                f"{entry['pascal']}FieldRef, {entry['pascal']}ValuesRequest"
             )
 
             yield StaticFile(
@@ -425,17 +425,21 @@ def _format_top_level_unions(
 
     Pulled out of Jinja because Python's ``" | ".join(...)`` reads
     cleaner than the equivalent loop with whitespace-control tags.
-    Returns the right-hand side of three module-level assignments,
+    Returns the right-hand side of four module-level assignments,
     pre-rendered:
 
     * ``registered_resource_src`` — for ``RegisteredResource = ...``
     * ``registered_field_ref_src`` — for ``RegisteredFieldRef = ...``
+    * ``registered_values_request_src`` — for ``RegisteredValuesRequest = ...``
     * ``fields_discovery_inner_src`` — the element type for
       ``FieldsDiscovery.fields: list[...]``.
     """
     resource_classes = [str(entry["resource_class"]) for entry in entries]
     field_ref_classes = [
         f"{entry['pascal']}FieldRef" for entry in entries
+    ]
+    values_request_classes = [
+        f"{entry['pascal']}ValuesRequest" for entry in entries
     ]
     filter_unions = [
         str(entry["filter_union"])
@@ -446,6 +450,7 @@ def _format_top_level_unions(
     return {
         "registered_resource_src": _join_union(resource_classes),
         "registered_field_ref_src": _join_union(field_ref_classes),
+        "registered_values_request_src": _join_union(values_request_classes),
         "fields_discovery_inner_src": (
             " | ".join(filter_unions) if filter_unions else "ValuesDescriptor"
         ),

@@ -168,8 +168,8 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert "resources/router.py" in files
     router = files["resources/router.py"]
 
-    # Four endpoints, all POST.  Discovery uses the codegen'd
-    # discriminated unions; values uses ingot's ValuesPage.
+    # Three endpoints, all POST.  Discovery uses the codegen'd
+    # discriminated unions; values is a single discriminated POST.
     assert (
         '@router.post("/_filters", response_model=Discovery)' in router
     )
@@ -178,13 +178,10 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
         in router
     )
     assert (
-        '@router.post("/_values/{resource}", response_model=ValuesPage)'
-        in router
+        '@router.post("/_values", response_model=ValuesPage)' in router
     )
-    assert (
-        '@router.post("/_values/{resource}/{field}", response_model=ValuesPage)'
-        in router
-    )
+    # The two-route shape is gone.
+    assert "/_values/{resource}" not in router
 
     # Each delegates to the registry.
     assert "resource_registry.filter_discovery(" in router
@@ -197,6 +194,7 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert "FieldsDiscovery" in router
     assert "ProjectFilterDiscoveryRequest" in router
     assert "ProjectFieldDiscoveryRequest" in router
+    assert "RegisteredValuesRequest" in router
     # Body schema and ValuesPage from ingot.
     assert "from ingot.filter_values import FilterValuesRequest" in router
     assert "ValuesPage" in router

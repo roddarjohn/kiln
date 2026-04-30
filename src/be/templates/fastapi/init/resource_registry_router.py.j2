@@ -1,6 +1,6 @@
 {% from "_macros.j2" import file_header %}
 {% set _extra %}
-Four thin handlers backed entirely by
+Three thin handlers backed entirely by
 :class:`ingot.resource_registry.ResourceRegistry`:
 
 * ``POST /_filters`` — full or filtered project discovery.
@@ -11,13 +11,15 @@ Four thin handlers backed entirely by
   ``(resource, field)`` references.
   Body: :class:`ProjectFieldDiscoveryRequest`.  Returns
   :class:`FieldsDiscovery`.
-* ``POST /_values/{resource}`` — resource-level search.
-* ``POST /_values/{resource}/{field}`` — per-field value provider.
+* ``POST /_values`` — value provider, dispatched on the body's
+  ``resource`` (and optional ``field``).
+  Body: :data:`RegisteredValuesRequest`.
 
-Discovery responses use codegen-side discriminated unions
-(:data:`RegisteredResource` discriminated on ``resource``;
-per-resource unions discriminated on ``field``) so the FE-side
-OpenAPI client narrows automatically.
+All three responses use codegen-side discriminated unions —
+:data:`RegisteredResource` over ``resource``, per-resource
+filter unions over ``field``, :data:`RegisteredValuesRequest`
+over ``resource`` — so the FE OpenAPI client narrows
+automatically.
 
 Mount this router in your app once::
 
@@ -38,7 +40,9 @@ from ingot.filter_values import FilterValuesRequest
 from ingot.resource_registry import (
     FieldDiscoveryRequest,
     FieldRef,
+    FieldsDiscovery as IngotFieldsDiscovery,
     FilterDiscoveryRequest,
+    ProjectDiscovery as IngotProjectDiscovery,
     ValuesPage,
 )
 
@@ -47,6 +51,7 @@ from {{ schemas_module }} import (
     FieldsDiscovery,
     ProjectFieldDiscoveryRequest,
     ProjectFilterDiscoveryRequest,
+    RegisteredValuesRequest,
 )
 
 from {{ session_module }} import {{ get_db_fn }}
@@ -66,12 +71,13 @@ def filters_discovery(
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> Discovery:
+) -> IngotProjectDiscovery:
     """Return the project discovery payload, narrowed by ``body.resources``.
 
-    ``body.resources is None`` returns every registered resource
-    (full project payload); a list narrows to that subset; an
-    empty list returns ``{"resources": []}``.
+    Registry returns the ingot generic shape; FastAPI's
+    ``response_model=Discovery`` re-validates into the
+    discriminated codegen union for the wire format and OpenAPI
+    schema — no manual round-trip needed.
     """
     return resource_registry.filter_discovery(
         FilterDiscoveryRequest(resources=body.resources),
@@ -84,11 +90,12 @@ def filter_fields_discovery(
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> FieldsDiscovery:
+) -> IngotFieldsDiscovery:
     """Return one :class:`FieldDiscovery` per requested ``(resource, field)``.
 
-    Order is preserved so callers can pair the response list
-    against the request list by index.
+    Order is preserved.  ``response_model=FieldsDiscovery`` (the
+    codegen-side discriminated shape) handles the per-resource
+    union narrowing on serialisation.
     """
     return resource_registry.field_discovery(
         FieldDiscoveryRequest(
@@ -100,42 +107,28 @@ def filter_fields_discovery(
     )
 
 
-@router.post("/_values/{resource}", response_model=ValuesPage)
-async def values_resource(
-    resource: str,
-    body: FilterValuesRequest,
+@router.post("/_values", response_model=ValuesPage)
+async def values(
+    body: RegisteredValuesRequest,
     db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
 ) -> ValuesPage:
-    """Resource-level search; routes to the registry's link builder."""
-    return await resource_registry.values(
-        resource=resource,
-        field=None,
-        request=body,
-        db=db,
-{% if require_auth %}
-        session=session,
-{% endif %}
-    )
+    """Single values endpoint covering every dispatch path.
 
-
-@router.post("/_values/{resource}/{field}", response_model=ValuesPage)
-async def values_resource_field(
-    resource: str,
-    field: str,
-    body: FilterValuesRequest,
-    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
-{% if require_auth %}
-    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
-{% endif %}
-) -> ValuesPage:
-    """Per-field value provider (enum / free-text / ref / self)."""
+    The body is discriminated on ``resource`` so the FE OpenAPI
+    client picks the right per-resource shape; ``field`` is
+    constrained to the resource's filter fields (or ``None`` for
+    the resource-level search).  The registry handles the actual
+    dispatch.
+    """
     return await resource_registry.values(
-        resource=resource,
-        field=field,
-        request=body,
+        resource=body.resource,
+        field=body.field,
+        request=FilterValuesRequest(
+            q=body.q, cursor=body.cursor, limit=body.limit,
+        ),
         db=db,
 {% if require_auth %}
         session=session,

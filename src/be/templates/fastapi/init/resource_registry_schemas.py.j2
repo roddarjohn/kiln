@@ -101,3 +101,23 @@ class ProjectFieldDiscoveryRequest(BaseModel):
     """
 
     fields: list[RegisteredFieldRef] = Field(default_factory=list)
+
+
+# -------------------------------------------------------------------
+# Values request — one discriminated body covering both
+# resource-level search (``field is None``) and per-field value
+# providers (``field`` set).  Replaces the two-route shape.
+# -------------------------------------------------------------------
+
+
+{% if entries | length > 1 %}
+RegisteredValuesRequest = Annotated[
+    {{ registered_values_request_src }},
+    Field(discriminator="resource"),
+]
+"""Discriminated union over per-resource values-request shapes.
+Field is constrained to that resource's filter fields (or
+``None`` for the resource-level search)."""
+{% else %}
+RegisteredValuesRequest = {{ registered_values_request_src }}
+{% endif %}
