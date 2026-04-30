@@ -1,0 +1,182 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+The discovery surface is fully discriminated:
+
+* Each resource gets a :class:`{{ entries[0].resource_class }}`-style
+  Pydantic class with a ``Literal["<slug>"]`` ``resource`` field.
+* Each filter field gets its own subclass with a ``Literal["<field>"]``
+  discriminator and a narrowed ``values`` descriptor.
+* The top-level :data:`RegisteredResource` and per-resource filter
+  unions use ``Field(discriminator=...)``, so an OpenAPI client
+  reading these schemas narrows on ``resource`` / ``field`` / ``kind``
+  without a runtime type check.
+
+Generated at codegen time from each resource's filter modifier and
+its ``searchable`` opt-in.  Re-run ``foundry generate`` after
+adding a resource or field.
+{% endset %}
+{{ file_header("Project-wide resource discovery schemas", extra=_extra) }}
+
+
+from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+from ingot.resource_registry import (
+    BoolValuesDescriptor,
+    Choice,
+    EnumValuesDescriptor,
+    FieldDiscoveryRequest,
+    FieldRef,
+    FilterDiscoveryRequest,
+    FreeTextValuesDescriptor,
+    LiteralValuesDescriptor,
+    RefValuesDescriptor,
+    SearchDiscovery,
+    SelfValuesDescriptor,
+    ValuesDescriptor,
+)
+
+{% for line in extra_imports %}
+{{ line }}
+{% endfor %}
+
+
+# -------------------------------------------------------------------
+# Resource slug literal — the set of resource keys the registry
+# knows about.  Used as the discriminator on
+# :class:`RegisteredResource` and as the element type of
+# :attr:`FilterDiscoveryRequest.resources`.
+# -------------------------------------------------------------------
+
+
+ResourceSlug = Literal[{% for entry in entries %}{{ entry.slug | tojson }}{% if not loop.last %}, {% endif %}{% endfor %}]
+
+
+{% for entry in entries %}
+# -------------------------------------------------------------------
+# {{ entry.pascal }} — per-field filter shapes + resource container.
+# -------------------------------------------------------------------
+
+
+{% for field in entry.field_schemas %}
+class {{ field.class_name }}(BaseModel):
+    """``{{ entry.slug }}.{{ field.field_name }}`` filter discovery payload."""
+
+    field: Literal[{{ field.field_name | tojson }}] = {{ field.field_name | tojson }}
+    operators: list[str]
+    values: {{ field.values_class }}
+
+
+{% endfor %}
+{% if entry.field_schemas | length > 1 %}
+{{ entry.filter_union }} = Annotated[
+    {% for field in entry.field_schemas %}{{ field.class_name }}{% if not loop.last %} | {% endif %}{% endfor %},
+    Field(discriminator="field"),
+]
+"""Discriminated union of every {{ entry.pascal }} filter field."""
+{% elif entry.field_schemas | length == 1 %}
+{{ entry.filter_union }} = {{ entry.field_schemas[0].class_name }}
+"""Sole filter field on {{ entry.pascal }} (no discrimination needed)."""
+{% else %}
+# {{ entry.pascal }} declares no filter fields; ``filters`` is empty.
+{{ entry.filter_union }} = ValuesDescriptor  # placeholder; never instantiated
+{% endif %}
+
+
+class {{ entry.resource_class }}(BaseModel):
+    """Discovery payload for the ``{{ entry.slug }}`` resource."""
+
+    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
+    filters: list[{{ entry.filter_union }}]
+    search: SearchDiscovery | None = None
+
+
+# {{ entry.pascal }} field reference (used in :class:`FieldDiscoveryRequest`).
+class {{ entry.pascal }}FieldRef(BaseModel):
+    """Pointer to one filter field on ``{{ entry.slug }}``."""
+
+    resource: Literal[{{ entry.slug | tojson }}] = {{ entry.slug | tojson }}
+{% if entry.field_schemas | length > 0 %}
+    field: Literal[{% for field in entry.field_schemas %}{{ field.field_name | tojson }}{% if not loop.last %}, {% endif %}{% endfor %}]
+{% else %}
+    field: str
+{% endif %}
+
+
+{% endfor %}
+# -------------------------------------------------------------------
+# Top-level discriminated unions + project-wide payloads.
+# -------------------------------------------------------------------
+
+
+{% if entries | length > 1 %}
+RegisteredResource = Annotated[
+    {% for entry in entries %}{{ entry.resource_class }}{% if not loop.last %} | {% endif %}{% endfor %},
+    Field(discriminator="resource"),
+]
+"""Discriminated union of every registered resource's discovery."""
+{% elif entries | length == 1 %}
+RegisteredResource = {{ entries[0].resource_class }}
+"""The sole registered resource."""
+{% endif %}
+
+{% if entries | length > 1 %}
+RegisteredFieldRef = Annotated[
+    {% for entry in entries %}{{ entry.pascal }}FieldRef{% if not loop.last %} | {% endif %}{% endfor %},
+    Field(discriminator="resource"),
+]
+"""Discriminated union of every resource's typed field reference."""
+{% elif entries | length == 1 %}
+RegisteredFieldRef = {{ entries[0].pascal }}FieldRef
+{% endif %}
+
+
+class Discovery(BaseModel):
+    """Project-wide discovery response."""
+
+    resources: list[RegisteredResource]
+
+
+class FieldsDiscovery(BaseModel):
+    """Multi-field discovery response."""
+
+    fields: list[
+{% for entry in entries %}
+        {% if entry.field_schemas | length > 0 -%}
+        {{ entry.filter_union }}{% if not loop.last %} |{% endif %}
+        {%- endif %}
+{% endfor %}
+    ]
+
+
+# -------------------------------------------------------------------
+# Request bodies — narrowed to known slugs / fields so the FE
+# OpenAPI client can constrain inputs at compile time.
+# -------------------------------------------------------------------
+
+
+class ProjectFilterDiscoveryRequest(BaseModel):
+    """Project-narrowed counterpart of :class:`FilterDiscoveryRequest`.
+
+    ``resources`` is constrained to the registered slugs at codegen
+    time, so callers can't ask for a resource that doesn't exist.
+    Same semantics as the ingot base: ``None`` returns every
+    registered resource.
+    """
+
+    resources: list[ResourceSlug] | None = None
+
+
+class ProjectFieldDiscoveryRequest(BaseModel):
+    """Project-narrowed counterpart of :class:`FieldDiscoveryRequest`.
+
+    ``fields`` carries one of the per-resource ``*FieldRef`` typed
+    references; the union is discriminated on ``resource`` so a
+    valid combination of ``(resource, field)`` is enforced at the
+    schema layer.
+    """
+
+    fields: list[RegisteredFieldRef] = Field(default_factory=list)

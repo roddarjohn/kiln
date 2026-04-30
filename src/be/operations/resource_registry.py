@@ -100,12 +100,32 @@ class ResourceRegistry:
         if any(e["search"] for e in entries):
             registry_imports.append(("ingot.resource_registry", "SearchSpec"))
 
+        # Per-resource per-field schema specs are derived from the
+        # same FilterField list that drives the registry entries.
+        # Computed on a parallel pass so the schemas template gets
+        # a tidy data structure (avoids repeating the introspection
+        # in Jinja).
+        schema_imports: list[tuple[str, str]] = []
+        schema_entries = [
+            _build_schema_entry(resource, schema_imports)
+            for _, resource in _iter_contributing_resources(config)
+        ]
+
         yield StaticFile(
             path="resources/__init__.py",
             template="fastapi/init/resource_registry.py.j2",
             context={
                 "imports": _format_imports(registry_imports),
                 "entries": entries,
+            },
+        )
+
+        yield StaticFile(
+            path="resources/schemas.py",
+            template="fastapi/init/resource_registry_schemas.py.j2",
+            context={
+                "extra_imports": _format_imports(schema_imports),
+                "entries": schema_entries,
             },
         )
 
@@ -139,15 +159,16 @@ class ResourceRegistry:
             session_schema_module = sess_mod
             session_schema_name = sess_name_obj.raw
 
+        registry_module = (
+            f"{package_prefix}.resources" if package_prefix else "resources"
+        )
+
         yield StaticFile(
             path="resources/router.py",
             template="fastapi/init/resource_registry_router.py.j2",
             context={
-                "registry_module": (
-                    f"{package_prefix}.resources"
-                    if package_prefix
-                    else "resources"
-                ),
+                "registry_module": registry_module,
+                "schemas_module": f"{registry_module}.schemas",
                 "session_module": session_module,
                 "get_db_fn": primary_db.get_db_fn,
                 "require_auth": require_auth,
@@ -300,6 +321,62 @@ def _build_entry(  # noqa: PLR0913 -- collects six shared accumulators
         "pk": resource.pk,
         "fields": fields_src,
         "search": search_src,
+    }
+
+
+_VALUES_DESCRIPTOR_BY_KIND: dict[str, str] = {
+    "enum": "EnumValuesDescriptor",
+    "free_text": "FreeTextValuesDescriptor",
+    "ref": "RefValuesDescriptor",
+    "self": "SelfValuesDescriptor",
+    "literal": "LiteralValuesDescriptor",
+    "bool": "BoolValuesDescriptor",
+}
+"""Map a :data:`be.config.schema.FilterValueKind` to the matching
+ingot ``ValuesDescriptor`` subclass.  Used to emit a narrowed
+``values`` annotation per generated field schema — so the FE
+client knows that, e.g., ``ProjectIdFilter.values`` is always
+``SelfValuesDescriptor`` rather than the open union."""
+
+
+def _build_schema_entry(
+    resource: ResourceConfig,
+    imports: list[tuple[str, str]],
+) -> dict[str, object]:
+    """Build the schema-template context for one resource.
+
+    Mirrors :func:`_build_entry`'s shape but stays focused on the
+    schema codegen — collects the per-field class names, narrowed
+    ``values`` descriptor type, and per-resource union/class
+    names.  *imports* accumulates any additional ``(module, name)``
+    pairs the schemas file needs (today: nothing extra; left
+    plumbed for future per-field enum-class re-imports if we want
+    to inline choices in the schema).
+    """
+    del imports  # reserved for future enum-class re-imports
+    _, model = Name.from_dotted(resource.model)
+    slug = model.lower
+    pascal = model.pascal
+
+    field_schemas: list[dict[str, object]] = []
+
+    for field in _resource_filter_fields(resource):
+        field_pascal = Name(field.name).pascal
+        field_schemas.append(
+            {
+                "class_name": f"{pascal}{field_pascal}Filter",
+                "field_name": field.name,
+                "values_class": _VALUES_DESCRIPTOR_BY_KIND[field.values],
+            }
+        )
+
+    return {
+        "slug": slug,
+        "pascal": pascal,
+        "resource_class": f"{pascal}Resource",
+        "filter_union": f"{pascal}Filter",
+        "field_schemas": field_schemas,
+        "has_search": resource.searchable,
     }
 
 

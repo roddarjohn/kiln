@@ -35,7 +35,7 @@ requiring callers to track mode out-of-band.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, overload
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -261,9 +261,68 @@ class ResourceDiscovery(BaseModel):
 
 
 class ProjectDiscovery(BaseModel):
-    """Discovery payload covering every registered resource."""
+    """Discovery payload covering every registered resource.
 
-    resources: dict[str, ResourceDiscovery]
+    ``resources`` is a list (rather than a dict) so the codegen
+    layer can wrap it in a discriminated union over the
+    ``resource`` field — that's what gives the FE-side OpenAPI
+    client real per-resource narrowing.
+    """
+
+    resources: list[ResourceDiscovery]
+
+
+class FieldsDiscovery(BaseModel):
+    """Response shape for ``POST /_filters/fields``.
+
+    A list of resolved :class:`FieldDiscovery` payloads, one per
+    requested ``(resource, field)`` pair, in the request order.
+    """
+
+    fields: list[FieldDiscovery]
+
+
+# -------------------------------------------------------------------
+# Discovery request bodies.
+#
+# Both filter endpoints are POST so they can accept structured
+# narrowing parameters in the request body — the FE picks which
+# resources or fields it cares about, and the registry returns just
+# those.  The codegen layer typically narrows ``resources`` to a
+# ``Literal`` over the registered slugs for tighter FE typing.
+# -------------------------------------------------------------------
+
+
+class FilterDiscoveryRequest(BaseModel):
+    """Request body for ``POST /_filters``.
+
+    ``resources`` selects which resources appear in the response:
+
+    * ``None`` (the default) — every registered resource (full
+      project discovery).
+    * empty list — none (returns ``{"resources": []}``).
+    * one or more slugs — that subset, in request order.
+    """
+
+    resources: list[str] | None = None
+
+
+class FieldRef(BaseModel):
+    """A pointer to one filter field on one resource."""
+
+    resource: str
+    field: str
+
+
+class FieldDiscoveryRequest(BaseModel):
+    """Request body for ``POST /_filters/fields``.
+
+    ``fields`` is a non-empty list of ``(resource, field)``
+    references; the response carries one :class:`FieldDiscovery`
+    per ref, in the same order.
+    """
+
+    fields: list[FieldRef] = Field(default_factory=list)
 
 
 # -------------------------------------------------------------------
@@ -360,53 +419,69 @@ class ResourceRegistry:
 
     # ---------- Discovery ----------
 
-    @overload
-    def discovery(self) -> ProjectDiscovery: ...
-
-    @overload
-    def discovery(self, *, resource: str) -> ResourceDiscovery: ...
-
-    @overload
-    def discovery(self, *, resource: str, field: str) -> FieldDiscovery: ...
-
-    def discovery(
+    def filter_discovery(
         self,
-        *,
-        resource: str | None = None,
-        field: str | None = None,
-    ) -> ProjectDiscovery | ResourceDiscovery | FieldDiscovery:
-        """Return the discovery payload, narrowed by *resource* / *field*.
+        request: FilterDiscoveryRequest,
+    ) -> ProjectDiscovery:
+        """Return discovery for the resources named in *request*.
 
-        With both unset, returns :class:`ProjectDiscovery`.  With
-        only *resource* set, returns that resource's
-        :class:`ResourceDiscovery`.  With both set, returns one
-        :class:`FieldDiscovery`.  Overloads narrow each call site
-        to the correct return type without callers having to
-        downcast.
+        ``request.resources`` is the gating filter:
 
-        Raises :class:`fastapi.HTTPException` (404) on unknown
-        resource or field.
+        * ``None`` — every registered resource (full project payload).
+        * empty list — empty payload (``{"resources": []}``).
+        * one or more slugs — that subset, in request order.
+
+        Raises :class:`fastapi.HTTPException` (404) when any
+        requested slug is not registered.
         """
-        if resource is None:
-            return ProjectDiscovery(
-                resources={
-                    slug: self._resource_payload(slug) for slug in self._entries
-                },
+        if request.resources is None:
+            slugs: list[str] = list(self._entries)
+
+        else:
+            for slug in request.resources:
+                self._require_entry(slug)
+
+            slugs = list(request.resources)
+
+        return ProjectDiscovery(
+            resources=[self._resource_payload(slug) for slug in slugs],
+        )
+
+    def field_discovery(
+        self,
+        request: FieldDiscoveryRequest,
+    ) -> FieldsDiscovery:
+        """Return per-field discovery for each ``(resource, field)``.
+
+        The response preserves the request order so the FE can
+        pair the result list against its own request list by
+        index.  Unknown resource/field combinations raise
+        :class:`fastapi.HTTPException` (404).
+        """
+        resolved: list[FieldDiscovery] = []
+
+        for ref in request.fields:
+            entry = self._require_entry(ref.resource)
+            spec = next(
+                (
+                    candidate
+                    for candidate in entry.fields
+                    if candidate.name == ref.field
+                ),
+                None,
             )
 
-        entry = self._require_entry(resource)
+            if spec is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Unknown filter field: {ref.resource}.{ref.field}"
+                    ),
+                )
 
-        if field is None:
-            return self._resource_payload(resource)
+            resolved.append(self._field_payload(ref.resource, spec))
 
-        for spec in entry.fields:
-            if spec.name == field:
-                return self._field_payload(resource, spec)
-
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown filter field: {field}",
-        )
+        return FieldsDiscovery(fields=resolved)
 
     def _resource_payload(self, resource: str) -> ResourceDiscovery:
         """Build the per-resource discovery payload for *resource*."""

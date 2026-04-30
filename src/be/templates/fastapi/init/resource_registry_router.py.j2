@@ -1,13 +1,23 @@
 {% from "_macros.j2" import file_header %}
 {% set _extra %}
-Five thin handlers backed entirely by
+Four thin handlers backed entirely by
 :class:`ingot.resource_registry.ResourceRegistry`:
 
-* ``GET /_filters`` — full project discovery payload.
-* ``GET /_filters/{resource}`` — one resource.
-* ``GET /_filters/{resource}/{field}`` — one field.
+* ``POST /_filters`` — full or filtered project discovery.
+  Body: :class:`ProjectFilterDiscoveryRequest`
+  (``resources: list[ResourceSlug] | None``).  Returns
+  :class:`Discovery`.
+* ``POST /_filters/fields`` — discovery for a list of typed
+  ``(resource, field)`` references.
+  Body: :class:`ProjectFieldDiscoveryRequest`.  Returns
+  :class:`FieldsDiscovery`.
 * ``POST /_values/{resource}`` — resource-level search.
 * ``POST /_values/{resource}/{field}`` — per-field value provider.
+
+Discovery responses use codegen-side discriminated unions
+(:data:`RegisteredResource` discriminated on ``resource``;
+per-resource unions discriminated on ``field``) so the FE-side
+OpenAPI client narrows automatically.
 
 Mount this router in your app once::
 
@@ -26,10 +36,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ingot.filter_values import FilterValuesRequest
 from ingot.resource_registry import (
-    FieldDiscovery,
-    ProjectDiscovery,
-    ResourceDiscovery,
+    FieldDiscoveryRequest,
+    FieldRef,
+    FilterDiscoveryRequest,
     ValuesPage,
+)
+
+from {{ schemas_module }} import (
+    Discovery,
+    FieldsDiscovery,
+    ProjectFieldDiscoveryRequest,
+    ProjectFilterDiscoveryRequest,
 )
 
 from {{ session_module }} import {{ get_db_fn }}
@@ -43,37 +60,44 @@ from {{ registry_module }} import resource_registry
 router = APIRouter()
 
 
-@router.get("/_filters", response_model=ProjectDiscovery)
-def filters_root(
+@router.post("/_filters", response_model=Discovery)
+def filters_discovery(
+    body: ProjectFilterDiscoveryRequest,
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> ProjectDiscovery:
-    """Return the full project discovery payload."""
-    return resource_registry.discovery()
+) -> Discovery:
+    """Return the project discovery payload, narrowed by ``body.resources``.
+
+    ``body.resources is None`` returns every registered resource
+    (full project payload); a list narrows to that subset; an
+    empty list returns ``{"resources": []}``.
+    """
+    return resource_registry.filter_discovery(
+        FilterDiscoveryRequest(resources=body.resources),
+    )
 
 
-@router.get("/_filters/{resource}", response_model=ResourceDiscovery)
-def filters_resource(
-    resource: str,
+@router.post("/_filters/fields", response_model=FieldsDiscovery)
+def filter_fields_discovery(
+    body: ProjectFieldDiscoveryRequest,
 {% if require_auth %}
     session: Annotated[{{ session_schema_name }}, Depends(get_session)],
 {% endif %}
-) -> ResourceDiscovery:
-    """Return one resource's discovery payload."""
-    return resource_registry.discovery(resource=resource)
+) -> FieldsDiscovery:
+    """Return one :class:`FieldDiscovery` per requested ``(resource, field)``.
 
-
-@router.get("/_filters/{resource}/{field}", response_model=FieldDiscovery)
-def filters_resource_field(
-    resource: str,
-    field: str,
-{% if require_auth %}
-    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
-{% endif %}
-) -> FieldDiscovery:
-    """Return one field's discovery payload (404 on unknown field)."""
-    return resource_registry.discovery(resource=resource, field=field)
+    Order is preserved so callers can pair the response list
+    against the request list by index.
+    """
+    return resource_registry.field_discovery(
+        FieldDiscoveryRequest(
+            fields=[
+                FieldRef(resource=ref.resource, field=ref.field)
+                for ref in body.fields
+            ],
+        ),
+    )
 
 
 @router.post("/_values/{resource}", response_model=ValuesPage)
