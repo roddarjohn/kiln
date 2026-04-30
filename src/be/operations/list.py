@@ -100,7 +100,7 @@ class List:
             ctx.store.ancestor_of(ctx.instance_id, "resource"),
         )
         model_module, model = Name.from_dotted(resource.model)
-        pk_name = getattr(resource, "pk", "id")
+        pk_name = resource.pk.name
         include_actions = resource.include_actions_in_dump
         custom_serializer = ctx.instance.serializer
 

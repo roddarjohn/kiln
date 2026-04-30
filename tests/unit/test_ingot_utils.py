@@ -4,8 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import Column, Integer, MetaData, String, Table, select
 
 from ingot.utils import (
+    compile_query,
     get_object_from_query_or_404,
     run_once,
 )
@@ -129,3 +131,57 @@ def test_run_once_isolates_state_per_decoration():
     b()
     assert a_calls == [1]
     assert b_calls == [1]
+
+
+# ---------------------------------------------------------------------------
+# compile_query
+# ---------------------------------------------------------------------------
+
+
+_users = Table(
+    "users",
+    MetaData(),
+    Column("id", Integer, primary_key=True),
+    Column("name", String),
+)
+
+
+def test_compile_query_inlines_bind_params_by_default():
+    sql = compile_query(select(_users).where(_users.c.id == 7))
+    # Generic dialect; literal_binds=True by default.
+    assert "7" in sql
+    assert ":id_1" not in sql
+
+
+def test_compile_query_keeps_binds_when_literal_binds_false():
+    sql = compile_query(
+        select(_users).where(_users.c.id == 7),
+        literal_binds=False,
+    )
+    assert ":id_1" in sql
+
+
+def test_compile_query_postgres_renders_skip_locked():
+    stmt = (
+        select(_users).where(_users.c.id == 1).with_for_update(skip_locked=True)
+    )
+    sql = compile_query(stmt, dialect="postgres").upper()
+    assert "FOR UPDATE" in sql
+    assert "SKIP LOCKED" in sql
+
+
+def test_compile_query_default_dialect_drops_skip_locked():
+    # The generic dialect doesn't know about ``SKIP LOCKED`` -- this
+    # test guards the documented contract that callers must pass
+    # ``dialect="postgres"`` for the modifier to render.
+    stmt = (
+        select(_users).where(_users.c.id == 1).with_for_update(skip_locked=True)
+    )
+    sql = compile_query(stmt).upper()
+    assert "SKIP LOCKED" not in sql
+
+
+def test_compile_query_postgresql_alias():
+    stmt = select(_users).with_for_update(skip_locked=True)
+    sql = compile_query(stmt, dialect="postgresql").upper()
+    assert "SKIP LOCKED" in sql

@@ -306,7 +306,7 @@ def _build_entry(
     return {
         "slug": slug,
         "model_name": model.pascal,
-        "pk": resource.pk,
+        "pk": resource.pk.name,
         "fields": fields_src,
         "search_columns": columns_src,
     }

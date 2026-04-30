@@ -68,7 +68,7 @@ class Paginate:
         handler.return_type = page_name
         handler.body_context["pagination_mode"] = options.mode
         handler.body_context["max_page_size"] = options.max_page_size
-        handler.body_context["cursor_field"] = options.cursor_field
+        handler.body_context["cursor_field"] = options.cursor.name
         handler.extra_imports.append(
             (
                 "ingot.pagination",

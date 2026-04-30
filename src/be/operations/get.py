@@ -119,20 +119,20 @@ class Get:
 
         yield RouteHandler(
             method="GET",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             function_name=f"get_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 )
             ],
             response_model=response_model,
             serializer_fn=serializer_fn,
             serializer_fn_module=serializer_fn_module,
             return_type=return_type,
-            doc=f"Get a {model.pascal} by {resource.pk}.",
+            doc=f"Get a {model.pascal} by {resource.pk.name}.",
             body_template="fastapi/ops/get.py.j2",
             body_context={
                 "load_options": dump.load_options,
@@ -146,7 +146,7 @@ class Get:
         yield TestCase(
             op_name="get",
             method="get",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             status_success=200,
             status_not_found=404,
             response_schema=(

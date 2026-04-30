@@ -32,8 +32,7 @@
 
 {
   model: "{{ module }}.models.NotificationPreference",
-  pk: "id",
-  pk_type: "uuid",
+  pk: { name: "id", type: "uuid" },
   route_prefix: "/notification-preferences",
   require_auth: true,
 

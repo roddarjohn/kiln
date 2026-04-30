@@ -85,17 +85,17 @@ class Update:
 
         yield RouteHandler(
             method="PATCH",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             function_name=f"update_{model.snake}",
             op_name=ctx.instance.name,
             params=[
                 RouteParam(
-                    name=resource.pk,
-                    annotation=PYTHON_TYPES[resource.pk_type],
+                    name=resource.pk.name,
+                    annotation=PYTHON_TYPES[resource.pk.type],
                 ),
                 RouteParam(name="body", annotation=request_schema),
             ],
-            doc=f"Update a {model.pascal} by {resource.pk}.",
+            doc=f"Update a {model.pascal} by {resource.pk.name}.",
             request_schema=request_schema,
             body_template="fastapi/ops/update.py.j2",
             body_context={**gate_ctx, **hook_ctx},
@@ -111,7 +111,7 @@ class Update:
         yield TestCase(
             op_name="update",
             method="patch",
-            path=f"/{{{resource.pk}}}",
+            path=f"/{{{resource.pk.name}}}",
             status_success=200,
             status_not_found=404,
             status_invalid=422,

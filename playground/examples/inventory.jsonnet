@@ -24,8 +24,7 @@ local resource = import "be/resources/presets.libsonnet";
     // Products: full CRUD, mutations require auth, explicit route prefix
     {
       model: "inventory.models.Product",
-      pk: "id",
-      pk_type: "uuid",
+      pk: { name: "id", type: "uuid" },
       route_prefix: "/products",
       require_auth: false,
 
@@ -130,8 +129,7 @@ local resource = import "be/resources/presets.libsonnet";
     // StockMovements: create-only (append-only pattern)
     {
       model: "inventory.models.StockMovement",
-      pk: "id",
-      pk_type: "uuid",
+      pk: { name: "id", type: "uuid" },
       require_auth: false,
 
       operations: [
@@ -154,8 +152,7 @@ local resource = import "be/resources/presets.libsonnet";
     // fields, require_auth: true, and a no-param no-auth action.
     {
       model: "inventory.models.EventLog",
-      pk: "id",
-      pk_type: "uuid",
+      pk: { name: "id", type: "uuid" },
       route_prefix: "/event-logs",
       db_key: "analytics",
       require_auth: true,

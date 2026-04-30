@@ -31,7 +31,8 @@
   //   order:    Optional OrderConfig dict
   //             (``{ fields: [...], default: ..., default_dir: ... }``).
   //   paginate: Optional PaginateConfig dict
-  //             (``{ mode: ..., cursor_field: ..., default_page_size: ... }``).
+  //             (``{ mode: ..., cursor: { name: ..., type: ... },
+  //              default_page_size: ... }``).
   searchable(fields, filter=null, order=null, paginate=null):: {
     name: "list",
     fields: fields,

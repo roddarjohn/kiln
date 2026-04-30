@@ -1,10 +1,10 @@
 """Pydantic models for be configuration."""
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from foundry.config import FoundryConfig
+from foundry.config import ExtensibleConfig, FoundryConfig
 from foundry.naming import Name
 from foundry.scope import Scoped
 
@@ -65,6 +65,43 @@ consumer-supplied class name (the enum / model class) that the
 schema renderer imports from :attr:`FieldSpec.enum` /
 :attr:`FieldSpec.model`.
 """
+
+
+# Scalar types valid as a column reference -- ``"nested"`` and
+# ``"enum"`` are FieldSpec-only sentinels that don't make sense for
+# a primary key or pagination cursor.
+ScalarType = Literal[
+    "uuid",
+    "str",
+    "email",
+    "int",
+    "float",
+    "bool",
+    "datetime",
+    "date",
+    "json",
+]
+
+
+class ColumnRef(BaseModel):
+    """A reference to a single typed column on the consumer's model.
+
+    Two config knobs share this shape: a resource's primary key
+    (:attr:`ResourceConfig.pk`) and a paginator's cursor
+    (:attr:`PaginateConfig.cursor`).  Bundling the name and type
+    keeps them mutually consistent (the type drives the path-param
+    annotation generated for the pk; the cursor's type drives the
+    keyset cursor encoding) and lets callers pass a single value
+    around instead of an ``(name, type)`` pair.
+    """
+
+    name: str
+    """Attribute name on the SQLAlchemy model class
+    (e.g. ``"id"``)."""
+
+    type: ScalarType = "uuid"
+    """Scalar type of the column.  Drives the Python annotation
+    rendered for path params and cursor parsing."""
 
 
 class AuthConfig(BaseModel):
@@ -717,27 +754,7 @@ class FieldSpec(BaseModel):
         return self.type == ENUM
 
 
-class _ExtensibleConfig(BaseModel):
-    """Base for configs whose extra keys feed an op's ``Options`` model.
-
-    Both :class:`ModifierConfig` and :class:`OperationConfig` parse
-    a fixed discriminator (``type`` / ``name``) and collect every
-    other key into :attr:`options` via Pydantic's ``extra="allow"``.
-    The op class then validates ``options`` against its own
-    ``Options`` :class:`~pydantic.BaseModel`.  Hoisting the config
-    knob and the accessor here keeps the two leaf classes aligned
-    so adding a third extensible config later is a one-liner.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    @property
-    def options(self) -> dict[str, Any]:
-        """Op-specific options (every key not declared on the model)."""
-        return self.model_extra or {}
-
-
-class ModifierConfig(_ExtensibleConfig):
+class ModifierConfig(ExtensibleConfig):
     """Configuration for an op modifier.
 
     Modifiers nest inside their parent op's config (under
@@ -757,7 +774,7 @@ class ModifierConfig(_ExtensibleConfig):
     type: str
 
 
-class OperationConfig(_ExtensibleConfig):
+class OperationConfig(ExtensibleConfig):
     """Configuration for a single operation.
 
     Known fields (``name``, ``require_auth``) are parsed normally.
@@ -1011,12 +1028,9 @@ class ResourceConfig(BaseModel):
     """Dotted import path to the consumer's SQLAlchemy model class,
     e.g. ``"myapp.models.Article"``."""
 
-    pk: str = "id"
-    """Primary-key attribute name on the model."""
-
-    pk_type: FieldType = "uuid"
-    """Type of the primary key, used to generate the correct path
-    parameter."""
+    pk: ColumnRef = Field(default_factory=ColumnRef)
+    """Primary-key column on the model.  ``{name, type}`` -- defaults
+    to ``{name: "id", type: "uuid"}``."""
 
     route_prefix: str | None = None
     """URL prefix for this resource's router, e.g. ``"/articles"``.
@@ -1637,7 +1651,9 @@ class PaginateConfig(BaseModel):
     """Configuration for list pagination."""
 
     mode: Literal["keyset", "offset"] = "keyset"
-    cursor_field: str = "id"
-    cursor_type: FieldType = "uuid"
+    cursor: ColumnRef = Field(default_factory=ColumnRef)
+    """Cursor column for keyset pagination.  ``{name, type}`` --
+    defaults to ``{name: "id", type: "uuid"}``.  Ignored when
+    :attr:`mode` is ``"offset"``."""
     max_page_size: int = 100
     default_page_size: int = 20

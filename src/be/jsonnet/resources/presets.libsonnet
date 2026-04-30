@@ -67,7 +67,7 @@
   //   resources: [
   //     {
   //       model: "myapp.models.File",
-  //       pk: "id", pk_type: "uuid",
+  //       pk: { name: "id", type: "uuid" },
   //       operations: resource.files(),
   //     },
   //   ],
@@ -105,7 +105,7 @@
   //   resources: [
   //     {
   //       model: "myapp.models.SavedView",
-  //       pk: "id", pk_type: "str",
+  //       pk: { name: "id", type: "str" },
   //       require_auth: true,
   //       operations: resource.saved_views(
   //         serializer="myapp.serializers.dump_view_hydrated",
