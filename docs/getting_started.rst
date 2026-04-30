@@ -90,7 +90,34 @@ optional bits to enable:
      pgcraft: false,
      pgqueuer: false,
      editable: false,
+     rate_limit: false,
+     comms: false,
+     notification_preferences: false,
    }
+
+Setting ``rate_limit: true`` adds the ``kiln-generator[rate-limit]``
+extra and stamps a ``rate_limit: rate_limit.slowapi('...')`` block
+into ``config/project.jsonnet`` pointing at a placeholder bucket-model
+dotted path you fill in once your model exists.
+
+Setting ``comms: true`` stamps a ``comms: comms.platform({...})``
+block and emits a starter ``comms.py`` skeleton with stub context
+schemas, a stub :class:`~ingot.comms.Transport`, and a stub
+:class:`~ingot.comms.PreferenceResolver`.  ``comms`` requires
+``pgqueuer: true`` -- the bootstrap rejects the combination
+otherwise so the broken state is caught at config-load time.  See
+:doc:`comms` for the runtime surface.
+
+Setting ``notification_preferences: true`` (requires ``comms: true``)
+upgrades the comms scaffold: the stub
+:class:`~ingot.comms.PreferenceResolver` is replaced by a real
+``DbPreferenceResolver`` querying
+``{module}.models.NotificationPreference``, and the per-app
+``config/{module}.jsonnet`` gains a full-CRUD resource for
+managing the preference rows.  You still own the
+``NotificationPreference`` SQLAlchemy class -- subclass
+:class:`~ingot.comms.NotificationPreferenceMixin` on your
+project's ``Base`` and migrate the table.
 
 Then run::
 

@@ -3,6 +3,11 @@
 Each submodule groups related primitives:
 
 * :mod:`ingot.auth` -- JWT session auth (bearer + cookie transports).
+* :mod:`ingot.comms` -- communication-platform primitives:
+  :class:`~ingot.comms.CommType` registry, transport adapters,
+  preference resolver, and a transactional-outbox
+  :func:`~ingot.comms.send_communication` that rides the request
+  session via pgqueuer.
 * :mod:`ingot.files` -- :class:`~ingot.files.FileMixin` (pgcraft-
   flavoured storage-column mixin) + S3 client + four ready-made
   action functions.  Requires the ``files`` extra

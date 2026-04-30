@@ -1,0 +1,154 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Exposes the project's :class:`ingot.comms.CommRegistry`, a
+``send_comm`` wrapper with the registry and ORM classes pre-bound,
+and a ``dispatch`` worker handler ready to register against
+:data:`ingot.comms.DISPATCH_ENTRYPOINT`::
+
+    from pgqueuer import PgQueuer
+    from ingot.comms import DISPATCH_ENTRYPOINT
+    from {{ comms_module }} import dispatch
+
+    pgq = PgQueuer(driver)
+    pgq.entrypoint(DISPATCH_ENTRYPOINT)(dispatch)
+
+The registry is populated from the project's declared comm types;
+the worker uses the same async session factory the rest of the
+generated app reads from (``{{ db_key }}`` database).
+{% endset %}
+{{ file_header("Communication-platform wiring", extra=_extra) }}
+
+
+from typing import TYPE_CHECKING
+
+from ingot.comms import (
+    CommRegistry,
+    CommType,
+    make_dispatch_entrypoint,
+    send_communication,
+)
+
+{% if recipient_module == message_module %}
+from {{ message_module }} import {{ message_class }}, {{ recipient_class }}
+{% else %}
+from {{ message_module }} import {{ message_class }}
+from {{ recipient_module }} import {{ recipient_class }}
+{% endif %}
+{% for entry in types %}
+from {{ entry.context_module }} import {{ entry.context_class }}
+{% endfor %}
+{% for transport in transports %}
+from {{ transport.module }} import {{ transport.name }}
+{% endfor %}
+{% if renderer_module %}
+from {{ renderer_module }} import {{ renderer_name }}
+{% endif %}
+{% if preferences_module %}
+from {{ preferences_module }} import {{ preferences_name }}
+{% endif %}
+
+# The session module exposes its sessionmaker as the private
+# ``_SessionLocal`` (its public surface is the FastAPI dep generator
+# instead).  The worker can't use a generator -- it needs to open
+# its own short-lived session per job -- so reach the sessionmaker
+# directly.  Both files are generated, so the cross-import is
+# internal infrastructure rather than a stable public surface.
+from {{ session_module }} import _SessionLocal as _session_factory
+
+if TYPE_CHECKING:
+    import uuid
+    from collections.abc import Sequence
+
+    from pgqueuer import Queries
+    from pydantic import BaseModel
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ingot.comms import RecipientSpec
+
+
+registry = CommRegistry()
+"""Project-wide :class:`ingot.comms.CommRegistry`.  Populated below
+with one :class:`~ingot.comms.CommType` per declared entry."""
+
+{% for entry in types %}
+registry.register(
+    CommType(
+        name={{ entry.name | tojson }},
+        context_schema={{ entry.context_class }},
+        subject_template={{ entry.subject_template | tojson }},
+        body_template={{ entry.body_template | tojson }},
+        default_methods=tuple({{ entry.default_methods | tojson }}),
+    ),
+)
+{% endfor %}
+
+_transports = {
+{% for transport in transports %}
+    {{ transport.method | tojson }}: {{ transport.name }},
+{% endfor %}
+}
+"""Method -> transport instance.  Looked up at dispatch time."""
+
+
+async def send_comm(
+    *,
+    session: "AsyncSession",
+    queue: "Queries",
+    comm_type: str,
+    context: "BaseModel | dict",
+    recipients: "Sequence[RecipientSpec]",
+) -> "uuid.UUID":
+    """Send a comm by name -- registry and ORM classes pre-bound.
+
+    Thin wrapper over :func:`ingot.comms.send_communication` so call
+    sites don't repeat the message / recipient classes and the
+    registry on every send.
+
+    Args:
+        session: Async SQLAlchemy session -- the message + recipient
+            inserts ride this transaction.
+        queue: pgqueuer ``Queries`` bound to *session*'s connection
+            (build via :func:`ingot.queue.get_queue`).  Per-recipient
+            jobs are enqueued on the same connection so they're
+            durable iff *session* commits.
+        comm_type: Registry key declared in this project's spec.
+        context: Pydantic model matching the type's
+            ``context_schema``, or a dict that will be validated
+            against it.
+        recipients: Per-delivery specs.
+
+    Returns:
+        Id of the inserted message row.
+
+    """
+    return await send_communication(
+        session=session,
+        queue=queue,
+        registry=registry,
+        comm_type=comm_type,
+        context=context,
+        recipients=recipients,
+        message_cls={{ message_class }},
+        recipient_cls={{ recipient_class }},
+{% if renderer_name %}
+        renderer={{ renderer_name }},
+{% endif %}
+{% if preferences_name %}
+        preferences={{ preferences_name }},
+{% endif %}
+    )
+
+
+dispatch = make_dispatch_entrypoint(
+    session_factory=_session_factory,
+    transports=_transports,
+    message_cls={{ message_class }},
+    recipient_cls={{ recipient_class }},
+)
+"""Worker handler.  Register on a pgqueuer ``PgQueuer`` instance::
+
+    pgq.entrypoint(DISPATCH_ENTRYPOINT)(dispatch)
+"""
+
+
+__all__ = ["dispatch", "registry", "send_comm"]

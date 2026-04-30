@@ -70,6 +70,18 @@ be config schema
    :members:
    :undoc-members:
 
+.. autoclass:: be.config.schema.CommsConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: be.config.schema.CommTypeConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: be.config.schema.TemplateSource
+   :members:
+   :undoc-members:
+
 .. autoclass:: be.config.schema.FilterConfig
    :members:
    :undoc-members:
