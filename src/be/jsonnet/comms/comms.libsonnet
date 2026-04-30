@@ -35,22 +35,22 @@
   platform(opts):: {
     message_model: opts.message_model,
     recipient_model: opts.recipient_model,
-    types: std.get(opts, 'types', []),
-    transports: std.get(opts, 'transports', {}),
-    [if std.objectHas(opts, 'renderer') then 'renderer']:
+    types: std.get(opts, "types", []),
+    transports: std.get(opts, "transports", {}),
+    [if std.objectHas(opts, "renderer") then "renderer"]:
       opts.renderer,
-    [if std.objectHas(opts, 'preferences') then 'preferences']:
+    [if std.objectHas(opts, "preferences") then "preferences"]:
       opts.preferences,
-    [if std.objectHas(opts, 'db_key') then 'db_key']: opts.db_key,
+    [if std.objectHas(opts, "db_key") then "db_key"]: opts.db_key,
   },
 
   type(opts):: {
     name: opts.name,
     context_schema: opts.context_schema,
-    [if std.objectHas(opts, 'subject_template') then 'subject_template']:
+    [if std.objectHas(opts, "subject_template") then "subject_template"]:
       opts.subject_template,
     body_template: opts.body_template,
-    [if std.objectHas(opts, 'default_methods') then 'default_methods']:
+    [if std.objectHas(opts, "default_methods") then "default_methods"]:
       opts.default_methods,
   },
 

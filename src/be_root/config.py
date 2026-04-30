@@ -100,7 +100,7 @@ class RootConfig(FoundryConfig):
             database-backed preference layer for the comms
             platform: the generated ``comms.py`` swaps its stub
             :class:`~ingot.comms.PreferenceResolver` for a real
-            :class:`DbPreferenceResolver` that queries
+            ``DbPreferenceResolver`` that queries
             ``{module}.models.NotificationPreference`` (a
             user-supplied SQLAlchemy class mixing in
             :class:`ingot.comms.NotificationPreferenceMixin`),
