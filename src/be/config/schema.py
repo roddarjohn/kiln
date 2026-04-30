@@ -959,75 +959,55 @@ class SearchConfig(BaseModel):
     Drives the project-wide ``POST /_values`` endpoint when called
     with ``fields=[]`` for this resource: each name in
     :attr:`fields` becomes a column in a pg_trgm union, ranked by
-    similarity to ``q``.  Empty ``fields`` defaults to the
-    resource's :attr:`LinkConfig.name` column.
+    similarity to ``q``.  Empty ``fields`` defaults to the first
+    ``str``-typed entry in :attr:`LinkConfig.fields`.
     """
 
     fields: list[str] = Field(default_factory=list)
     """Model attribute names to trigram-match against ``q``.
-    Defaults to ``[link.name]`` when empty."""
-
-
-LinkKind = Literal["name", "id", "id_name"]
-"""Built-in link-schema kinds.  Each generates a per-resource
-``{Model}Link`` Pydantic class in the resource's schemas file:
-
-* ``"name"`` → ``{Model}Link`` with ``type`` + ``name``.
-* ``"id"`` → ``{Model}Link`` with ``type`` + ``id``.
-* ``"id_name"`` → ``{Model}Link`` with ``type`` + ``id`` + ``name``.
-
-``type`` is always a ``Literal[<slug>]`` so the FE-side OpenAPI
-client narrows on resource type without a manual cast."""
+    Defaults to the first ``str``-typed field in
+    :attr:`LinkConfig.fields` when empty."""
 
 
 class LinkConfig(BaseModel):
     """How a resource serializes when referenced as a link.
 
-    Either declare model-attribute shorthands (``name`` / ``id``)
-    so the codegen generates a builder that pulls those attributes
-    directly off the model, or provide a ``builder:`` dotted path
-    for arbitrary logic.  Mutually exclusive — if ``builder`` is
-    set, shorthand fields must be omitted.
+    Each entry in :attr:`fields` becomes a typed field on the
+    generated ``{Model}Link`` Pydantic class -- the codegen reads
+    the named attribute straight off the model row.  ``type`` is
+    always added as a ``Literal[<slug>]`` discriminator so the
+    FE-side OpenAPI client narrows on resource type without a
+    manual cast.
+
+    Use :attr:`builder` instead when the link payload needs custom
+    logic (joining related rows, formatting, async work).  The two
+    are mutually exclusive: a builder takes over the whole link.
     """
 
-    kind: LinkKind
-    """Which built-in link schema this resource produces.  See
-    :data:`LinkKind`."""
+    fields: list[ColumnRef] = Field(default_factory=list)
+    """Fields included in the link dump.  Each :class:`ColumnRef`
+    names a model attribute and its scalar type; the schema renders
+    one typed field per entry and the builder pulls each value off
+    the model with ``getattr``.
 
-    name: str | None = None
-    """Model attribute holding the display name, used by shorthand
-    when ``kind`` is ``"name"`` or ``"id_name"``.  Required for
-    those kinds unless ``builder`` is set."""
+    No presets -- spell out exactly what the resource exposes when
+    referenced as a link.  Empty list yields a link with just the
+    ``type`` discriminator (occasionally useful for ``ref`` filters
+    that only need to identify the resource type).
 
-    id: str | None = None
-    """Model attribute holding the link id, used by shorthand when
-    ``kind`` is ``"id"`` or ``"id_name"``.  Defaults to the
-    resource's primary key (``ResourceConfig.pk``); set explicitly
-    to override."""
+    The first ``str``-typed entry is the default search column when
+    the resource is :attr:`~ResourceConfig.searchable` and no
+    explicit :class:`SearchConfig` is configured."""
 
     builder: str | None = None
     """Dotted import path to an async callable
     ``(instance, session) -> LinkSchema`` that returns the link
-    schema instance.  Overrides shorthand."""
+    schema instance.  Mutually exclusive with :attr:`fields`."""
 
     @model_validator(mode="after")
-    def _validate_shorthand(self) -> LinkConfig:
-        if self.builder is not None:
-            if self.name is not None or self.id is not None:
-                msg = (
-                    "LinkConfig: provide either `builder` or "
-                    "shorthand fields (`name` / `id`), not both."
-                )
-                raise ValueError(msg)
-
-            return self
-
-        if self.kind in {"name", "id_name"} and self.name is None:
-            msg = (
-                f"LinkConfig: kind={self.kind!r} requires either "
-                f"`name` (model attribute holding the display name) "
-                f"or `builder`."
-            )
+    def _validate_builder_excludes_fields(self) -> LinkConfig:
+        if self.builder is not None and self.fields:
+            msg = "LinkConfig: provide either `builder` or `fields`, not both."
             raise ValueError(msg)
 
         return self

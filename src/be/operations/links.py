@@ -56,12 +56,10 @@ class LinkSchema:
     ) -> Iterable[object]:
         """Yield the resource's ``{Model}Link`` schema class.
 
-        The shape varies with
-        :attr:`~be.config.schema.LinkConfig.kind`: ``name``
-        carries a single ``name`` field, ``id`` carries an ``id``
-        typed against ``pk_type``, and ``id_name`` carries both.
-        ``type`` is a ``Literal[<slug>]`` so the FE-side OpenAPI
-        client gets a discriminator narrowing.
+        Renders one typed field per :attr:`LinkConfig.fields`
+        entry alongside the always-present ``type:
+        Literal[<slug>]`` discriminator that lets FE clients
+        narrow on resource type.
         """
         resource = ctx.instance
         link = resource.link
@@ -71,6 +69,10 @@ class LinkSchema:
             raise AssertionError(msg)
 
         _, model = Name.from_dotted(resource.model)
+        # When ``builder`` is set the user controls the payload --
+        # but the schema class still needs to exist for callers to
+        # type against, so emit the discriminator-only shell.
+        link_fields = [] if link.builder is not None else link.fields
 
         yield SchemaClass(
             name=f"{model.pascal}Link",
@@ -78,8 +80,10 @@ class LinkSchema:
             body_context={
                 "schema_name": f"{model.pascal}Link",
                 "slug": model.snake,
-                "kind": link.kind,
-                "id_py_type": PYTHON_TYPES[resource.pk.type],
+                "fields": [
+                    {"name": f.name, "py_type": PYTHON_TYPES[f.type]}
+                    for f in link_fields
+                ],
             },
             extra_imports=[("typing", "Literal")],
         )
