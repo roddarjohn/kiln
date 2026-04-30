@@ -10,11 +10,14 @@
         detail="{{ model_name }} not found",
     )
 {{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
+{% set values_expr -%}
+{% if dump_call|default(none) %}{{ dump_call }}(body){% else %}body.model_dump(exclude_unset=True){% endif %}
+{%- endset %}
 {% if post_hook_call|default(none) %}
     result = await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-        .values(**body.model_dump(exclude_unset=True))
+        .values(**{{ values_expr }})
         .returning({{ model_name }})
     )
     obj = result.scalar_one()
@@ -24,7 +27,7 @@
     await db.execute(
         update({{ model_name }})
         .where({{ model_name }}.{{ pk_name }} == {{ pk_name }})
-        .values(**body.model_dump(exclude_unset=True))
+        .values(**{{ values_expr }})
     )
     await db.commit()
 {% endif %}

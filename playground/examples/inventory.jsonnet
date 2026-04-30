@@ -27,6 +27,9 @@ local resource = import "be/resources/presets.libsonnet";
       pk: { name: "id", type: "uuid" },
       route_prefix: "/products",
       require_auth: false,
+      // Link config required because the list filter below uses
+      // ``values: "self"`` (which serialises Product as a link).
+      link: { kind: "id_name", name: "name" },
 
       operations: [
         {
@@ -85,8 +88,7 @@ local resource = import "be/resources/presets.libsonnet";
           },
           paginate={
             mode: "keyset",
-            cursor_field: "id",
-            cursor_type: "uuid",
+            cursor: { name: "id", type: "uuid" },
             default_page_size: 25,
             max_page_size: 100,
           },

@@ -887,6 +887,25 @@ class OperationConfig(ExtensibleConfig):
     request body so the consumer can fan out side effects
     (cache invalidation, audit log, downstream notification).
     Same op restrictions as :attr:`pre`."""
+    dump: str | None = None
+    """Dotted path to a sync ``(body) -> dict[str, Any]`` function
+    that maps the parsed request body to the kwargs for the
+    SQL write -- ``insert(...).values(**dump(body))`` on create
+    and ``update(...).values(**dump(body))`` on update.
+
+    When ``None``, the generated handler uses
+    ``body.model_dump()`` for create and
+    ``body.model_dump(exclude_unset=True)`` for update.  Override
+    when the request shape doesn't map 1:1 to columns: a flat
+    ``address_*`` cluster folded into a JSONB column, a derived
+    ``slug`` computed from ``title``, a denormalised tag list
+    written to a join table by the caller, etc.
+
+    Same op restrictions as :attr:`pre` -- only meaningful on
+    ``create`` and ``update``.  The function runs after :attr:`pre`
+    (so the dump sees the pre-processed body) and inside the SQL
+    write, so it should be cheap and pure -- use :attr:`pre` for
+    anything that needs ``db``."""
     modifiers: Annotated[list[ModifierConfig], Scoped(name="modifier")] = Field(
         default_factory=list
     )
@@ -896,21 +915,21 @@ class OperationConfig(ExtensibleConfig):
 
     @model_validator(mode="after")
     def _hooks_only_on_write_ops(self) -> OperationConfig:
-        """Reject ``pre`` / ``post`` on ops that don't support them.
+        """Reject ``pre`` / ``post`` / ``dump`` on unsupported ops.
 
-        The hooks wrap a parsed request body and a freshly
+        These hooks wrap a parsed request body and a freshly
         written row, so they're only meaningful on the built-in
         write ops (``create``, ``update``).  ``get`` / ``delete``
         / ``list`` have no body to pre-process and ``action``
         already calls a user-supplied function -- adding a
         second hook layer would just duplicate that path.
         """
-        if self.pre is None and self.post is None:
+        if self.pre is None and self.post is None and self.dump is None:
             return self
 
         if self.type == "action":
             msg = (
-                f"Operation {self.name!r}: pre/post hooks are not "
+                f"Operation {self.name!r}: pre/post/dump hooks are not "
                 f"supported on action ops -- the action's own fn "
                 f"is the user-defined entry point."
             )
@@ -919,7 +938,7 @@ class OperationConfig(ExtensibleConfig):
         if self.name not in _HOOK_SUPPORTED_OPS:
             allowed = ", ".join(sorted(_HOOK_SUPPORTED_OPS))
             msg = (
-                f"Operation {self.name!r}: pre/post hooks are only "
+                f"Operation {self.name!r}: pre/post/dump hooks are only "
                 f"supported on {allowed}."
             )
             raise ValueError(msg)

@@ -136,6 +136,112 @@ def test_update_handler_awaits_pre_then_post(files: dict[str, str]) -> None:
     assert pre < update < returning < commit < post
 
 
+@pytest.fixture
+def dump_files() -> dict[str, str]:
+    """Generate a project that overrides the body→values transform.
+
+    Same shape as ``files`` but wires :attr:`OperationConfig.dump`
+    instead of pre/post so the assertions can isolate the dump
+    path from the surrounding hook plumbing.
+    """
+    config = ProjectConfig(
+        databases=[DatabaseConfig(key="primary", default=True)],
+        apps=[
+            App(
+                config=AppConfig(
+                    module="blog",
+                    resources=[
+                        ResourceConfig(
+                            model="blog.models.Post",
+                            require_auth=False,
+                            operations=[
+                                OperationConfig(
+                                    name="create",
+                                    fields=[{"name": "title", "type": "str"}],
+                                    dump="blog.hooks.dump_create",
+                                ),
+                                OperationConfig(
+                                    name="update",
+                                    fields=[{"name": "title", "type": "str"}],
+                                    dump="blog.hooks.dump_update",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                prefix="/blog",
+            ),
+        ],
+    )
+    rendered: list[GeneratedFile] = generate(config, target)
+    return {f.path: f.content for f in rendered}
+
+
+def test_dump_hook_replaces_model_dump_on_create(
+    dump_files: dict[str, str],
+) -> None:
+    """When ``dump`` is set, create's insert calls the user fn instead."""
+    routes = dump_files["blog/routes/post.py"]
+    block = _handler_block(routes, "async def create_post(")
+    assert "**dump_create(body)" in block
+    assert "body.model_dump(" not in block
+
+
+def test_dump_hook_replaces_model_dump_on_update(
+    dump_files: dict[str, str],
+) -> None:
+    """When ``dump`` is set, update's values come from the user fn."""
+    routes = dump_files["blog/routes/post.py"]
+    block = _handler_block(routes, "async def update_post(")
+    assert "**dump_update(body)" in block
+    assert "body.model_dump(" not in block
+
+
+def test_dump_hook_imported_by_bare_name(
+    dump_files: dict[str, str],
+) -> None:
+    """The dump callable is imported from its dotted module."""
+    routes = dump_files["blog/routes/post.py"]
+    assert "from blog.hooks import" in routes
+    assert "dump_create" in routes
+    assert "dump_update" in routes
+
+
+def test_default_dump_keeps_model_dump_call() -> None:
+    """No ``dump`` set → templates still spell ``body.model_dump()``."""
+    config = ProjectConfig(
+        databases=[DatabaseConfig(key="primary", default=True)],
+        apps=[
+            App(
+                config=AppConfig(
+                    module="blog",
+                    resources=[
+                        ResourceConfig(
+                            model="blog.models.Post",
+                            require_auth=False,
+                            operations=[
+                                OperationConfig(
+                                    name="create",
+                                    fields=[{"name": "title", "type": "str"}],
+                                ),
+                                OperationConfig(
+                                    name="update",
+                                    fields=[{"name": "title", "type": "str"}],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                prefix="/blog",
+            ),
+        ],
+    )
+    rendered = {f.path: f.content for f in generate(config, target)}
+    routes = rendered["blog/routes/post.py"]
+    assert "body.model_dump()" in routes
+    assert "body.model_dump(exclude_unset=True)" in routes
+
+
 def test_post_hook_can_spawn_background_task() -> None:
     """A post-hook that fires an ``asyncio.create_task`` works end-to-end.
 

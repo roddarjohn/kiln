@@ -5,10 +5,13 @@
     body = await {{ pre_hook_call }}(body, db=db)
 {% endif %}
 {{ gate(gate_specs_const|default(none), gate_op_name|default(""), "None") }}
+{% set values_expr -%}
+{% if dump_call|default(none) %}{{ dump_call }}(body){% else %}body.model_dump(){% endif %}
+{%- endset %}
 {% if post_hook_call|default(none) %}
     result = await db.execute(
         insert({{ model_name }})
-        .values(**body.model_dump())
+        .values(**{{ values_expr }})
         .returning({{ model_name }})
     )
     obj = result.scalar_one()
@@ -17,7 +20,7 @@
     await {{ post_hook_call }}(obj, body, db=db)
 
 {% else %}
-    await db.execute(insert({{ model_name }}).values(**body.model_dump()))
+    await db.execute(insert({{ model_name }}).values(**{{ values_expr }}))
 
     await db.commit()
 {% endif %}

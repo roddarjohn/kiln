@@ -669,13 +669,17 @@ def gate_wiring(
 def hooks_wiring(
     op: OperationConfig,
 ) -> tuple[dict[str, object], list[tuple[str, str]]]:
-    """Wire imports + body context for an op's ``pre`` / ``post`` hooks.
+    """Wire imports + body context for an op's hook callables.
 
-    Returns ``({}, [])`` when the op declares neither hook.  The
-    template references the hooks by their bare callable name
-    (``pre_hook_call`` / ``post_hook_call``); this function
-    splits the dotted path and registers the import so the bare
-    name resolves at runtime.
+    Resolves the three optional dotted-path hooks
+    (:attr:`OperationConfig.pre`, :attr:`OperationConfig.post`,
+    :attr:`OperationConfig.dump`) into ``(ctx, imports)``: the
+    template references each hook by its bare callable name
+    (``pre_hook_call`` / ``post_hook_call`` / ``dump_call``);
+    this function splits the dotted path and registers the import
+    so the bare name resolves at runtime.
+
+    Returns ``({}, [])`` when no hook is declared.
     """
     ctx: dict[str, object] = {}
     imports: list[tuple[str, str]] = []
@@ -683,16 +687,19 @@ def hooks_wiring(
     for slot, dotted in (
         ("pre_hook_call", op.pre),
         ("post_hook_call", op.post),
+        ("dump_call", op.dump),
     ):
         if dotted is None:
             continue
+
+        label = slot.removesuffix("_hook_call").removesuffix("_call")
 
         try:
             module, attr_name = Name.from_dotted(dotted)
 
         except ValueError as exc:
             msg = (
-                f"Operation {op.name!r}: {slot.removesuffix('_call')!r} "
+                f"Operation {op.name!r}: {label!r} "
                 f"must be a dotted path (got {dotted!r})"
             )
             raise ValueError(msg) from exc

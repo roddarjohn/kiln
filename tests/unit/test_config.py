@@ -364,11 +364,14 @@ def test_operation_config_hooks_on_update_allowed():
 def test_operation_config_hooks_rejected_on_read_only_ops(op_name):
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+    with pytest.raises(ValidationError, match="hooks are only"):
         OperationConfig(name=op_name, pre="myapp.hooks.h")
 
-    with pytest.raises(ValidationError, match="pre/post hooks are only"):
+    with pytest.raises(ValidationError, match="hooks are only"):
         OperationConfig(name=op_name, post="myapp.hooks.h")
+
+    with pytest.raises(ValidationError, match="hooks are only"):
+        OperationConfig(name=op_name, dump="myapp.hooks.dump_body")
 
 
 def test_operation_config_hooks_rejected_on_action_ops():
