@@ -69,14 +69,11 @@ class {{ entry.pascal }}FieldRef(BaseModel):
 class {{ entry.pascal }}ValuesRequest(BaseModel):
     """Request body for ``POST /_values`` targeting ``{{ entry.slug }}``.
 
-    ``fields`` is interpreted by ``len()``:
-
-    * empty — resource-level search using the configured
-      :class:`SearchSpec` (or a pk fallback when none).
-    * one element — per-field value provider for that field
-      (enum / free-text / ref dispatch).
-    * two or more — multi-column resource search ILIKE-OR'd
-      across the named columns.
+    ``fields`` is the list of columns to trigram-match against.
+    Empty defaults to the resource's configured search columns;
+    any populated list narrows to those specific fields.  The FE
+    has the full enum members from discovery, so enum dropdowns
+    populate without calling this endpoint.
 
     Field names are constrained at codegen time to this
     resource's filter fields.

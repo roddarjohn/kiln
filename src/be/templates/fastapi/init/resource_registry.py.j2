@@ -31,8 +31,8 @@ resource_registry = ResourceRegistry({
 {% endfor %}
         ),
 {% endif %}
-{% if entry.search %}
-        search={{ entry.search }},
+{% if entry.search_columns %}
+        search_columns=({{ entry.search_columns }}),
 {% endif %}
     ),
 {% endfor %}

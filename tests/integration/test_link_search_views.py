@@ -9,13 +9,12 @@ asserts that:
 * Each linked resource produces an entry in the per-app
   ``links.py`` registry, plus a matching ``REF_RESOLVERS`` entry
   capable of fetching rows by id.
-* ``searchable: True`` contributes a
-  :class:`~ingot.resource_registry.SearchSpec` to the project-wide
-  registry — the ``POST /_values/{resource}`` endpoint lives on
-  the project router, not on the resource.
+* ``searchable: True`` contributes ``search_columns`` to the
+  resource's project-wide registry entry — the ``POST /_values``
+  endpoint lives on the project router, not on the resource.
 * A ``ref`` filter on one resource shows up in the registry with
   the right ``target`` slug; the FE-facing endpoint URL points at
-  the project-wide ``/_values/<target>`` route.
+  the project-wide ``/_values`` route.
 * A regular CRUD resource carrying ``serializer:`` on its read
   ops swaps in the user's serializer (called with
   ``(obj, session, db)``) and drops ``response_model``.
@@ -245,23 +244,23 @@ def test_link_schema_emitted_in_resource_schemas(
     assert 'type: Literal["product"] = "product"' in product_schemas
 
 
-def test_searchable_contributes_search_spec(
+def test_searchable_contributes_search_columns(
     files: dict[str, str],
 ) -> None:
-    """Customer's ``searchable=True`` shows up in the registry as
-    a :class:`SearchSpec` pulling the link builder from the per-app
-    ``LINKS`` map (no per-resource ``POST /_values`` is emitted)."""
+    """Customer's ``searchable=True`` lands as ``search_columns`` on
+    its registry entry (no per-resource ``POST /_values`` route is
+    emitted, and link payloads are no longer plumbed through the
+    registry — the FE resolves ids via REF_RESOLVERS)."""
     routes = files["inventory/routes/customer.py"]
     assert '@router.post("/_values"' not in routes
 
     registry = files["resources/__init__.py"]
-    # Customer entry exists with a search spec.
+    # Customer entry exists with default search columns from link.name.
     assert '"customer": ResourceEntry(' in registry
-    assert "search=SearchSpec(" in registry
-    # Default search column comes from link.name.
-    assert "columns=('name'" in registry
-    # Link builder pulled from the per-app LINKS map (aliased).
-    assert "_inventory_LINKS['customer']" in registry
+    assert "search_columns=('name'" in registry
+    # No SearchSpec / LINKS plumbing in the registry anymore.
+    assert "SearchSpec(" not in registry
+    assert "_inventory_LINKS" not in registry
 
 
 def test_ref_filter_targets_registered_resource(

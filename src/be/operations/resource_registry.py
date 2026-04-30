@@ -78,17 +78,13 @@ class ResourceRegistry:
             ("ingot.resource_registry", "ResourceEntry"),
         ]
         used_field_kinds: set[str] = set()
-        link_aliases: dict[str, str] = {}
         entries: list[dict[str, object]] = []
 
-        for app, resource in _iter_contributing_resources(config):
+        for _app, resource in _iter_contributing_resources(config):
             entry = _build_entry(
-                app=app,
                 resource=resource,
-                package_prefix=package_prefix,
                 imports=registry_imports,
                 kinds=used_field_kinds,
-                link_aliases=link_aliases,
             )
             entries.append(entry)
 
@@ -96,9 +92,6 @@ class ResourceRegistry:
             ("ingot.resource_registry", kind)
             for kind in sorted(used_field_kinds)
         )
-
-        if any(e["search"] for e in entries):
-            registry_imports.append(("ingot.resource_registry", "SearchSpec"))
 
         # Per-resource per-field schema specs are derived from the
         # same FilterField list that drives the registry entries.
@@ -254,14 +247,11 @@ def _resource_filter_fields(
     return []
 
 
-def _build_entry(  # noqa: PLR0913 -- collects six shared accumulators
+def _build_entry(
     *,
-    app: AppConfig,
     resource: ResourceConfig,
-    package_prefix: str,
     imports: list[tuple[str, str]],
     kinds: set[str],
-    link_aliases: dict[str, str],
 ) -> dict[str, object]:
     """Build the template-context dict for one resource's entry.
 
@@ -270,9 +260,12 @@ def _build_entry(  # noqa: PLR0913 -- collects six shared accumulators
     * Appends model and enum imports onto *imports*.
     * Records each ``FilterField`` kind used so the registry module
       imports only what it needs.
-    * Allocates a per-app ``LINKS`` alias on *link_aliases* (and
-      the corresponding import) when the resource opts into
-      ``searchable``.
+
+    Searchable resources contribute a ``search_columns`` tuple
+    (the columns to trigram against when the values endpoint is
+    called with empty ``fields``).  Link payload shaping is no
+    longer the registry's concern — the FE resolves ids via the
+    per-app ``REF_RESOLVERS`` registry when it needs link shapes.
     """
     model_module, model = Name.from_dotted(resource.model)
     slug = model.lower
@@ -286,7 +279,7 @@ def _build_entry(  # noqa: PLR0913 -- collects six shared accumulators
         kinds.add(kind)
         fields_src.append(rendered)
 
-    search_src: str | None = None
+    search_columns: list[str] = []
 
     if resource.searchable:
         link = resource.link
@@ -299,46 +292,23 @@ def _build_entry(  # noqa: PLR0913 -- collects six shared accumulators
             )
             raise ValueError(msg)
 
-        columns = (
+        search_columns = (
             list(resource.search.fields)
             if resource.search is not None
             else _default_search_fields(link)
         )
-        vector_column = (
-            resource.search.vector_column
-            if resource.search is not None
-            else None
-        )
-        alias = link_aliases.get(app.module)
 
-        if alias is None:
-            alias = f"_{app.module}_LINKS"
-            link_aliases[app.module] = alias
-            links_module = prefix_import(package_prefix, app.module, "links")
-            imports.append((links_module, f"LINKS as {alias}"))
+    columns_src = ", ".join(repr(c) for c in search_columns)
 
-        columns_src = ", ".join(repr(c) for c in columns)
-
-        if len(columns) == 1:
-            columns_src += ","
-
-        vector_kwarg = (
-            f", vector_column={vector_column!r}"
-            if vector_column is not None
-            else ""
-        )
-
-        search_src = (
-            f"SearchSpec(columns=({columns_src}), "
-            f"link={alias}[{slug!r}]{vector_kwarg})"
-        )
+    if len(search_columns) == 1:
+        columns_src += ","
 
     return {
         "slug": slug,
         "model_name": model.pascal,
         "pk": resource.pk,
         "fields": fields_src,
-        "search": search_src,
+        "search_columns": columns_src,
     }
 
 

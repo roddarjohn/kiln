@@ -14,7 +14,6 @@ that doesn't behave like the production target (Postgres).
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -37,7 +36,6 @@ from ingot.resource_registry import (
     Ref,
     ResourceEntry,
     ResourceRegistry,
-    SearchSpec,
 )
 
 if TYPE_CHECKING:
@@ -63,29 +61,6 @@ class _Item(_Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     sku = Column(String)
-    # Stand-in for a pgcraft-generated tsvector column.  The real
-    # type would be ``TSVECTOR`` from sqlalchemy.dialects.postgresql,
-    # but this test only compiles SQL — it never executes — so the
-    # column type doesn't matter, only its presence.
-    search_vector = Column(String)
-
-
-@dataclass(frozen=True)
-class _Link:
-    """Stand-in for the consumer's link schema; mirrors
-    :meth:`pydantic.BaseModel.model_dump` so the registry's
-    ``hasattr(link, "model_dump")`` branch fires."""
-
-    type: str
-    id: int
-    name: str
-
-    def model_dump(self) -> dict[str, Any]:
-        return {"type": self.type, "id": self.id, "name": self.name}
-
-
-async def _link_item(obj: _Item, _session: Any) -> _Link:
-    return _Link(type="item", id=obj.id, name=obj.name)
 
 
 class _ExecuteCapture:
@@ -110,7 +85,7 @@ class _ExecuteCapture:
 
 
 def _registry() -> ResourceRegistry:
-    """One entry covering every field kind, with a SearchSpec."""
+    """One entry covering every field kind, with default search columns."""
     return ResourceRegistry(
         {
             "item": ResourceEntry(
@@ -126,7 +101,7 @@ def _registry() -> ResourceRegistry:
                     LiteralField("count", type="int"),
                     Bool("active"),
                 ),
-                search=SearchSpec(columns=("name", "sku"), link=_link_item),
+                search_columns=("name", "sku"),
             ),
         }
     )
@@ -187,7 +162,6 @@ def test_supports_search_false_when_entry_lacks_search() -> None:
                 model=_Item,
                 pk="id",
                 fields=(FreeText("name"),),
-                search=None,
             ),
         }
     )
@@ -352,62 +326,11 @@ async def test_values_response_has_no_cursor() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_resource_with_tsvector_column_uses_ts_rank() -> None:
-    """SearchSpec.vector_column switches the SQL to tsvector mode."""
-    registry = ResourceRegistry(
-        {
-            "item": ResourceEntry(
-                model=_Item,
-                pk="id",
-                fields=(),
-                search=SearchSpec(
-                    columns=("name",),
-                    link=_link_item,
-                    vector_column="search_vector",
-                ),
-            ),
-        }
-    )
-    db = _ExecuteCapture(rows=[])
-    await registry.values(
-        resource="item",
-        fields=[],
-        request=FilterValuesRequest(q="apple"),
-        db=db,  # type: ignore[arg-type]
-    )
-
-    sql = str(db.statements[0].compile(dialect=postgresql.dialect())).replace(
-        "\n", " "
-    )
-
-    assert "@@" in sql
-    assert "websearch_to_tsquery" in sql
-    assert "ts_rank" in sql
-    assert "ILIKE" not in sql.upper()
-
-
-@pytest.mark.asyncio
-async def test_search_resource_without_vector_column_keeps_ilike() -> None:
-    """Without vector_column the ILIKE fallback fires, keyset on pk."""
-    db = _ExecuteCapture(rows=[])
-    await _registry().values(
-        resource="item",
-        fields=[],
-        request=FilterValuesRequest(q="apple"),
-        db=db,  # type: ignore[arg-type]
-    )
-
-    sql = _sql(db.statements[0])
-    assert "@@" not in sql
-    assert "ts_rank" not in sql
-    assert "ILIKE" in sql.upper()
-    # Single-column ordering: pk, no relevance bucket.
-    assert "CASE WHEN" not in sql.upper()
-
-
-@pytest.mark.asyncio
-async def test_search_resource_with_q_or_ilikes_every_search_column() -> None:
-    """Resource-level search ORs ILIKE over every column in SearchSpec."""
+async def test_empty_fields_unions_search_columns_with_q() -> None:
+    """``fields=[]`` defaults to the entry's ``search_columns`` and
+    runs the same trigram union pipeline as a populated list.
+    Each search column appears in the compiled SQL and ``ILIKE``
+    never does — the empty-fields path is purely trigram now."""
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
@@ -417,15 +340,42 @@ async def test_search_resource_with_q_or_ilikes_every_search_column() -> None:
     )
 
     sql = _sql(db.statements[0])
-    assert "ILIKE '%%ap%%'" in sql
-    assert " OR " in sql.upper()
+    assert "ILIKE" not in sql.upper()
+    assert "similarity" in sql.lower()
+    assert "_filter_registry_test_items.name" in sql
+    assert "_filter_registry_test_items.sku" in sql
+
+
+@pytest.mark.asyncio
+async def test_empty_fields_without_search_columns_returns_empty() -> None:
+    """A resource with no ``search_columns`` and no ``fields``
+    short-circuits to an empty page — no SQL, no error."""
+    registry = ResourceRegistry(
+        {
+            "item": ResourceEntry(
+                model=_Item,
+                pk="id",
+                fields=(FreeText("name"),),
+            ),
+        }
+    )
+    db = _ExecuteCapture(rows=[])
+    page = await registry.values(
+        resource="item",
+        fields=[],
+        request=FilterValuesRequest(q="ap"),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert page.results == []
+    assert db.statements == []
 
 
 @pytest.mark.asyncio
 async def test_self_ref_with_q_uses_target_search_col() -> None:
     """A self-ref Ref field is just a Ref whose target is the same
     resource — its trigram subquery scores against the target's
-    first configured search column."""
+    first ``search_columns`` entry."""
     db = _ExecuteCapture(rows=[])
     await _registry().values(
         resource="item",
@@ -435,16 +385,16 @@ async def test_self_ref_with_q_uses_target_search_col() -> None:
     )
 
     sql = _sql(db.statements[0])
-    # ``name`` is the first column in the registry's SearchSpec.
+    # ``name`` is the first entry in the registry's search_columns.
     assert "_filter_registry_test_items.name" in sql
     assert "similarity" in sql.lower()
 
 
 @pytest.mark.asyncio
 async def test_ref_to_unsearched_resource_with_q_uses_pk_string_label() -> None:
-    """Ref to a target without a SearchSpec falls back to the
-    target's stringified pk as the label column — trigram on
-    ``cast(pk, String)`` so the union still composes."""
+    """Ref to a target without ``search_columns`` falls back to the
+    target's stringified pk — trigram on ``cast(pk, String)`` so
+    the union still composes."""
     registry = ResourceRegistry(
         {
             "item": ResourceEntry(
@@ -456,7 +406,7 @@ async def test_ref_to_unsearched_resource_with_q_uses_pk_string_label() -> None:
                 model=_Item,  # reuse for the test
                 pk="id",
                 fields=(),
-                search=None,  # crucial: no SearchSpec
+                search_columns=(),  # crucial: no search columns
             ),
         }
     )

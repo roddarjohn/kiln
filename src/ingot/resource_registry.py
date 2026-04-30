@@ -31,7 +31,6 @@ from sqlalchemy import (
     column,
     func,
     literal,
-    or_,
     select,
     union_all,
 )
@@ -40,8 +39,6 @@ from ingot.filter_values import FilterValuesRequest, resolved_limit
 from ingot.values_table import values_table
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
 
@@ -104,9 +101,9 @@ class FreeText:
 class Ref:
     """Filter pointing at another resource (or this one).
 
-    The values endpoint dispatches to the *target*'s search; targets
-    without a configured :class:`SearchSpec` fall back to a
-    pk-ordered page.
+    The trigram subquery scores against the target's first
+    :attr:`ResourceEntry.search_columns` entry; targets without
+    any search columns fall back to the stringified pk.
     """
 
     name: str
@@ -295,40 +292,25 @@ class ValuesPage(BaseModel):
 
 
 # =============================================================================
-# Resource entry + search spec.
+# Resource entry.
 # =============================================================================
 
 
 @dataclass(frozen=True)
-class SearchSpec:
-    """Resource-level search configuration.
-
-    Two modes:
-
-    * **ILIKE** (no ``vector_column``) — ``columns`` are OR'd
-      via ILIKE on the search query, results paginate by pk.
-    * **tsvector** — the named column is matched with
-      ``@@ websearch_to_tsquery(query)`` and ranked via
-      ``ts_rank``.  Pairs with the pgcraft-generated tsvector
-      column on the consumer's model.
-
-    ``link`` shapes each resulting row into the public link
-    payload via the consumer's builder.
-    """
-
-    columns: tuple[str, ...]
-    link: Callable[[Any, Any], Awaitable[Any]]
-    vector_column: str | None = None
-
-
-@dataclass(frozen=True)
 class ResourceEntry:
-    """One resource's filter declaration, registry-side."""
+    """One resource's filter declaration, registry-side.
+
+    ``search_columns`` are the model attributes used as the
+    default field list when the values endpoint is called with
+    empty ``fields`` — they're trigram-matched the same way any
+    other field is, so the empty-fields path is just a multi-
+    column search over these defaults.
+    """
 
     model: type
     pk: str
     fields: tuple[FilterField, ...] = ()
-    search: SearchSpec | None = None
+    search_columns: tuple[str, ...] = ()
 
 
 # =============================================================================
@@ -391,7 +373,7 @@ class ResourceRegistry:
         return ResourceDiscovery(
             resource=slug,
             filters=[_discover_filter(spec) for spec in entry.fields],
-            supports_search=entry.search is not None,
+            supports_search=bool(entry.search_columns),
         )
 
     def _discover_field(self, ref: FieldRef) -> FieldDiscovery:
@@ -415,23 +397,20 @@ class ResourceRegistry:
         fields: Sequence[str],
         request: FilterValuesRequest,
         db: AsyncSession,
-        session: Any = None,
+        session: Any = None,  # noqa: ARG002 -- reserved for future hook use
     ) -> ValuesPage:
         """Run a value-provider request.
 
-        ``fields=[]`` runs a resource-level search (link-shaped
-        results); any non-empty ``fields`` runs a pg_trgm union
-        ranked together, which degrades naturally to a single
-        ``%``-match when only one field is named.  The FE already
-        has every enum member from discovery, so single-field Enum
-        calls without ``q`` returning nothing isn't a regression.
+        Empty ``fields`` defaults to the resource's
+        :attr:`ResourceEntry.search_columns`, so the same multi-
+        column trigram pipeline serves both generic search and
+        per-filter narrowing.  The FE already has every enum
+        member from discovery, so a no-``q`` request for an enum
+        field returning nothing isn't a regression.
         """
         entry = self._require_entry(resource)
-
-        if not fields:
-            return await _run_resource_search(entry, request, db, session)
-
-        return await self._run_multi_column_search(entry, fields, request, db)
+        names = list(fields) if fields else list(entry.search_columns)
+        return await self._run_multi_column_search(entry, names, request, db)
 
     # -------- Internal helpers --------
 
@@ -451,40 +430,25 @@ class ResourceRegistry:
     async def _run_multi_column_search(
         self,
         entry: ResourceEntry,
-        fields: Sequence[str],
+        names: list[str],
         request: FilterValuesRequest,
         db: AsyncSession,
     ) -> ValuesPage:
-        """UNION ``(field, value, label, score)`` per field, ranked together.
+        """UNION ``(field, value, label, score)`` per name, ranked together.
 
-        Works for any non-empty ``fields``; one field is just a
-        one-arm union.  Each field dispatches by its
-        :class:`FilterField` kind so heterogeneous filters compose
-        into one search box:
+        Each entry in ``names`` is either a registered filter
+        field (:class:`Enum` / :class:`FreeText` / :class:`Ref`)
+        or a plain text column on ``entry.model`` (the
+        ``search_columns`` default path).  Bool / Literal fields
+        have no text to score against and 404 up-front, even with
+        no ``q``.
 
-        * **FreeText** — trigram on the source column.
-        * **Enum** — trigram on the enum's member names via a
-          ``VALUES`` table (so unused enum members still surface).
-        * **Ref** — trigram on the target resource's first
-          configured search column; ``value`` is the target's
-          stringified pk so the FE can plug it straight into a
-          filter operand.
-        * **Bool** / **LiteralField** — 404; they have no text to
-          score against.
-
-        Without ``q`` the union returns nothing (relevance scoring
-        is meaningless without a query).  Requires ``pg_trgm``.
+        Without ``q`` (or with an empty ``names``) the union
+        returns nothing — relevance scoring needs a query and
+        narrowing UX is "type to search".  Requires ``pg_trgm``.
         """
-        # Validate field names up-front so unknown / unscorable
-        # fields surface as 404 even when ``q`` is empty.
-        for name in fields:
+        for name in names:
             spec = _find_field(entry, name)
-
-            if spec is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Unknown filter field: {name}",
-                )
 
             if isinstance(spec, (Bool, LiteralField)):
                 raise HTTPException(
@@ -492,18 +456,27 @@ class ResourceRegistry:
                     detail=f"Field {name!r} has no value provider",
                 )
 
-        if not request.q:
+            if spec is None and not hasattr(entry.model, name):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown filter field: {name}",
+                )
+
+        if not names or not request.q:
             return ValuesPage(results=[])
 
         sub_queries = [
-            self._trigram_subquery(entry, name, request.q) for name in fields
+            self._trigram_subquery(entry, name, request.q) for name in names
         ]
+
         statement = (
             union_all(*sub_queries)
             .order_by(column("score").desc(), column("value").asc())
             .limit(resolved_limit(request.limit))
         )
+
         rows = (await db.execute(statement)).all()
+
         return ValuesPage(
             results=[
                 {
@@ -519,37 +492,16 @@ class ResourceRegistry:
     def _trigram_subquery(
         self,
         entry: ResourceEntry,
-        field_name: str,
+        name: str,
         query: str,
     ) -> Select[Any]:
         """Build the trigram subquery for one field in the union.
 
-        Dispatches on the field's :class:`FilterField` kind so each
-        type contributes the right ``(value, label, score)`` shape:
-        a FreeText column comes straight from the source row, an
-        Enum from the enum class' members table, a Ref from the
-        target resource's link column.
+        ``name`` is either a registered :class:`FilterField`
+        (dispatched by kind) or a plain model column from
+        ``entry.search_columns`` (treated as a free-text trigram).
         """
-        spec = _find_field(entry, field_name)
-
-        if spec is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Unknown filter field: {field_name}",
-            )
-
-        if isinstance(spec, FreeText):
-            column_expr = getattr(entry.model, spec.column or spec.name)
-            return (
-                select(
-                    literal(spec.name).label("field"),
-                    column_expr.label("value"),
-                    column_expr.label("label"),
-                    func.similarity(column_expr, query).label("score"),
-                )
-                .distinct()
-                .where(column_expr.op("%")(query))
-            )
+        spec = _find_field(entry, name)
 
         if isinstance(spec, Enum):
             members_table = values_table(
@@ -571,17 +523,14 @@ class ResourceRegistry:
         if isinstance(spec, Ref):
             target = self._require_entry(spec.target)
             target_pk = getattr(target.model, target.pk)
-
-            # Label by the target's first configured search column
-            # when present; otherwise fall back to its stringified
-            # pk.  Must be text-shaped for ``similarity()`` to
-            # compose.
-            if target.search and target.search.columns:
-                target_label = getattr(target.model, target.search.columns[0])
-
-            else:
-                target_label = cast(target_pk, String)
-
+            # Label by the target's first search_column when
+            # present; else its stringified pk.  Must be text-
+            # shaped for ``similarity()`` to compose.
+            target_label = (
+                getattr(target.model, target.search_columns[0])
+                if target.search_columns
+                else cast(target_pk, String)
+            )
             return select(
                 literal(spec.name).label("field"),
                 cast(target_pk, String).label("value"),
@@ -589,11 +538,23 @@ class ResourceRegistry:
                 func.similarity(target_label, query).label("score"),
             ).where(target_label.op("%")(query))
 
-        # Bool / LiteralField — no text to score against; the FE
-        # renders these natively without calling ``/_values``.
-        raise HTTPException(
-            status_code=404,
-            detail=f"Field {field_name!r} has no value provider",
+        # FreeText filter or a plain search column — both trigram
+        # against the underlying model column.
+        column_attr = (
+            getattr(entry.model, spec.column or spec.name)
+            if isinstance(spec, FreeText)
+            else getattr(entry.model, name)
+        )
+        emitted_name = spec.name if isinstance(spec, FreeText) else name
+        return (
+            select(
+                literal(emitted_name).label("field"),
+                column_attr.label("value"),
+                column_attr.label("label"),
+                func.similarity(column_attr, query).label("score"),
+            )
+            .distinct()
+            .where(column_attr.op("%")(query))
         )
 
 
@@ -637,87 +598,6 @@ def _find_field(entry: ResourceEntry, name: str) -> FilterField | None:
         (field for field in entry.fields if field.name == name),
         None,
     )
-
-
-# =============================================================================
-# Value-provider runners.
-#
-# Every runner is single-page — autocomplete UX narrows by typing
-# more characters rather than paginating, so the registry doesn't
-# carry cursor / over-fetch / next_cursor bookkeeping.  Each
-# runner: build a SELECT, optional WHERE on ``q``, ORDER BY,
-# LIMIT, execute, shape rows.  That's it.
-# =============================================================================
-
-
-async def _run_resource_search(
-    entry: ResourceEntry,
-    request: FilterValuesRequest,
-    db: AsyncSession,
-    session: Any,
-) -> ValuesPage:
-    """Resource-level search; one page of link-shaped results.
-
-    Branches by ``q`` and search config:
-
-    * ``q`` + tsvector → ``vector @@ websearch_to_tsquery``,
-      ``ORDER BY ts_rank DESC``.
-    * ``q`` + ILIKE columns → OR'd ILIKE WHERE, ``ORDER BY pk``.
-    * Otherwise → unfiltered ``ORDER BY pk``.
-
-    Entries without a :class:`SearchSpec` get a pk-only page with
-    ``{"value": pk, "label": str(pk)}`` rows so ref-only resources
-    still drive a usable autocomplete.
-    """
-    search = entry.search
-    query = request.q
-    limit = resolved_limit(request.limit)
-    pk_column = getattr(entry.model, entry.pk)
-
-    if search and query and search.vector_column is not None:
-        vector = getattr(entry.model, search.vector_column)
-        tsquery = func.websearch_to_tsquery("english", query)
-        rank = func.ts_rank(vector, tsquery)
-        statement: Select[Any] = (
-            select(entry.model)
-            .where(vector.op("@@")(tsquery))
-            .order_by(rank.desc())
-            .limit(limit)
-        )
-
-    else:
-        statement = select(entry.model).order_by(pk_column.asc()).limit(limit)
-
-        if search and query and search.columns:
-            ilike_columns = [
-                getattr(entry.model, name) for name in search.columns
-            ]
-            statement = statement.where(
-                or_(*[col.ilike(f"%{query}%") for col in ilike_columns])
-            )
-
-    rows = list((await db.execute(statement)).scalars().all())
-
-    if search is None:
-        return ValuesPage(
-            results=[
-                {
-                    "value": str(getattr(row, entry.pk)),
-                    "label": str(getattr(row, entry.pk)),
-                }
-                for row in rows
-            ],
-        )
-
-    results: list[dict[str, Any]] = []
-
-    for row in rows:
-        link = await search.link(row, session)
-        results.append(
-            link.model_dump() if hasattr(link, "model_dump") else link
-        )
-
-    return ValuesPage(results=results)
 
 
 @dataclass(frozen=True)

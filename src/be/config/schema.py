@@ -908,31 +908,16 @@ calls (see ``be.operations.create`` / ``be.operations.update``)."""
 class SearchConfig(BaseModel):
     """Resource-level search configuration.
 
-    Drives the project-wide ``POST /_values/{resource}?q=``
-    endpoint.  Without :attr:`vector_column`, ``q`` is matched via
-    ``WHERE col1 ILIKE %q% OR col2 ILIKE %q% OR ...`` over every
-    name in :attr:`fields` and results are reranked so starts-with
-    matches come first.  With :attr:`vector_column` set, the same
-    endpoint switches to ``vector_column @@ websearch_to_tsquery(q)``
-    and orders by ``ts_rank(...)`` — true full-text relevance, the
-    pgcraft-generated tsvector path.
+    Drives the project-wide ``POST /_values`` endpoint when called
+    with ``fields=[]`` for this resource: each name in
+    :attr:`fields` becomes a column in a pg_trgm union, ranked by
+    similarity to ``q``.  Empty ``fields`` defaults to the
+    resource's :attr:`LinkConfig.name` column.
     """
 
     fields: list[str] = Field(default_factory=list)
-    """Model attribute names to OR-match on the search query.  May
-    be empty when :attr:`vector_column` is set — the tsvector path
-    doesn't need a column list."""
-
-    vector_column: str | None = None
-    """Model attribute holding a Postgres ``tsvector`` column (the
-    one pgcraft generates from the resource's searchable text
-    fields).  When set, the search endpoint matches and ranks via
-    ``ts_rank`` against ``websearch_to_tsquery(q)`` instead of the
-    ILIKE fallback.
-
-    When unset, the endpoint uses :attr:`fields` (or ``link.name``
-    when neither is given) for ILIKE matching with starts-with
-    relevance reranking."""
+    """Model attribute names to trigram-match against ``q``.
+    Defaults to ``[link.name]`` when empty."""
 
 
 LinkKind = Literal["name", "id", "id_name"]
