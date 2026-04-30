@@ -913,7 +913,7 @@ def _bucket_expr(
 
 
 # -------------------------------------------------------------------
-. 5. # Page finalisers.
+# 5. # Page finalisers.
 #
 # After the runner executes its over-fetched (LIMIT n+1) statement
 # and reads the rows, the finaliser for that mode trims the spare
