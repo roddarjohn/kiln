@@ -118,8 +118,7 @@ def _saved_view() -> ResourceConfig:
     """
     return ResourceConfig(
         model="inventory.models.SavedView",
-        pk="id",
-        pk_type="str",
+        pk={"name": "id", "type": "str"},
         route_prefix="/saved-views",
         require_auth=True,
         operations=[

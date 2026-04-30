@@ -222,8 +222,8 @@ def test_project_config_action_framework_with_auth_validates():
 
 def test_resource_config_defaults():
     r = ResourceConfig(model="myapp.models.User")
-    assert r.pk == "id"
-    assert r.pk_type == "uuid"
+    assert r.pk.name == "id"
+    assert r.pk.type == "uuid"
     assert r.route_prefix is None
     assert r.db_key is None
     assert r.require_auth is True
@@ -262,8 +262,18 @@ def test_resource_config_custom_route_prefix():
 
 
 def test_resource_config_int_pk():
-    r = ResourceConfig(model="myapp.models.Tag", pk="id", pk_type="int")
-    assert r.pk_type == "int"
+    r = ResourceConfig(
+        model="myapp.models.Tag",
+        pk={"name": "id", "type": "int"},
+    )
+    assert r.pk.type == "int"
+    assert r.pk.name == "id"
+
+
+def test_resource_config_pk_defaults_to_id_uuid():
+    r = ResourceConfig(model="myapp.models.Article")
+    assert r.pk.name == "id"
+    assert r.pk.type == "uuid"
 
 
 def test_operation_config_basic():

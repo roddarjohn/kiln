@@ -93,9 +93,15 @@ class ColumnRef(BaseModel):
     annotation generated for the pk; the cursor's type drives the
     keyset cursor encoding) and lets callers pass a single value
     around instead of an ``(name, type)`` pair.
+
+    Defaults assume the most common shape -- ``id`` column typed as
+    ``uuid`` -- so consumers using that convention can omit the
+    block entirely.  Override per resource when the model uses a
+    different name (``slug``, ``code``, ...) or a different scalar
+    type (``int``, ``str``, ...).
     """
 
-    name: str
+    name: str = "id"
     """Attribute name on the SQLAlchemy model class
     (e.g. ``"id"``)."""
 
