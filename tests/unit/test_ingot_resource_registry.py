@@ -438,3 +438,21 @@ async def test_bool_and_literal_have_no_value_provider() -> None:
 
         assert ei.value.status_code == 404
         assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_field_404s_when_not_on_model() -> None:
+    """Names that aren't a registered filter and aren't a column
+    on the model raise 404, not silently empty results."""
+    db = _ExecuteCapture(rows=[])
+
+    with pytest.raises(HTTPException) as ei:
+        await _registry().values(
+            resource="item",
+            fields=["nope"],
+            request=FilterValuesRequest(q="x"),
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert ei.value.status_code == 404
+    assert db.statements == []

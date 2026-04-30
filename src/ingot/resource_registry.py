@@ -333,10 +333,6 @@ class ResourceRegistry:
         """Copy *entries* so the caller can mutate their original."""
         self._entries: dict[str, ResourceEntry] = dict(entries)
 
-    def resources(self) -> list[str]:
-        """Return the registered resource slugs, in declaration order."""
-        return list(self._entries)
-
     # -------- Discovery --------
 
     def filter_discovery(
