@@ -19,7 +19,7 @@ from __future__ import annotations
 {% endfor %}
 
 
-REGISTRY = ResourceRegistry({
+resource_registry = ResourceRegistry({
 {% for entry in entries %}
     "{{ entry.slug }}": ResourceEntry(
         model={{ entry.model_name }},

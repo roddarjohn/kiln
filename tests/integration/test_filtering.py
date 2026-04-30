@@ -18,7 +18,7 @@ This test asserts:
 * The router file exposes ``GET /_filters``, ``GET /_filters/{resource}``,
   ``GET /_filters/{resource}/{field}``, ``POST /_values/{resource}``,
   and ``POST /_values/{resource}/{field}``, all delegating to
-  ``REGISTRY``.
+  ``resource_registry``.
 * The project router mounts the new filter router.
 * The per-resource routes file no longer carries any of the old
   ``/_filters`` or ``/_values`` boilerplate.
@@ -164,7 +164,7 @@ def test_registry_field_specs(files: dict[str, str]) -> None:
 
 
 def test_router_module_emitted(files: dict[str, str]) -> None:
-    """The router file delegates every endpoint to ``REGISTRY``."""
+    """The router file delegates every endpoint to ``resource_registry``."""
     assert "resources/router.py" in files
     router = files["resources/router.py"]
 
@@ -176,10 +176,10 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert '@router.post("/_values/{resource}/{field}")' in router
 
     # Each delegates to the registry.
-    assert "REGISTRY.discovery()" in router
-    assert "REGISTRY.discovery(resource=resource)" in router
-    assert "REGISTRY.discovery(resource=resource, field=field)" in router
-    assert "await REGISTRY.values(" in router
+    assert "resource_registry.discovery()" in router
+    assert "resource_registry.discovery(resource=resource)" in router
+    assert "resource_registry.discovery(resource=resource, field=field)" in router
+    assert "await resource_registry.values(" in router
 
     # Shared body schema imported once.
     assert "from ingot.filter_values import FilterValuesRequest" in router

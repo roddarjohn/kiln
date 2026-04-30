@@ -32,7 +32,7 @@ from {{ auth_module }} import get_session
 from {{ session_schema_module }} import {{ session_schema_name }}
 {% endif %}
 
-from . import REGISTRY
+from {{ registry_module }} import resource_registry
 
 router = APIRouter()
 
@@ -44,7 +44,7 @@ def filters_root(
 {% endif %}
 ) -> dict[str, Any]:
     """Return the full project discovery payload."""
-    return REGISTRY.discovery()
+    return resource_registry.discovery()
 
 
 @router.get("/_filters/{resource}")
@@ -55,7 +55,7 @@ def filters_resource(
 {% endif %}
 ) -> dict[str, Any]:
     """Return one resource's discovery payload."""
-    return REGISTRY.discovery(resource=resource)
+    return resource_registry.discovery(resource=resource)
 
 
 @router.get("/_filters/{resource}/{field}")
@@ -67,7 +67,7 @@ def filters_resource_field(
 {% endif %}
 ) -> dict[str, Any]:
     """Return one field's discovery payload (404 on unknown field)."""
-    return REGISTRY.discovery(resource=resource, field=field)
+    return resource_registry.discovery(resource=resource, field=field)
 
 
 @router.post("/_values/{resource}")
@@ -80,7 +80,7 @@ async def values_resource(
 {% endif %}
 ) -> dict[str, Any]:
     """Resource-level search; routes to the registry's link builder."""
-    return await REGISTRY.values(
+    return await resource_registry.values(
         resource=resource,
         field=None,
         request=body,
@@ -102,7 +102,7 @@ async def values_resource_field(
 {% endif %}
 ) -> dict[str, Any]:
     """Per-field value provider (enum / free-text / ref / self)."""
-    return await REGISTRY.values(
+    return await resource_registry.values(
         resource=resource,
         field=field,
         request=body,

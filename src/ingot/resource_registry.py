@@ -4,8 +4,7 @@ Generated codegen emits one :class:`ResourceRegistry` per project,
 populated declaratively with one :class:`ResourceEntry` per
 resource.  Today the registry covers filter discovery and
 value-provider dispatch; future work folds in actions, dump
-schemas, and other resource-scoped concerns under the same map
-(see ``ResourceEntry``'s extension points).
+schemas, and other resource-scoped concerns under the same map.
 
 Project-wide route handlers (``GET /_filters``,
 ``GET /_filters/{resource}``, ``GET /_filters/{resource}/{field}``,
@@ -13,31 +12,45 @@ Project-wide route handlers (``GET /_filters``,
 delegate everything to :meth:`ResourceRegistry.discovery` and
 :meth:`ResourceRegistry.values` — they hold no logic of their own.
 
-Pagination is keyset (cursor on the primary ordering column) when
-no search query is present; with a query, results are reranked so
-starts-with-q matches come first, and pagination falls back to an
-offset cursor under that compound ordering.  Cursor strings are
-tagged with a one-character prefix (``"k:"`` keyset, ``"o:"``
-offset) so the registry decodes either mode without ambiguity.
+Both endpoints return typed Pydantic models.  Discovery is a
+discriminated union (``kind``) so the FE-side OpenAPI client narrows
+on field shape automatically.  Values are returned as
+:class:`ValuesPage` carrying a list of dicts plus an optional
+``next_cursor``.
+
+Pagination is always keyset.  Three cursor modes carry enough state
+to resume any of the three ordering shapes the registry uses:
+
+* ``"k:<pk>"`` — no query.  ORDER BY pk ASC.
+* ``"b:<bucket>:<pk>"`` — query + ILIKE relevance.  ORDER BY
+  bucket ASC, pk ASC, where bucket is ``0`` for starts-with hits
+  and ``1`` otherwise.
+* ``"r:<rank>:<pk>"`` — query + tsvector.  ORDER BY ts_rank DESC,
+  pk ASC.
+
+The one-character tag on the cursor disambiguates decode without
+requiring callers to track mode out-of-band.
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, overload
 
 from fastapi import HTTPException
-from sqlalchemy import case, func, or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, case, func, or_, select, tuple_
 
 from ingot.filter_values import (
     FilterValuesRequest,
     enum_values,
     resolved_limit,
 )
+from ingot.pagination import apply_keyset_pagination
 
 if TYPE_CHECKING:
     import enum
-    from collections.abc import Awaitable, Callable, Sequence
 
     from sqlalchemy import ColumnElement
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,7 +152,140 @@ FilterField = Enum | FreeText | Ref | SelfRef | LiteralField | Bool
 
 
 # -------------------------------------------------------------------
-# Resource-level search + entry
+# Typed discovery payload models.
+#
+# All discovery endpoints return a Pydantic model — never a plain
+# dict — so the FE-side OpenAPI client gets a real schema and so
+# FastAPI's ``response_model=`` machinery serialises consistently.
+# The ``ValuesDescriptor`` union is discriminated on ``kind`` so
+# clients can narrow on field shape without runtime type checks.
+# -------------------------------------------------------------------
+
+
+class Choice(BaseModel):
+    """One ``{value, label}`` pair in an enum field's discovery payload."""
+
+    value: Any
+    """Original enum value (whatever ``enum.value`` returns —
+    typically ``str`` for :class:`enum.StrEnum`, ``int`` for plain
+    enums)."""
+
+    label: str
+    """Enum member name, used as the human-readable label."""
+
+
+class EnumValuesDescriptor(BaseModel):
+    """Discovery descriptor for an :class:`Enum` field."""
+
+    kind: Literal["enum"] = "enum"
+    choices: list[Choice]
+    endpoint: str
+
+
+class FreeTextValuesDescriptor(BaseModel):
+    """Discovery descriptor for a :class:`FreeText` field."""
+
+    kind: Literal["free_text"] = "free_text"
+    endpoint: str
+
+
+class RefValuesDescriptor(BaseModel):
+    """Discovery descriptor for a :class:`Ref` field.
+
+    ``endpoint`` is ``None`` when the target resource has no
+    :class:`SearchSpec` configured — the FE falls back to a typed
+    input in that case.
+    """
+
+    kind: Literal["ref"] = "ref"
+    type: str
+    endpoint: str | None = None
+
+
+class SelfValuesDescriptor(BaseModel):
+    """Discovery descriptor for a :class:`SelfRef` field."""
+
+    kind: Literal["self"] = "self"
+    type: str
+    endpoint: str | None = None
+
+
+class LiteralValuesDescriptor(BaseModel):
+    """Discovery descriptor for a :class:`LiteralField`."""
+
+    kind: Literal["literal"] = "literal"
+    type: str
+
+
+class BoolValuesDescriptor(BaseModel):
+    """Discovery descriptor for a :class:`Bool` field."""
+
+    kind: Literal["bool"] = "bool"
+
+
+ValuesDescriptor = Annotated[
+    EnumValuesDescriptor
+    | FreeTextValuesDescriptor
+    | RefValuesDescriptor
+    | SelfValuesDescriptor
+    | LiteralValuesDescriptor
+    | BoolValuesDescriptor,
+    Field(discriminator="kind"),
+]
+"""Discriminated union of every per-field discovery descriptor."""
+
+
+class FieldDiscovery(BaseModel):
+    """Discovery payload for one filterable field on a resource."""
+
+    field: str
+    operators: list[str]
+    values: ValuesDescriptor
+
+
+class SearchDiscovery(BaseModel):
+    """Discovery descriptor for the resource-level search endpoint."""
+
+    endpoint: str
+
+
+class ResourceDiscovery(BaseModel):
+    """Discovery payload for one resource's filters + search."""
+
+    resource: str
+    filters: list[FieldDiscovery]
+    search: SearchDiscovery | None = None
+
+
+class ProjectDiscovery(BaseModel):
+    """Discovery payload covering every registered resource."""
+
+    resources: dict[str, ResourceDiscovery]
+
+
+# -------------------------------------------------------------------
+# Typed values-page model.
+#
+# Per-row shape varies (``{value, label}`` for enum/free-text,
+# link payload for resource search) but all of them are dicts post-
+# serialisation, so the response carries ``list[dict[str, Any]]``.
+# -------------------------------------------------------------------
+
+
+class ValuesPage(BaseModel):
+    """Response shape for value-provider endpoints.
+
+    ``results`` is ``[{"value": ..., "label": ...}]`` for
+    enum/free-text fields and the consumer's link-payload shape
+    (already ``model_dump``-ed) for resource search and ref dispatch.
+    """
+
+    results: list[dict[str, Any]]
+    next_cursor: str | None = None
+
+
+# -------------------------------------------------------------------
+# Resource-level search + entry.
 # -------------------------------------------------------------------
 
 
@@ -153,8 +299,8 @@ class SearchSpec:
       OR'd via ILIKE on the search query, and results are reranked
       so starts-with matches come first.
     - **tsvector mode** (``vector_column`` set): the named column
-      is matched via ``@@ websearch_to_tsquery(q)`` and ranked via
-      ``ts_rank(...)``.  Pairs with the pgcraft-generated
+      is matched via ``@@ websearch_to_tsquery(query)`` and ranked
+      via ``ts_rank(...)``.  Pairs with the pgcraft-generated
       tsvector column on the consumer's model.
 
     ``link`` shapes each result into the public link payload via
@@ -184,7 +330,7 @@ class ResourceEntry:
 
 
 # -------------------------------------------------------------------
-# Registry
+# Registry.
 # -------------------------------------------------------------------
 
 
@@ -211,36 +357,42 @@ class ResourceRegistry:
 
     # ---------- Discovery ----------
 
+    @overload
+    def discovery(self) -> ProjectDiscovery: ...
+
+    @overload
+    def discovery(self, *, resource: str) -> ResourceDiscovery: ...
+
+    @overload
+    def discovery(
+        self, *, resource: str, field: str
+    ) -> FieldDiscovery: ...
+
     def discovery(
         self,
         *,
         resource: str | None = None,
         field: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> ProjectDiscovery | ResourceDiscovery | FieldDiscovery:
         """Return the discovery payload, narrowed by *resource* / *field*.
 
-        With both unset, returns the full project payload.  With
-        *resource*, returns just that resource's payload.  With
-        both, returns the single field's descriptor; raises
-        :class:`fastapi.HTTPException` (404) when the field or
-        resource is unknown.
+        With both unset, returns :class:`ProjectDiscovery`.  With
+        only *resource* set, returns that resource's
+        :class:`ResourceDiscovery`.  With both set, returns one
+        :class:`FieldDiscovery`.  Overloads narrow each call site
+        to the correct return type without callers having to
+        downcast.
 
-        Args:
-            resource: Resource slug to narrow to.  ``None`` returns
-                the full project payload.
-            field: Field name within *resource* to narrow to.
-                Requires *resource* to be set.
-
-        Returns:
-            JSON-serializable payload.
-
+        Raises :class:`fastapi.HTTPException` (404) on unknown
+        resource or field.
         """
         if resource is None:
-            return {
-                "resources": {
-                    key: self._resource_payload(key) for key in self._entries
+            return ProjectDiscovery(
+                resources={
+                    slug: self._resource_payload(slug)
+                    for slug in self._entries
                 },
-            }
+            )
 
         entry = self._require_entry(resource)
 
@@ -256,60 +408,78 @@ class ResourceRegistry:
             detail=f"Unknown filter field: {field}",
         )
 
-    def _resource_payload(self, resource: str) -> dict[str, Any]:
-        """Build the per-resource discovery dict for *resource*."""
+    def _resource_payload(self, resource: str) -> ResourceDiscovery:
+        """Build the per-resource discovery payload for *resource*."""
         entry = self._require_entry(resource)
-        payload: dict[str, Any] = {
-            "resource": resource,
-            "filters": [
+        return ResourceDiscovery(
+            resource=resource,
+            filters=[
                 self._field_payload(resource, spec) for spec in entry.fields
             ],
-        }
-
-        if entry.search is not None:
-            payload["search"] = {"endpoint": f"/_values/{resource}"}
-
-        return payload
+            search=(
+                SearchDiscovery(endpoint=f"/_values/{resource}")
+                if entry.search is not None
+                else None
+            ),
+        )
 
     def _field_payload(
         self,
         resource: str,
         spec: FilterField,
-    ) -> dict[str, Any]:
-        """Build the discovery dict for one field on *resource*."""
-        values: dict[str, Any] = {"kind": spec.kind}
+    ) -> FieldDiscovery:
+        """Build the discovery payload for one field on *resource*."""
+        return FieldDiscovery(
+            field=spec.name,
+            operators=list(spec.operators),
+            values=self._values_descriptor(resource, spec),
+        )
 
+    def _values_descriptor(
+        self,
+        resource: str,
+        spec: FilterField,
+    ) -> ValuesDescriptor:
+        """Return the ``values`` block for one field."""
         if isinstance(spec, Enum):
-            values["choices"] = [
-                {"value": m.value, "label": m.name} for m in spec.enum_class
-            ]
-            values["endpoint"] = f"/_values/{resource}/{spec.name}"
+            return EnumValuesDescriptor(
+                choices=[
+                    Choice(value=member.value, label=member.name)
+                    for member in spec.enum_class
+                ],
+                endpoint=f"/_values/{resource}/{spec.name}",
+            )
 
-        elif isinstance(spec, FreeText):
-            values["endpoint"] = f"/_values/{resource}/{spec.name}"
+        if isinstance(spec, FreeText):
+            return FreeTextValuesDescriptor(
+                endpoint=f"/_values/{resource}/{spec.name}",
+            )
 
-        elif isinstance(spec, Ref):
-            values["type"] = spec.target
+        if isinstance(spec, Ref):
+            return RefValuesDescriptor(
+                type=spec.target,
+                endpoint=(
+                    f"/_values/{spec.target}"
+                    if self._has_search(spec.target)
+                    else None
+                ),
+            )
 
-            if self._has_search(spec.target):
-                values["endpoint"] = f"/_values/{spec.target}"
+        if isinstance(spec, SelfRef):
+            return SelfValuesDescriptor(
+                type=spec.type,
+                endpoint=(
+                    f"/_values/{resource}"
+                    if self._has_search(resource)
+                    else None
+                ),
+            )
 
-        elif isinstance(spec, SelfRef):
-            values["type"] = spec.type
-
-            if self._has_search(resource):
-                values["endpoint"] = f"/_values/{resource}"
-
-        elif isinstance(spec, LiteralField):
-            values["type"] = spec.type
+        if isinstance(spec, LiteralField):
+            return LiteralValuesDescriptor(type=spec.type)
 
         # Bool: nothing extra to attach.
-
-        return {
-            "field": spec.name,
-            "operators": list(spec.operators),
-            "values": values,
-        }
+        return BoolValuesDescriptor()
 
     def _has_search(self, resource: str) -> bool:
         """Whether *resource* declares a :class:`SearchSpec`."""
@@ -326,7 +496,7 @@ class ResourceRegistry:
         request: FilterValuesRequest,
         db: AsyncSession,
         session: Any = None,
-    ) -> dict[str, Any]:
+    ) -> ValuesPage:
         """Dispatch a value-provider request to the right code path.
 
         ``field=None`` runs the resource-level search (requires
@@ -335,30 +505,16 @@ class ResourceRegistry:
         serve their own values, ``Ref`` and ``SelfRef`` recurse
         into the target resource's search, ``Bool`` and
         ``LiteralField`` 404.
-
-        Args:
-            resource: Registered resource slug.
-            field: Field name on that resource, or ``None`` for the
-                resource-level search.
-            request: Parsed :class:`FilterValuesRequest` body.
-            db: Async SQLAlchemy session.
-            session: Auth session forwarded to link builders;
-                ``None`` when auth isn't configured.
-
-        Returns:
-            ``{"results": [...], "next_cursor": ...}``.
-
-        Raises:
-            fastapi.HTTPException: 404 on unknown resource/field
-                or on a field that has no values endpoint.
-
         """
         entry = self._require_entry(resource)
 
         if field is None:
             return await self._search_resource(entry, request, db, session)
 
-        spec = next((f for f in entry.fields if f.name == field), None)
+        spec = next(
+            (candidate for candidate in entry.fields if candidate.name == field),
+            None,
+        )
 
         if spec is None:
             raise HTTPException(
@@ -367,7 +523,7 @@ class ResourceRegistry:
             )
 
         if isinstance(spec, Enum):
-            return enum_values(spec.enum_class, request)
+            return ValuesPage(**enum_values(spec.enum_class, request))
 
         if isinstance(spec, FreeText):
             return await self._free_text_values(entry, spec, request, db)
@@ -411,31 +567,50 @@ class ResourceRegistry:
         spec: FreeText,
         request: FilterValuesRequest,
         db: AsyncSession,
-    ) -> dict[str, Any]:
-        """Distinct-column ILIKE search with relevance ordering."""
-        col_name = spec.column or spec.name
-        col = getattr(entry.model, col_name)
-        stmt = select(col).distinct()
+    ) -> ValuesPage:
+        """Distinct-column ILIKE search with relevance ordering.
 
-        q = request.q
+        Single-column ordering, so the keyset cursor is either:
 
-        if q:
-            stmt = stmt.where(col.ilike(f"%{q}%"))
+        * ``"k:<value>"`` when no query is set (ORDER BY column ASC).
+        * ``"b:<bucket>:<value>"`` when a query is set
+          (ORDER BY bucket ASC, column ASC).
+        """
+        column_name = spec.column or spec.name
+        column = getattr(entry.model, column_name)
+        query = request.q
+        page_size = resolved_limit(request.limit)
+        statement = select(column).distinct()
 
-        stmt = stmt.order_by(*_relevance_ordering(q, [col]), col)
+        if query:
+            statement = (
+                statement.where(column.ilike(f"%{query}%"))
+                .order_by(
+                    _bucket_expr(query, [column]).asc(),
+                    column.asc(),
+                )
+                .limit(page_size + 1)
+            )
+            statement = _apply_bucket_keyset(
+                statement, column, column, request.cursor
+            )
 
-        rows, next_cursor = await _paginate_scalars(
-            stmt=stmt,
-            primary_col=col,
-            request=request,
-            db=db,
-            relevance_active=bool(q),
+        else:
+            statement, _ = apply_keyset_pagination(
+                statement.order_by(column.asc()),
+                entry.model,
+                cursor=_decode_pk_cursor(request.cursor),
+                cursor_field=column_name,
+                page_size=page_size,
+                max_page_size=page_size,
+            )
+
+        rows = list((await db.execute(statement)).scalars().all())
+        page, next_cursor = _finalise_scalar_page(rows, query, page_size)
+        return ValuesPage(
+            results=[{"value": row, "label": row} for row in page],
+            next_cursor=next_cursor,
         )
-
-        return {
-            "results": [{"value": r, "label": r} for r in rows],
-            "next_cursor": next_cursor,
-        }
 
     async def _search_resource(
         self,
@@ -443,22 +618,11 @@ class ResourceRegistry:
         request: FilterValuesRequest,
         db: AsyncSession,
         session: Any,
-    ) -> dict[str, Any]:
+    ) -> ValuesPage:
         """Resource-level search; shape rows via the link builder.
 
-        Two query modes:
-
-        * **tsvector** (``search.vector_column`` set): ``vec @@
-          websearch_to_tsquery(q)`` for the match, ``ts_rank(...)``
-          for the order — true relevance from the pgcraft column.
-        * **ILIKE** (default): OR of ``ILIKE %q%`` over
-          :attr:`SearchSpec.columns`, with a starts-with relevance
-          bucket placed first.
-
-        Both modes still tiebreak by primary key, and both use
-        offset pagination when a query is present (compound
-        ordering is hard to keyset cleanly) and keyset on the pk
-        when no query is set.
+        Three cursor modes — pk-only, bucket+pk, rank+pk — line up
+        with the three orderings (no-q, q+ILIKE, q+tsvector).
         """
         if entry.search is None:
             raise HTTPException(
@@ -467,223 +631,501 @@ class ResourceRegistry:
             )
 
         search = entry.search
-        pk_col = getattr(entry.model, entry.pk)
-        stmt = select(entry.model)
-        q = request.q
+        primary_key_column = getattr(entry.model, entry.pk)
+        query = request.q
 
-        if q and search.vector_column is not None:
-            stmt = _apply_tsvector_search(
-                stmt, entry.model, search.vector_column, q, pk_col
+        if query and search.vector_column is not None:
+            return await _run_tsvector_search(
+                entry=entry,
+                search=search,
+                query=query,
+                request=request,
+                db=db,
+                session=session,
+                primary_key_column=primary_key_column,
             )
 
-        elif q and search.columns:
-            cols = [getattr(entry.model, c) for c in search.columns]
-            stmt = stmt.where(or_(*[c.ilike(f"%{q}%") for c in cols]))
-            stmt = stmt.order_by(*_relevance_ordering(q, cols), pk_col)
+        if query and search.columns:
+            return await _run_ilike_search(
+                entry=entry,
+                search=search,
+                query=query,
+                request=request,
+                db=db,
+                session=session,
+                primary_key_column=primary_key_column,
+            )
 
-        else:
-            stmt = stmt.order_by(pk_col)
-
-        rows, next_cursor = await _paginate_objects(
-            stmt=stmt,
-            model=entry.model,
-            pk_attr=entry.pk,
+        return await _run_unfiltered_search(
+            entry=entry,
+            search=search,
             request=request,
             db=db,
-            relevance_active=bool(q),
+            session=session,
+            primary_key_column=primary_key_column,
         )
-
-        items: list[Any] = []
-
-        for obj in rows:
-            link = await search.link(obj, session)
-            items.append(
-                link.model_dump() if hasattr(link, "model_dump") else link
-            )
-
-        return {"results": items, "next_cursor": next_cursor}
 
 
 # -------------------------------------------------------------------
-# Pagination + cursor helpers.
+# Search-mode runners.
 #
-# Two cursor modes exist because the ordering changes when ``q`` is
-# set: relevance bucket + column is hard to keyset cleanly, so we
-# fall back to offset under the compound ordering.  The one-char
-# prefix on the cursor string disambiguates the two on decode.
+# Each branch builds + runs its own statement, then shapes rows
+# through the link builder.  Pulled out so :meth:`_search_resource`
+# stays a thin dispatcher.
 # -------------------------------------------------------------------
 
 
-_OFFSET_PREFIX = "o:"
-_KEYSET_PREFIX = "k:"
+async def _run_unfiltered_search(  # noqa: PLR0913
+    *,
+    entry: ResourceEntry,
+    search: SearchSpec,
+    request: FilterValuesRequest,
+    db: AsyncSession,
+    session: Any,
+    primary_key_column: ColumnElement[Any],
+) -> ValuesPage:
+    """No query: ORDER BY pk ASC, keyset on pk."""
+    statement = select(entry.model)
+    statement = _apply_pk_keyset(statement, primary_key_column, request.cursor)
+    statement = statement.order_by(primary_key_column.asc())
+
+    rows = await _fetch_models(statement, request, db)
+    page, next_cursor = _finalise_pk_page(
+        rows, entry.pk, request.limit
+    )
+    items = await _shape_link_items(page, search, session)
+    return ValuesPage(results=items, next_cursor=next_cursor)
 
 
-def _relevance_ordering(
-    q: str | None,
-    cols: Sequence[ColumnElement[Any]],
-) -> tuple[ColumnElement[Any], ...]:
-    """Build a starts-with-first ORDER BY prefix when ``q`` is set."""
-    if not q or not cols:
-        return ()
+async def _run_ilike_search(  # noqa: PLR0913
+    *,
+    entry: ResourceEntry,
+    search: SearchSpec,
+    query: str,
+    request: FilterValuesRequest,
+    db: AsyncSession,
+    session: Any,
+    primary_key_column: ColumnElement[Any],
+) -> ValuesPage:
+    """Query + ILIKE: ORDER BY bucket ASC, pk ASC, keyset on (bucket, pk)."""
+    columns = [getattr(entry.model, name) for name in search.columns]
+    statement = select(entry.model).where(
+        or_(*[column.ilike(f"%{query}%") for column in columns])
+    )
+    statement = _apply_bucket_keyset(
+        statement,
+        _bucket_expr(query, columns),
+        primary_key_column,
+        request.cursor,
+        query,
+    )
+    statement = statement.order_by(
+        _bucket_expr(query, columns).asc(),
+        primary_key_column.asc(),
+    )
 
-    prefix = f"{q}%"
-    starts_with = or_(*[c.ilike(prefix) for c in cols])
-    # 0 → starts-with bucket, 1 → everything else; ascending sort
-    # surfaces the bucket first.
-    return (case((starts_with, 0), else_=1).asc(),)
+    rows = await _fetch_models(statement, request, db)
+    page, next_cursor = _finalise_bucket_page(
+        rows, entry.pk, columns, query, request.limit
+    )
+    items = await _shape_link_items(page, search, session)
+    return ValuesPage(results=items, next_cursor=next_cursor)
 
 
-def _apply_tsvector_search(
-    stmt: Select[Any],
-    model: type,
-    vector_column: str,
-    q: str,
-    pk_col: ColumnElement[Any],
-) -> Select[Any]:
-    """Apply a Postgres tsvector match + ts_rank ordering.
+async def _run_tsvector_search(  # noqa: PLR0913
+    *,
+    entry: ResourceEntry,
+    search: SearchSpec,
+    query: str,
+    request: FilterValuesRequest,
+    db: AsyncSession,
+    session: Any,
+    primary_key_column: ColumnElement[Any],
+) -> ValuesPage:
+    """Query + tsvector: ORDER BY ts_rank DESC, pk ASC, keyset on (rank, pk).
 
-    ``websearch_to_tsquery`` parses common search-engine syntax
-    (quoted phrases, ``-exclusion``) so the consumer doesn't have
-    to hand-craft a tsquery — the same ``q`` the FE sends to the
-    ILIKE path works here too.
-
-    Tied ranks are broken by primary key for stable pagination.
+    The rank is read off each row directly — :func:`select` adds it
+    as a labelled column so we don't have to recompute it Python-side
+    (we couldn't anyway: ``ts_rank`` is a Postgres function).
     """
-    vec = getattr(model, vector_column)
-    query = func.websearch_to_tsquery("english", q)
-    rank = func.ts_rank(vec, query)
-    return stmt.where(vec.op("@@")(query)).order_by(rank.desc(), pk_col)
+    vector = getattr(entry.model, search.vector_column)
+    tsquery = func.websearch_to_tsquery("english", query)
+    rank_expression = func.ts_rank(vector, tsquery).label("_rank")
 
-
-async def _paginate_scalars(
-    *,
-    stmt: Select[Any],
-    primary_col: ColumnElement[Any],
-    request: FilterValuesRequest,
-    db: AsyncSession,
-    relevance_active: bool,
-) -> tuple[list[Any], str | None]:
-    """Execute *stmt* under the right pagination mode, returning scalars."""
-    limit = resolved_limit(request.limit)
-    paginated = _apply_pagination(
-        stmt=stmt,
-        primary_col=primary_col,
-        cursor=request.cursor,
-        limit=limit,
-        relevance_active=relevance_active,
+    statement = (
+        select(entry.model, rank_expression)
+        .where(vector.op("@@")(tsquery))
     )
-    rows = list((await db.execute(paginated.stmt)).scalars().all())
-    return paginated.finalize(rows, key=lambda v: v)
-
-
-async def _paginate_objects(
-    *,
-    stmt: Select[Any],
-    model: type,
-    pk_attr: str,
-    request: FilterValuesRequest,
-    db: AsyncSession,
-    relevance_active: bool,
-) -> tuple[list[Any], str | None]:
-    """Execute *stmt* under the right pagination mode, returning objects."""
-    limit = resolved_limit(request.limit)
-    pk_col = getattr(model, pk_attr)
-    paginated = _apply_pagination(
-        stmt=stmt,
-        primary_col=pk_col,
-        cursor=request.cursor,
-        limit=limit,
-        relevance_active=relevance_active,
+    statement = _apply_rank_keyset(
+        statement,
+        rank_expression,
+        primary_key_column,
+        request.cursor,
     )
-    rows = list((await db.execute(paginated.stmt)).scalars().all())
-    return paginated.finalize(rows, key=lambda obj: getattr(obj, pk_attr))
+    statement = statement.order_by(
+        rank_expression.desc(),
+        primary_key_column.asc(),
+    )
+
+    rows = await _fetch_model_rank_pairs(statement, request, db)
+    page, next_cursor = _finalise_rank_page(
+        rows, entry.pk, request.limit
+    )
+    instances = [model_instance for model_instance, _ in page]
+    items = await _shape_link_items(instances, search, session)
+    return ValuesPage(results=items, next_cursor=next_cursor)
 
 
-@dataclass
-class _Pagination:
-    """Internal handle returned by :func:`_apply_pagination`."""
+async def _shape_link_items(
+    instances: Sequence[Any],
+    search: SearchSpec,
+    session: Any,
+) -> list[dict[str, Any]]:
+    """Run the consumer link builder over each row, dump to dicts."""
+    items: list[dict[str, Any]] = []
 
-    stmt: Select[Any]
-    limit: int
-    relevance_active: bool
-    last_offset: int
-
-    def finalize(
-        self,
-        rows: list[Any],
-        key: Callable[[Any], Any],
-    ) -> tuple[list[Any], str | None]:
-        """Trim the over-fetched row, build ``next_cursor``."""
-        has_more = len(rows) > self.limit
-        page = rows[: self.limit]
-
-        if not has_more or not page:
-            return page, None
-
-        if self.relevance_active:
-            return page, _encode_offset(self.last_offset + self.limit)
-
-        return page, _encode_keyset(str(key(page[-1])))
-
-
-def _apply_pagination(
-    *,
-    stmt: Select[Any],
-    primary_col: ColumnElement[Any],
-    cursor: str | None,
-    limit: int,
-    relevance_active: bool,
-) -> _Pagination:
-    """Apply offset (relevance-active) or keyset (no-q) windowing."""
-    if relevance_active:
-        offset = _decode_offset(cursor)
-        return _Pagination(
-            stmt=stmt.offset(offset).limit(limit + 1),
-            limit=limit,
-            relevance_active=True,
-            last_offset=offset,
+    for model_instance in instances:
+        link = await search.link(model_instance, session)
+        items.append(
+            link.model_dump() if hasattr(link, "model_dump") else link
         )
 
-    prev = _decode_keyset(cursor)
+    return items
 
-    if prev is not None:
-        stmt = stmt.where(primary_col > prev)
 
-    return _Pagination(
-        stmt=stmt.limit(limit + 1),
-        limit=limit,
-        relevance_active=False,
-        last_offset=0,
+# -------------------------------------------------------------------
+# Keyset WHERE-clause builders.
+#
+# Three modes; each takes a previous-cursor string and returns a
+# statement with the resume predicate appended.  Empty/wrong-tag
+# cursors fall back to "no resume" (start of result set), matching
+# how a fresh navigation would behave.
+# -------------------------------------------------------------------
+
+
+_PK_CURSOR_PREFIX = "k:"
+_BUCKET_CURSOR_PREFIX = "b:"
+_RANK_CURSOR_PREFIX = "r:"
+
+
+def _apply_pk_keyset(
+    statement: Select[Any],
+    primary_key_column: ColumnElement[Any],
+    cursor: str | None,
+) -> Select[Any]:
+    """Resume after ``pk == previous`` (single-column keyset)."""
+    previous_pk = _decode_pk_cursor(cursor)
+
+    if previous_pk is None:
+        return statement
+
+    return statement.where(primary_key_column > previous_pk)
+
+
+def _apply_bucket_keyset(
+    statement: Select[Any],
+    bucket_expression: ColumnElement[Any],
+    primary_key_column: ColumnElement[Any],
+    cursor: str | None,
+    query: str,
+) -> Select[Any]:
+    """Resume after ``(bucket, pk) > (previous_bucket, previous_pk)``.
+
+    The bucket expression must match the one used in ORDER BY,
+    so callers pass the same :func:`_bucket_expr` result here.
+    The unused *query* parameter keeps the call-site contract
+    explicit — bucket ordering only makes sense when there's a
+    query.
+    """
+    del query  # documented constraint; bucket keyset implies a query
+    previous = _decode_bucket_cursor(cursor)
+
+    if previous is None:
+        return statement
+
+    previous_bucket, previous_pk = previous
+    return statement.where(
+        tuple_(bucket_expression, primary_key_column)
+        > tuple_(previous_bucket, previous_pk)
     )
 
 
-def _decode_offset(cursor: str | None) -> int:
-    """Return the offset encoded in *cursor*, or 0 when absent/invalid."""
-    if not cursor:
-        return 0
+def _apply_rank_keyset(
+    statement: Select[Any],
+    rank_expression: ColumnElement[Any],
+    primary_key_column: ColumnElement[Any],
+    cursor: str | None,
+) -> Select[Any]:
+    """Resume after ``rank DESC, pk ASC`` keyset boundary.
 
-    raw = cursor.removeprefix(_OFFSET_PREFIX)
+    ORDER BY directions disagree, so we can't use the row-tuple
+    shorthand: a row is "after" the cursor when its rank is strictly
+    less, OR when ranks tie and its pk is strictly greater.
+    """
+    previous = _decode_rank_cursor(cursor)
 
-    try:
-        return max(0, int(raw))
+    if previous is None:
+        return statement
 
-    except ValueError:
-        return 0
+    previous_rank, previous_pk = previous
+    return statement.where(
+        or_(
+            rank_expression < previous_rank,
+            and_(
+                rank_expression == previous_rank,
+                primary_key_column > previous_pk,
+            ),
+        )
+    )
 
 
-def _encode_offset(value: int) -> str:
-    """Encode *value* as an offset cursor."""
-    return f"{_OFFSET_PREFIX}{value}"
+def _bucket_expr(
+    query: str,
+    columns: Sequence[ColumnElement[Any]],
+) -> ColumnElement[Any]:
+    """Build the ``CASE`` expression that classifies a row's relevance.
+
+    Returns 0 for rows where any of *columns* starts with *query*
+    (case-insensitive), 1 otherwise.  Wired identically into the
+    ORDER BY (so starts-with hits sort first) and the keyset
+    predicate (so cursor decoding lines up).
+    """
+    starts_with = or_(
+        *[column.ilike(f"{query}%") for column in columns]
+    )
+    return case((starts_with, 0), else_=1)
 
 
-def _decode_keyset(cursor: str | None) -> str | None:
-    """Strip the keyset prefix; return ``None`` for empty cursors."""
-    if not cursor:
+# -------------------------------------------------------------------
+# Result fetchers + page finalisers.
+#
+# Each fetcher executes the statement and returns the over-fetched
+# row list (LIMIT n+1).  Each finaliser trims the over-fetch row,
+# computes the next cursor for its mode, and returns the trimmed
+# page plus cursor.  Splitting fetch from finalise keeps the SQL
+# and cursor maths in separate, testable pieces.
+# -------------------------------------------------------------------
+
+
+async def _fetch_scalars(
+    statement: Select[Any],
+    request: FilterValuesRequest,
+    db: AsyncSession,
+) -> list[Any]:
+    """Execute *statement* with LIMIT n+1, return scalar rows."""
+    limit = resolved_limit(request.limit)
+    bounded = statement.limit(limit + 1)
+    return list((await db.execute(bounded)).scalars().all())
+
+
+async def _fetch_models(
+    statement: Select[Any],
+    request: FilterValuesRequest,
+    db: AsyncSession,
+) -> list[Any]:
+    """Execute *statement* with LIMIT n+1, return ORM instances."""
+    return await _fetch_scalars(statement, request, db)
+
+
+async def _fetch_model_rank_pairs(
+    statement: Select[Any],
+    request: FilterValuesRequest,
+    db: AsyncSession,
+) -> list[tuple[Any, float]]:
+    """Execute *statement* (model + rank), return ``[(instance, rank)]``."""
+    limit = resolved_limit(request.limit)
+    bounded = statement.limit(limit + 1)
+    raw_rows = (await db.execute(bounded)).all()
+    return [(row[0], float(row[1])) for row in raw_rows]
+
+
+def _finalise_scalar_page(
+    rows: list[Any],
+    query: str | None,
+    requested_limit: int | None,
+) -> tuple[list[Any], str | None]:
+    """Trim + build the next cursor for a free-text scalar page."""
+    limit = resolved_limit(requested_limit)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    if not has_more or not page:
+        return page, None
+
+    last_value = page[-1]
+
+    if query:
+        bucket = _row_bucket_from_value(query, last_value)
+        return page, _encode_bucket_cursor(bucket, str(last_value))
+
+    return page, _encode_pk_cursor(str(last_value))
+
+
+def _finalise_pk_page(
+    rows: list[Any],
+    pk_attr: str,
+    requested_limit: int | None,
+) -> tuple[list[Any], str | None]:
+    """Trim + build pk-only cursor for an ORM-row page."""
+    limit = resolved_limit(requested_limit)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    if not has_more or not page:
+        return page, None
+
+    last_pk = getattr(page[-1], pk_attr)
+    return page, _encode_pk_cursor(str(last_pk))
+
+
+def _finalise_bucket_page(  # noqa: PLR0913
+    rows: list[Any],
+    pk_attr: str,
+    columns: Sequence[ColumnElement[Any]],
+    query: str,
+    requested_limit: int | None,
+) -> tuple[list[Any], str | None]:
+    """Trim + build (bucket, pk) cursor for a relevance-bucketed page."""
+    limit = resolved_limit(requested_limit)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    if not has_more or not page:
+        return page, None
+
+    last_row = page[-1]
+    bucket = _row_bucket_from_columns(query, columns, last_row)
+    last_pk = getattr(last_row, pk_attr)
+    return page, _encode_bucket_cursor(bucket, str(last_pk))
+
+
+def _finalise_rank_page(
+    rows: list[tuple[Any, float]],
+    pk_attr: str,
+    requested_limit: int | None,
+) -> tuple[list[tuple[Any, float]], str | None]:
+    """Trim + build (rank, pk) cursor for a tsvector-ranked page."""
+    limit = resolved_limit(requested_limit)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    if not has_more or not page:
+        return page, None
+
+    last_instance, last_rank = page[-1]
+    last_pk = getattr(last_instance, pk_attr)
+    return page, _encode_rank_cursor(last_rank, str(last_pk))
+
+
+# -------------------------------------------------------------------
+# Bucket extraction (Python-side).
+#
+# Computing the relevance bucket of a row in Python avoids adding a
+# labelled CASE column to the SELECT just to read it back.  The
+# tsvector path can't do this trick — ts_rank is a Postgres function
+# — but the ILIKE path's logic is plain string comparison.
+# -------------------------------------------------------------------
+
+
+def _row_bucket_from_value(query: str, value: Any) -> int:
+    """Return ``0`` when *value* starts with *query* (case-insensitive)."""
+    if value is None:
+        return 1
+
+    return 0 if str(value).lower().startswith(query.lower()) else 1
+
+
+def _row_bucket_from_columns(
+    query: str,
+    columns: Sequence[ColumnElement[Any]],
+    instance: Any,
+) -> int:
+    """Return ``0`` when any of *columns*'s values starts with *query*."""
+    lowered_query = query.lower()
+
+    for column in columns:
+        attribute_value = getattr(instance, column.key, None)
+
+        if attribute_value is None:
+            continue
+
+        if str(attribute_value).lower().startswith(lowered_query):
+            return 0
+
+    return 1
+
+
+# -------------------------------------------------------------------
+# Cursor encode / decode.
+#
+# Three formats, one-character tag.  Decoders are tolerant: an
+# empty / mismatched / unparseable cursor returns ``None`` and the
+# caller treats it as "no cursor" (start from the beginning).
+# -------------------------------------------------------------------
+
+
+def _encode_pk_cursor(value: str) -> str:
+    """Encode a single-column keyset cursor."""
+    return f"{_PK_CURSOR_PREFIX}{value}"
+
+
+def _decode_pk_cursor(cursor: str | None) -> str | None:
+    """Strip the pk tag; ``None`` for empty / wrong-tag cursors."""
+    if not cursor or not cursor.startswith(_PK_CURSOR_PREFIX):
         return None
 
-    return cursor.removeprefix(_KEYSET_PREFIX)
+    return cursor.removeprefix(_PK_CURSOR_PREFIX) or None
 
 
-def _encode_keyset(value: str) -> str:
-    """Encode *value* as a keyset cursor."""
-    return f"{_KEYSET_PREFIX}{value}"
+def _encode_bucket_cursor(bucket: int, primary_key: str) -> str:
+    """Encode a (bucket, pk) cursor for ILIKE-relevance ordering."""
+    return f"{_BUCKET_CURSOR_PREFIX}{bucket}:{primary_key}"
+
+
+def _decode_bucket_cursor(
+    cursor: str | None,
+) -> tuple[int, str] | None:
+    """Decode ``b:<bucket>:<pk>`` into ``(bucket, pk)``."""
+    if not cursor or not cursor.startswith(_BUCKET_CURSOR_PREFIX):
+        return None
+
+    body = cursor.removeprefix(_BUCKET_CURSOR_PREFIX)
+    bucket_str, separator, primary_key = body.partition(":")
+
+    if not separator or not primary_key:
+        return None
+
+    try:
+        bucket = int(bucket_str)
+
+    except ValueError:
+        return None
+
+    return bucket, primary_key
+
+
+def _encode_rank_cursor(rank: float, primary_key: str) -> str:
+    """Encode a (rank, pk) cursor for ts_rank ordering."""
+    return f"{_RANK_CURSOR_PREFIX}{rank!r}:{primary_key}"
+
+
+def _decode_rank_cursor(
+    cursor: str | None,
+) -> tuple[float, str] | None:
+    """Decode ``r:<rank>:<pk>`` into ``(rank, pk)``."""
+    if not cursor or not cursor.startswith(_RANK_CURSOR_PREFIX):
+        return None
+
+    body = cursor.removeprefix(_RANK_CURSOR_PREFIX)
+    rank_str, separator, primary_key = body.partition(":")
+
+    if not separator or not primary_key:
+        return None
+
+    try:
+        rank = float(rank_str)
+
+    except ValueError:
+        return None
+
+    return rank, primary_key
