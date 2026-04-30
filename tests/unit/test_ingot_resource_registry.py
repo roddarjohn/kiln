@@ -306,8 +306,9 @@ async def test_enum_values_run_through_postgres_values_clause() -> None:
 
     sql = _sql(db.statements[0])
     assert "VALUES" in sql
-    # All three enum members should show up in the values clause.
-    assert "'draft'" in sql
+    # SQL only carries labels — the enum values are looked up
+    # Python-side from the enum class (no point round-tripping
+    # them through the DB).
     assert "'DRAFT'" in sql
     assert "'PUBLISHED'" in sql
     assert "'ARCHIVED'" in sql
@@ -379,8 +380,10 @@ async def test_free_text_values_keyset_cursor_round_trip() -> None:
         db=db,  # type: ignore[arg-type]
     )
 
-    assert page1.next_cursor is not None
-    assert page1.next_cursor.startswith("k:")
+    # Cursor is just the previous-key value as a string — no
+    # prefix tag, since each endpoint already knows what its
+    # ordering key is.
+    assert page1.next_cursor == "apricot"
 
     db2 = _ExecuteCapture(rows=["banana"])
     await _registry().values(

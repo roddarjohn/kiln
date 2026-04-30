@@ -7,9 +7,8 @@ value-provider dispatch; future work folds in actions, dump
 schemas, and other resource-scoped concerns under the same map.
 
 Project-wide route handlers (``POST /_filters``,
-``POST /_filters/fields``, ``POST /_values/{resource}``,
-``POST /_values/{resource}/{field}``) delegate everything to
-:meth:`ResourceRegistry.filter_discovery`,
+``POST /_filters/fields``, ``POST /_values``) delegate everything
+to :meth:`ResourceRegistry.filter_discovery`,
 :meth:`ResourceRegistry.field_discovery`, and
 :meth:`ResourceRegistry.values` — they hold no logic of their own.
 
