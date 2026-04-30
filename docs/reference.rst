@@ -115,6 +115,10 @@ be config schema
    :members:
    :undoc-members:
 
+.. autoclass:: be.config.schema.ResourceRegistryConfig
+   :members:
+   :undoc-members:
+
 Field types
 ^^^^^^^^^^^
 
