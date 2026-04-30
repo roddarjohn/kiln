@@ -273,15 +273,16 @@ class FieldDiscoveryRequest(BaseModel):
 class ValuesPage(BaseModel):
     """Response shape for ``POST /_values``.
 
-    ``results`` is ``[{"value": ..., "label": ...}]`` for
-    enum / free-text / single-field paths and the consumer's
-    link-payload shape (already ``model_dump``-ed) for resource
-    search.  Multi-column union results add a ``"field"`` key
-    indicating the source column.
+    Single-page only — autocomplete UX narrows by typing more
+    characters, not by paginating.  ``results`` is
+    ``[{"value": ..., "label": ...}]`` for enum / free-text /
+    single-field paths and the consumer's link-payload shape
+    (already ``model_dump``-ed) for resource search.  Multi-column
+    union results add a ``"field"`` key indicating the source
+    column.
     """
 
     results: list[dict[str, Any]]
-    next_cursor: str | None = None
 
 
 # =============================================================================

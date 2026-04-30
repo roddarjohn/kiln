@@ -1,6 +1,7 @@
 {% extends "fastapi/handler_default.py.j2" %}
 {% from "fastapi/ops/_gate.py.j2" import gate %}
 {% block body %}
+
 {% if pre_hook_call|default(none) %}
     body = await {{ pre_hook_call }}(body, db=db)
 {% endif %}
@@ -12,10 +13,12 @@
         .returning({{ model_name }})
     )
     obj = result.scalar_one()
-    await db.commit()
+
     await {{ post_hook_call }}(obj, body, db=db)
+
 {% else %}
     await db.execute(insert({{ model_name }}).values(**body.model_dump()))
+
     await db.commit()
 {% endif %}
 {% endblock %}

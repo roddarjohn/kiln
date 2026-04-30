@@ -1,17 +1,11 @@
 """Keyset and offset pagination helpers."""
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from sqlalchemy import ColumnElement, Select
-
-
-SortDirection = Literal["asc", "desc"]
-"""Per-column ordering direction for compound keyset cursors."""
+    from sqlalchemy import Select
 
 
 def apply_keyset_pagination(
@@ -50,80 +44,6 @@ def apply_keyset_pagination(
         stmt = stmt.where(cursor_col > cursor)
 
     return stmt.limit(effective_page_size + 1), effective_page_size
-
-
-def apply_compound_keyset_pagination(
-    stmt: Select,
-    columns: Sequence[tuple[ColumnElement[Any], SortDirection]],
-    cursor: Sequence[Any] | None,
-    page_size: int,
-    max_page_size: int,
-) -> tuple[Select, int]:
-    """Apply N-column keyset pagination with per-column directions.
-
-    Resumes after a cursor of N values matching N ``(column,
-    direction)`` pairs.  Required whenever the lead ordering column
-    isn't unique — the trailing column(s) break ties so pagination
-    stays stable.
-
-    The resume predicate is the standard lex-comparison expansion::
-
-        (c1 > p1)
-        OR (c1 == p1 AND c2 > p2)
-        OR (c1 == p1 AND c2 == p2 AND c3 > p3)
-        ...
-
-    with ``>`` flipped to ``<`` on any column whose direction is
-    ``"desc"``.  This form works for any mix of ASC/DESC; the
-    ``tuple_()`` row-constructor shorthand only handles all-ASC.
-
-    Args:
-        stmt: SELECT to extend.
-        columns: Ordered ``(expression, direction)`` pairs matching
-            the statement's ORDER BY.
-        cursor: One previous value per column, in the same order;
-            ``None`` skips the WHERE and returns just the LIMIT.
-        page_size: Requested page size.
-        max_page_size: Hard ceiling.
-
-    Returns:
-        ``(paginated_stmt, effective_page_size)``.  The statement
-        carries ``LIMIT effective_page_size + 1`` (over-fetch by
-        one so the caller can detect "more pages exist").
-
-    """
-    effective_page_size = min(page_size, max_page_size)
-
-    if cursor is not None:
-        if len(cursor) != len(columns):
-            msg = (
-                f"Cursor has {len(cursor)} values but {len(columns)} "
-                f"ordering columns were declared."
-            )
-            raise ValueError(msg)
-
-        stmt = stmt.where(_compound_resume(columns, cursor))
-
-    return stmt.limit(effective_page_size + 1), effective_page_size
-
-
-def _compound_resume(
-    columns: Sequence[tuple[ColumnElement[Any], SortDirection]],
-    cursor: Sequence[Any],
-) -> ColumnElement[bool]:
-    """Build the lex-comparison WHERE clause for compound keyset."""
-    clauses: list[ColumnElement[bool]] = []
-
-    for ith in range(len(columns)):
-        equality_prefix = [
-            columns[index][0] == cursor[index] for index in range(ith)
-        ]
-        column, direction = columns[ith]
-        previous = cursor[ith]
-        strict = column > previous if direction == "asc" else column < previous
-        clauses.append(and_(*equality_prefix, strict))
-
-    return or_(*clauses)
 
 
 def apply_offset_pagination(
