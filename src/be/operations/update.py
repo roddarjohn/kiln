@@ -82,7 +82,7 @@ class Update:
         )
         hook_ctx, hook_imports = hooks_wiring(ctx.instance)
 
-        spec = pick_representation(ctx, fall_back_to_default=False)
+        spec = pick_representation(ctx)
         rep_ctx = (
             {"serialize_response_call": spec.serializer_fn}
             if spec is not None

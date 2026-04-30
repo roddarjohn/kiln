@@ -69,7 +69,7 @@ class Get:
         )
         model_module, model = Name.from_dotted(resource.model)
         custom_serializer = ctx.instance.serializer
-        spec = pick_representation(ctx, fall_back_to_default=True)
+        spec = pick_representation(ctx)
 
         if spec is None:
             dump = _build_ad_hoc_dump(

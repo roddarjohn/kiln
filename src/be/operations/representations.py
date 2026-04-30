@@ -163,22 +163,18 @@ def build_representation_spec(
 
 def pick_representation(
     ctx: BuildContext[OperationConfig, ProjectConfig],
-    *,
-    fall_back_to_default: bool,
 ) -> RepresentationSpec | None:
     """Pick the rep spec for the current op, fetched from the store.
 
-    Resolution order:
+    Honours only the explicit :attr:`OperationConfig.representation`;
+    the resource's :attr:`ResourceConfig.default_representation`
+    is reserved for cross-resource surfaces (saved-view
+    hydration, ``ref`` autocomplete, ``self`` filter values) and
+    never silently overrides a per-op response shape.  Per-op ops
+    pick a rep by name or fall back to their ad-hoc ``fields:``
+    (read ops) or no-body 201/200 (write ops).
 
-    1. Explicit ``operation.representation`` on the op config.
-    2. The resource's ``default_representation``, if
-       *fall_back_to_default* is ``True`` (read ops use this; write
-       ops do not -- inheriting silently would flip create/update
-       responses on every rep-using resource).
-
-    Returns ``None`` when no rep applies; callers fall back to
-    their own legacy paths (read ops to ad-hoc ``fields:``, write
-    ops to no-body 201/200).
+    Returns ``None`` when the op didn't pick one.
 
     Raises:
         ValueError: When ``op.representation`` is set but doesn't
@@ -186,45 +182,25 @@ def pick_representation(
 
     """
     op = ctx.instance
+    explicit = op.representation
+
+    if explicit is None:
+        return None
+
     resource = cast(
         "ResourceConfig",
         ctx.store.ancestor_of(ctx.instance_id, "resource"),
     )
     specs = _specs_by_name(ctx, resource_id=_resource_id(ctx))
+    spec = specs.get(explicit)
 
-    explicit = op.representation
-
-    if explicit is not None:
-        spec = specs.get(explicit)
-
-        if spec is None:
-            msg = (
-                f"Operation {op.name!r}: representation={explicit!r} "
-                f"not declared on {resource.model!r} "
-                f"(have: {sorted(specs)!r})"
-            )
-            raise ValueError(msg)
-
-        return spec
-
-    if not fall_back_to_default:
-        return None
-
-    default = resource.default_representation
-
-    if default is None:
-        return None
-
-    spec = specs.get(default)
-
-    if (
-        spec is None
-    ):  # pragma: no cover -- ResourceConfig validator catches this
+    if spec is None:
         msg = (
-            f"Resource {resource.model!r}: default_representation="
-            f"{default!r} not in representations."
+            f"Operation {op.name!r}: representation={explicit!r} "
+            f"not declared on {resource.model!r} "
+            f"(have: {sorted(specs)!r})"
         )
-        raise AssertionError(msg)
+        raise ValueError(msg)
 
     return spec
 
