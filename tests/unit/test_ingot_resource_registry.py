@@ -28,6 +28,9 @@ from ingot.filter_values import FilterValuesRequest
 from ingot.resource_registry import (
     Bool,
     Enum,
+    FieldDiscoveryRequest,
+    FieldRef,
+    FilterDiscoveryRequest,
     FreeText,
     LiteralField,
     Ref,
@@ -147,17 +150,22 @@ def _sql(stmt: Select[Any]) -> str:
 # -------------------------------------------------------------------
 
 
-def test_discovery_full_payload() -> None:
-    payload = _registry().discovery()
-    assert "item" in payload.resources
+def test_filter_discovery_full_payload() -> None:
+    payload = _registry().filter_discovery(FilterDiscoveryRequest())
+    slugs = {resource.resource for resource in payload.resources}
+    assert slugs == {"item"}
 
 
-def test_discovery_resource_payload() -> None:
-    payload = _registry().discovery(resource="item")
-    assert payload.resource == "item"
-    assert payload.search is not None
-    assert payload.search.endpoint == "/_values/item"
-    fields = {entry.field: entry for entry in payload.filters}
+def test_filter_discovery_subset() -> None:
+    payload = _registry().filter_discovery(
+        FilterDiscoveryRequest(resources=["item"])
+    )
+    assert len(payload.resources) == 1
+    item_payload = payload.resources[0]
+    assert item_payload.resource == "item"
+    assert item_payload.search is not None
+    assert item_payload.search.endpoint == "/_values/item"
+    fields = {entry.field: entry for entry in item_payload.filters}
     assert set(fields) == {
         "status",
         "name",
@@ -168,8 +176,28 @@ def test_discovery_resource_payload() -> None:
     }
 
 
-def test_discovery_enum_includes_choices_and_endpoint() -> None:
-    payload = _registry().discovery(resource="item", field="status")
+def test_filter_discovery_empty_list_returns_no_resources() -> None:
+    payload = _registry().filter_discovery(
+        FilterDiscoveryRequest(resources=[])
+    )
+    assert payload.resources == []
+
+
+def test_filter_discovery_unknown_resource_404() -> None:
+    with pytest.raises(HTTPException) as ei:
+        _registry().filter_discovery(
+            FilterDiscoveryRequest(resources=["nope"])
+        )
+    assert ei.value.status_code == 404
+
+
+def test_field_discovery_enum_includes_choices_and_endpoint() -> None:
+    response = _registry().field_discovery(
+        FieldDiscoveryRequest(
+            fields=[FieldRef(resource="item", field="status")],
+        )
+    )
+    payload = response.fields[0]
     descriptor = payload.values
     assert descriptor.kind == "enum"
     labels = {choice.label for choice in descriptor.choices}
@@ -177,28 +205,46 @@ def test_discovery_enum_includes_choices_and_endpoint() -> None:
     assert descriptor.endpoint == "/_values/item/status"
 
 
-def test_discovery_self_includes_endpoint_when_searchable() -> None:
-    payload = _registry().discovery(resource="item", field="id")
-    descriptor = payload.values
+def test_field_discovery_self_includes_endpoint_when_searchable() -> None:
+    response = _registry().field_discovery(
+        FieldDiscoveryRequest(
+            fields=[FieldRef(resource="item", field="id")],
+        )
+    )
+    descriptor = response.fields[0].values
     assert descriptor.kind == "self"
     assert descriptor.endpoint == "/_values/item"
 
 
-def test_discovery_unknown_field_404() -> None:
+def test_field_discovery_preserves_request_order() -> None:
+    response = _registry().field_discovery(
+        FieldDiscoveryRequest(
+            fields=[
+                FieldRef(resource="item", field="name"),
+                FieldRef(resource="item", field="status"),
+            ],
+        )
+    )
+    assert [entry.field for entry in response.fields] == ["name", "status"]
+
+
+def test_field_discovery_unknown_field_404() -> None:
     with pytest.raises(HTTPException) as ei:
-        _registry().discovery(resource="item", field="nope")
+        _registry().field_discovery(
+            FieldDiscoveryRequest(
+                fields=[FieldRef(resource="item", field="nope")],
+            )
+        )
     assert ei.value.status_code == 404
 
 
-def test_discovery_unknown_resource_404() -> None:
-    with pytest.raises(HTTPException) as ei:
-        _registry().discovery(resource="nope")
-    assert ei.value.status_code == 404
-
-
-def test_discovery_ref_to_unknown_target_omits_endpoint() -> None:
-    payload = _registry().discovery(resource="item", field="owner_id")
-    descriptor = payload.values
+def test_field_discovery_ref_to_unknown_target_omits_endpoint() -> None:
+    response = _registry().field_discovery(
+        FieldDiscoveryRequest(
+            fields=[FieldRef(resource="item", field="owner_id")],
+        )
+    )
+    descriptor = response.fields[0].values
     assert descriptor.kind == "ref"
     assert descriptor.type == "owner"
     assert descriptor.endpoint is None

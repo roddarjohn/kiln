@@ -168,20 +168,15 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     assert "resources/router.py" in files
     router = files["resources/router.py"]
 
-    # Five endpoints, each declaring a typed response_model so
-    # FastAPI/OpenAPI surface real schemas (not bare dicts).
+    # Four endpoints, all POST.  Discovery uses the codegen'd
+    # discriminated unions; values uses ingot's ValuesPage.
     assert (
-        '@router.get("/_filters", response_model=ProjectDiscovery)'
-        in router
+        '@router.post("/_filters", response_model=Discovery)' in router
     )
     assert (
-        '@router.get("/_filters/{resource}", response_model=ResourceDiscovery)'
+        '@router.post("/_filters/fields", response_model=FieldsDiscovery)'
         in router
     )
-    assert (
-        '@router.get("/_filters/{resource}/{field}", '
-        "response_model=FieldDiscovery)"
-    ) in router
     assert (
         '@router.post("/_values/{resource}", response_model=ValuesPage)'
         in router
@@ -192,20 +187,58 @@ def test_router_module_emitted(files: dict[str, str]) -> None:
     )
 
     # Each delegates to the registry.
-    assert "resource_registry.discovery()" in router
-    assert "resource_registry.discovery(resource=resource)" in router
-    assert (
-        "resource_registry.discovery(resource=resource, field=field)" in router
-    )
+    assert "resource_registry.filter_discovery(" in router
+    assert "resource_registry.field_discovery(" in router
     assert "await resource_registry.values(" in router
 
-    # Typed registry models imported alongside the body schema.
+    # Schemas imported from the codegen'd schemas module.
+    assert "from _generated.resources.schemas import" in router
+    assert "Discovery" in router
+    assert "FieldsDiscovery" in router
+    assert "ProjectFilterDiscoveryRequest" in router
+    assert "ProjectFieldDiscoveryRequest" in router
+    # Body schema and ValuesPage from ingot.
     assert "from ingot.filter_values import FilterValuesRequest" in router
-    assert "from ingot.resource_registry import" in router
-    assert "ProjectDiscovery" in router
-    assert "ResourceDiscovery" in router
-    assert "FieldDiscovery" in router
     assert "ValuesPage" in router
+
+
+def test_schemas_module_emitted(files: dict[str, str]) -> None:
+    """The codegen'd schemas module discriminates on resource and field."""
+    assert "resources/schemas.py" in files
+    schemas = files["resources/schemas.py"]
+
+    # Resource slug literal.
+    assert 'ResourceSlug = Literal["product"]' in schemas
+    # Per-resource Resource class with the slug as discriminator.
+    assert "class ProductResource(BaseModel):" in schemas
+    assert 'resource: Literal["product"] = "product"' in schemas
+
+    # Per-field filter classes with field-name discriminators.
+    assert "class ProductStatusFilter(BaseModel):" in schemas
+    assert 'field: Literal["status"] = "status"' in schemas
+    assert "values: EnumValuesDescriptor" in schemas
+
+    assert "class ProductSkuFilter(BaseModel):" in schemas
+    assert "values: FreeTextValuesDescriptor" in schemas
+
+    assert "class ProductActiveFilter(BaseModel):" in schemas
+    assert "values: BoolValuesDescriptor" in schemas
+
+    assert "class ProductUnitPriceFilter(BaseModel):" in schemas
+    assert "values: LiteralValuesDescriptor" in schemas
+
+    # Per-resource discriminated filter union.
+    assert "ProductFilter = " in schemas
+
+    # Project-wide unions and discovery payload.
+    assert "RegisteredResource" in schemas
+    assert "class Discovery(BaseModel):" in schemas
+    assert "resources: list[RegisteredResource]" in schemas
+
+    # Project-narrowed request schemas.
+    assert "class ProjectFilterDiscoveryRequest(BaseModel):" in schemas
+    assert "resources: list[ResourceSlug] | None = None" in schemas
+    assert "class ProjectFieldDiscoveryRequest(BaseModel):" in schemas
 
 
 def test_project_router_mounts_resource_router(files: dict[str, str]) -> None:
