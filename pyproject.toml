@@ -100,7 +100,7 @@ actions = "be.operations.actions:Actions"
 permissions = "be.operations.permissions:Permissions"
 link_schema = "be.operations.links:LinkSchema"
 links = "be.operations.links:Links"
-searchable = "be.operations.searchable:Searchable"
+resource_registry = "be.operations.resource_registry:ResourceRegistry"
 
 [project.entry-points."be_root.operations"]
 root_scaffold = "be_root.operations:RootScaffold"

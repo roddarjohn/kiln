@@ -1,0 +1,113 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Five thin handlers backed entirely by
+:class:`ingot.resource_registry.ResourceRegistry`:
+
+* ``GET /_filters`` — full project discovery payload.
+* ``GET /_filters/{resource}`` — one resource.
+* ``GET /_filters/{resource}/{field}`` — one field.
+* ``POST /_values/{resource}`` — resource-level search.
+* ``POST /_values/{resource}/{field}`` — per-field value provider.
+
+Mount this router in your app once::
+
+    from {{ registry_module }}.router import router as resource_router
+    app.include_router(resource_router)
+{% endset %}
+{{ file_header("Project-wide resource registry endpoints", extra=_extra) }}
+
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ingot.filter_values import FilterValuesRequest
+
+from {{ session_module }} import {{ get_db_fn }}
+{% if require_auth %}
+from {{ auth_module }} import get_session
+from {{ session_schema_module }} import {{ session_schema_name }}
+{% endif %}
+
+from . import REGISTRY
+
+router = APIRouter()
+
+
+@router.get("/_filters")
+def filters_root(
+{% if require_auth %}
+    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
+{% endif %}
+) -> dict[str, Any]:
+    """Return the full project discovery payload."""
+    return REGISTRY.discovery()
+
+
+@router.get("/_filters/{resource}")
+def filters_resource(
+    resource: str,
+{% if require_auth %}
+    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
+{% endif %}
+) -> dict[str, Any]:
+    """Return one resource's discovery payload."""
+    return REGISTRY.discovery(resource=resource)
+
+
+@router.get("/_filters/{resource}/{field}")
+def filters_resource_field(
+    resource: str,
+    field: str,
+{% if require_auth %}
+    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
+{% endif %}
+) -> dict[str, Any]:
+    """Return one field's discovery payload (404 on unknown field)."""
+    return REGISTRY.discovery(resource=resource, field=field)
+
+
+@router.post("/_values/{resource}")
+async def values_resource(
+    resource: str,
+    body: FilterValuesRequest,
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if require_auth %}
+    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
+{% endif %}
+) -> dict[str, Any]:
+    """Resource-level search; routes to the registry's link builder."""
+    return await REGISTRY.values(
+        resource=resource,
+        field=None,
+        request=body,
+        db=db,
+{% if require_auth %}
+        session=session,
+{% endif %}
+    )
+
+
+@router.post("/_values/{resource}/{field}")
+async def values_resource_field(
+    resource: str,
+    field: str,
+    body: FilterValuesRequest,
+    db: Annotated[AsyncSession, Depends({{ get_db_fn }})],
+{% if require_auth %}
+    session: Annotated[{{ session_schema_name }}, Depends(get_session)],
+{% endif %}
+) -> dict[str, Any]:
+    """Per-field value provider (enum / free-text / ref / self)."""
+    return await REGISTRY.values(
+        resource=resource,
+        field=field,
+        request=body,
+        db=db,
+{% if require_auth %}
+        session=session,
+{% endif %}
+    )

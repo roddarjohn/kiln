@@ -128,6 +128,10 @@ class ProjectRouter:
         telemetry_module = (
             f"{package_prefix}.telemetry" if package_prefix else "telemetry"
         )
+        has_resource_registry = _has_resource_registry(config)
+        resource_registry_module = (
+            f"{package_prefix}.resources" if package_prefix else "resources"
+        )
 
         yield StaticFile(
             path="routes/__init__.py",
@@ -137,6 +141,8 @@ class ProjectRouter:
                 "auth_module": auth_module,
                 "has_telemetry": has_telemetry,
                 "telemetry_module": telemetry_module,
+                "has_resource_registry": has_resource_registry,
+                "resource_registry_module": resource_registry_module,
                 "apps": [
                     {
                         "module": (
@@ -151,6 +157,20 @@ class ProjectRouter:
                 ],
             },
         )
+
+
+def _has_resource_registry(config: ProjectConfig) -> bool:
+    """Whether any resource contributes to the project-wide registry routes."""
+    for app in config.apps:
+        for resource in app.config.resources:
+            if resource.searchable:
+                return True
+
+            for op in resource.operations:
+                if any(m.type == "filter" for m in op.modifiers):
+                    return True
+
+    return False
 
 
 def _resource_module_slug(resource: ResourceConfig) -> str:

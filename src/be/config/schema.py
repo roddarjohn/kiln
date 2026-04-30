@@ -387,6 +387,26 @@ class RateLimitConfig(BaseModel):
     """Emit ``X-RateLimit-*`` response headers (slowapi default on)."""
 
 
+class ResourceRegistryConfig(BaseModel):
+    """Project-wide resource-registry endpoint config.
+
+    Per-resource filter declarations stay on each list op's
+    ``filter`` modifier; per-resource search opt-in lives on the
+    resource itself.  This block governs the cross-cutting
+    properties of the *project-wide* registry routes
+    (``_filters`` / ``_values`` today; future ``_actions`` /
+    ``_dump`` join the same surface) — a single place to set auth
+    (and, in time, rate-limit / telemetry) on those routes
+    regardless of how many resources contribute.
+    """
+
+    require_auth: bool | None = None
+    """Whether the project-wide registry routes require an
+    authenticated session.  ``None`` (the default) infers from the
+    project: ``True`` when :attr:`ProjectConfig.auth` is set,
+    ``False`` otherwise.  Set explicitly to override."""
+
+
 class DatabaseConfig(BaseModel):
     """Configuration for a single database connection."""
 
@@ -741,22 +761,33 @@ calls (see ``be.operations.create`` / ``be.operations.update``)."""
 
 
 class SearchConfig(BaseModel):
-    """Resource-level search-field list.
+    """Resource-level search configuration.
 
-    Drives the ILIKE clause on
-    :attr:`~ResourceConfig.searchable`'s
-    ``POST /{prefix}/_values?q=`` endpoint.  When a query is
-    supplied, the SQL is::
-
-        WHERE col1 ILIKE %q% OR col2 ILIKE %q% OR ...
-
-    over every named attribute.  Without this block the endpoint
-    falls back to ``link.name`` (or no filtering at all when the
-    link is id-only / builder-only).
+    Drives the project-wide ``POST /_values/{resource}?q=``
+    endpoint.  Without :attr:`vector_column`, ``q`` is matched via
+    ``WHERE col1 ILIKE %q% OR col2 ILIKE %q% OR ...`` over every
+    name in :attr:`fields` and results are reranked so starts-with
+    matches come first.  With :attr:`vector_column` set, the same
+    endpoint switches to ``vector_column @@ websearch_to_tsquery(q)``
+    and orders by ``ts_rank(...)`` — true full-text relevance, the
+    pgcraft-generated tsvector path.
     """
 
-    fields: list[str]
-    """Model attribute names to OR-match on the search query."""
+    fields: list[str] = Field(default_factory=list)
+    """Model attribute names to OR-match on the search query.  May
+    be empty when :attr:`vector_column` is set — the tsvector path
+    doesn't need a column list."""
+
+    vector_column: str | None = None
+    """Model attribute holding a Postgres ``tsvector`` column (the
+    one pgcraft generates from the resource's searchable text
+    fields).  When set, the search endpoint matches and ranks via
+    ``ts_rank`` against ``websearch_to_tsquery(q)`` instead of the
+    ILIKE fallback.
+
+    When unset, the endpoint uses :attr:`fields` (or ``link.name``
+    when neither is given) for ILIKE matching with starts-with
+    relevance reranking."""
 
 
 LinkKind = Literal["name", "id", "id_name"]
@@ -1021,6 +1052,15 @@ class ProjectConfig(FoundryConfig):
     generated app emits zero rate-limit references; set to a
     :class:`RateLimitConfig` to opt in.  Per-resource and per-op
     ``rate_limit`` overrides are only allowed when this is set."""
+    resource_registry: ResourceRegistryConfig = Field(
+        default_factory=ResourceRegistryConfig
+    )
+    """Project-wide resource-registry configuration.  Per-resource
+    filter modifiers (under each list op) and ``searchable`` opt-ins
+    feed into the project-wide registry routes (``_filters`` /
+    ``_values`` today, more later); this block carries the
+    endpoint-level cross-cutting knobs (auth today; rate-limit /
+    telemetry as needed).  Defaults to a permissive config."""
     databases: list[DatabaseConfig] = Field(..., min_length=1)
     apps: Annotated[list[App], Scoped(name="app")] = Field(
         default_factory=list,

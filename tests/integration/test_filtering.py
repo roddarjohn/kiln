@@ -1,13 +1,29 @@
 """End-to-end coverage of the structured filter machinery.
 
-Builds a project config whose list op carries the full range of
-``StructuredFilterField`` modes (enum, bool, free_text, literal),
-runs the generator, and asserts that the rendered routes file
-includes the discovery handler, per-field value providers, and
-the right imports.  Stops short of executing the generated app
-(consumer modules are fictitious) — the unit suites cover op
-behavior in isolation; this test guards composition against
-regressions in the rendering pipeline.
+Filters and value providers no longer emit per-resource routes —
+every resource that opts in feeds a single project-wide
+:class:`ingot.resource_registry.ResourceRegistry`, and the project-scope
+``resource_registry`` op generates one ``resources/__init__.py``
+(registry construction) plus one ``resources/router.py`` (five thin
+delegating route handlers) at the project root.
+
+This test asserts:
+
+* The registry module imports the right
+  :class:`~ingot.resource_registry.ResourceRegistry`,
+  :class:`~ingot.resource_registry.ResourceEntry`, model class, enum
+  class, and per-app ``LINKS`` map (when ``searchable`` is on).
+* Each filter field renders as the matching field-spec dataclass
+  with its operators preserved.
+* The router file exposes ``GET /_filters``, ``GET /_filters/{resource}``,
+  ``GET /_filters/{resource}/{field}``, ``POST /_values/{resource}``,
+  and ``POST /_values/{resource}/{field}``, all delegating to
+  ``REGISTRY``.
+* The project router mounts the new filter router.
+* The per-resource routes file no longer carries any of the old
+  ``/_filters`` or ``/_values`` boilerplate.
+* The list endpoint still wires :func:`ingot.filters.apply_filters`
+  (the filter modifier still flips ``has_filter`` on the parent list).
 """
 
 from __future__ import annotations
@@ -108,80 +124,128 @@ def test_every_generated_python_file_parses(files: dict[str, str]) -> None:
             raise AssertionError(msg) from exc
 
 
-def test_filter_discovery_handler_emitted(files: dict[str, str]) -> None:
-    """``GET /_filters`` exists and inlines enum choices via the
-    imported enum class."""
+def test_registry_module_emitted(files: dict[str, str]) -> None:
+    """The project-scope op produces ``resources/__init__.py``."""
+    assert "resources/__init__.py" in files
+    registry = files["resources/__init__.py"]
+
+    # ResourceRegistry + ResourceEntry are imported from ingot.
+    assert "from ingot.resource_registry import" in registry
+    assert "ResourceRegistry" in registry
+    assert "ResourceEntry" in registry
+
+    # Resource keyed by lowercased model class name.
+    assert '"product": ResourceEntry(' in registry
+    assert "model=Product," in registry
+    assert 'pk="id",' in registry
+
+
+def test_registry_field_specs(files: dict[str, str]) -> None:
+    """Each filter field renders as its matching dataclass."""
+    registry = files["resources/__init__.py"]
+
+    # Enum: imports the enum class and references it by name.
+    assert "from inventory.models import" in registry
+    assert "Status" in registry
+    assert (
+        "Enum('status', enum_class=Status, operators=('eq', 'in'))" in registry
+    )
+
+    # Bool: just the name + operators.
+    assert "Bool('active', operators=('eq',))" in registry
+
+    # FreeText: name + default ('eq', 'contains', 'starts_with') ops.
+    assert "FreeText('sku'," in registry
+    assert "'contains'" in registry
+    assert "'starts_with'" in registry
+
+    # LiteralField: name + scalar type + operators.
+    assert "LiteralField('unit_price', type='float'," in registry
+
+
+def test_router_module_emitted(files: dict[str, str]) -> None:
+    """The router file delegates every endpoint to ``REGISTRY``."""
+    assert "resources/router.py" in files
+    router = files["resources/router.py"]
+
+    # Five endpoints, all thin wrappers.
+    assert '@router.get("/_filters")' in router
+    assert '@router.get("/_filters/{resource}")' in router
+    assert '@router.get("/_filters/{resource}/{field}")' in router
+    assert '@router.post("/_values/{resource}")' in router
+    assert '@router.post("/_values/{resource}/{field}")' in router
+
+    # Each delegates to the registry.
+    assert "REGISTRY.discovery()" in router
+    assert "REGISTRY.discovery(resource=resource)" in router
+    assert "REGISTRY.discovery(resource=resource, field=field)" in router
+    assert "await REGISTRY.values(" in router
+
+    # Shared body schema imported once.
+    assert "from ingot.filter_values import FilterValuesRequest" in router
+
+
+def test_project_router_mounts_resource_router(files: dict[str, str]) -> None:
+    """``routes/__init__.py`` includes the new filter router."""
+    project_router = files["routes/__init__.py"]
+
+    assert (
+        "from _generated.resources.router import router as resource_router"
+        in (project_router)
+    )
+    assert "router.include_router(resource_router)" in project_router
+
+
+def test_per_resource_routes_no_longer_carry_filter_endpoints(
+    files: dict[str, str],
+) -> None:
+    """Old per-resource ``/_filters`` and ``/_values`` are gone."""
     routes = files["inventory/routes/product.py"]
 
-    assert '@router.get("/_filters"' in routes
-    assert "async def filters_product(" in routes
-    # Enum class imported alongside Product (collector folds the line).
-    assert "from inventory.models import" in routes
-    assert "Status" in routes
-    # Enum members referenced inline in the response.
-    assert "for _m in Status" in routes
-
-
-def test_filter_discovery_payload_shape(files: dict[str, str]) -> None:
-    """Each filter field lands in the response with its kind +
-    operators."""
-    routes = files["inventory/routes/product.py"]
-
-    # Enum field: kind + endpoint + operators.
-    assert '"field": "status"' in routes
-    assert '"kind": "enum"' in routes
-    assert '"operators": ["eq", "in"]' in routes
-    assert '"endpoint": "/products/_values/status"' in routes
-
-    # Bool field: just kind.
-    assert '"field": "active"' in routes
-    assert '"kind": "bool"' in routes
-
-    # Free-text field: kind + endpoint.
-    assert '"field": "sku"' in routes
-    assert '"kind": "free_text"' in routes
-    assert '"endpoint": "/products/_values/sku"' in routes
-
-    # Literal field: kind + type, no endpoint.
-    assert '"field": "unit_price"' in routes
-    assert '"kind": "literal"' in routes
-    assert '"type": "float"' in routes
-
-
-def test_value_provider_routes_emitted(files: dict[str, str]) -> None:
-    """Enum and free-text value-provider POST routes both exist;
-    bool and literal don't."""
-    routes = files["inventory/routes/product.py"]
-
-    # Enum — uses ingot.filter_values.enum_values.
-    assert '@router.post("/_values/status"' in routes
-    assert "async def filter_values_product_status(" in routes
-    assert "from ingot.filter_values import enum_values" in routes
-    assert "return enum_values(Status, body)" in routes
-
-    # Free-text — issues SQL through Product.sku.
-    assert '@router.post("/_values/sku"' in routes
-    assert "async def filter_values_product_sku(" in routes
-    assert "Product.sku.ilike" in routes
-
-    # Bool / literal have no value-provider routes.
-    assert '@router.post("/_values/active"' not in routes
-    assert '@router.post("/_values/unit_price"' not in routes
-
-
-def test_filter_values_request_imported(files: dict[str, str]) -> None:
-    """The shared body schema is imported once per routes file."""
-    routes = files["inventory/routes/product.py"]
-
-    assert "FilterValuesRequest" in routes
-    assert "from ingot.filter_values import" in routes
+    assert '@router.get("/_filters' not in routes
+    assert '@router.post("/_values/' not in routes
+    # The list /search endpoint stays untouched.
+    assert '@router.post("/search"' in routes
 
 
 def test_search_endpoint_still_filters(files: dict[str, str]) -> None:
-    """The existing list/search execution path still wires
-    apply_filters — discovery + value providers don't displace it."""
+    """The list/search execution path still wires apply_filters —
+    the filter modifier flips ``has_filter`` on the parent list
+    even though it no longer emits routes itself."""
     routes = files["inventory/routes/product.py"]
 
-    assert '@router.post("/search"' in routes
     assert "from ingot.filters import apply_filters" in routes
     assert "stmt = apply_filters(stmt, body.filter," in routes
+
+
+def test_no_filter_modifier_skips_registry_emission() -> None:
+    """A project with no filters or searchable resources gets no
+    registry / router files at all."""
+    config = ProjectConfig(
+        databases=[DatabaseConfig(key="primary", default=True)],
+        apps=[
+            App(
+                config=AppConfig(
+                    module="inventory",
+                    resources=[
+                        ResourceConfig(
+                            model="inventory.models.Product",
+                            require_auth=False,
+                            route_prefix="/products",
+                            operations=[
+                                OperationConfig(
+                                    name="get", fields=_LIST_FIELDS
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                prefix="/inventory",
+            ),
+        ],
+    )
+    files = {f.path: f.content for f in generate(config, target)}
+
+    assert "resources/__init__.py" not in files
+    assert "resources/router.py" not in files
+    assert "resource_router" not in files["routes/__init__.py"]

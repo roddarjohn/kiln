@@ -1,6 +1,6 @@
 """End-to-end coverage of link / searchable / ref / saved-view emission.
 
-Exercises link configs, the resource-level search endpoint, ref
+Exercises link configs, the project-wide search endpoint, ref
 filter targeting, and saved views configured as a regular kiln
 resource that uses the new ``serializer:`` hook for hydration.
 Builds three resources — Customer, Product, and SavedView — and
@@ -9,10 +9,13 @@ asserts that:
 * Each linked resource produces an entry in the per-app
   ``links.py`` registry, plus a matching ``REF_RESOLVERS`` entry
   capable of fetching rows by id.
-* ``searchable: True`` produces a ``POST /_values`` route.
-* A ``ref`` filter on one resource points at the *other*
-  resource's resource-level ``_values`` URL in the discovery
-  payload.
+* ``searchable: True`` contributes a
+  :class:`~ingot.resource_registry.SearchSpec` to the project-wide
+  registry — the ``POST /_values/{resource}`` endpoint lives on
+  the project router, not on the resource.
+* A ``ref`` filter on one resource shows up in the registry with
+  the right ``target`` slug; the FE-facing endpoint URL points at
+  the project-wide ``/_values/<target>`` route.
 * A regular CRUD resource carrying ``serializer:`` on its read
   ops swaps in the user's serializer (called with
   ``(obj, session, db)``) and drops ``response_model``.
@@ -242,29 +245,34 @@ def test_link_schema_emitted_in_resource_schemas(
     assert 'type: Literal["product"] = "product"' in product_schemas
 
 
-def test_searchable_emits_resource_values_route(
+def test_searchable_contributes_search_spec(
     files: dict[str, str],
 ) -> None:
-    """Customer's searchable=True produces POST /_values."""
+    """Customer's ``searchable=True`` shows up in the registry as
+    a :class:`SearchSpec` pulling the link builder from the per-app
+    ``LINKS`` map (no per-resource ``POST /_values`` is emitted)."""
     routes = files["inventory/routes/customer.py"]
+    assert '@router.post("/_values"' not in routes
 
-    assert '@router.post("/_values"' in routes
-    assert "async def values_customer(" in routes
-    # Pulls the link builder out of the per-app registry.
-    assert 'builder = LINKS["customer"]' in routes
-    # ILIKE search uses the link's name field.
-    assert "Customer.name.ilike" in routes
+    registry = files["resources/__init__.py"]
+    # Customer entry exists with a search spec.
+    assert '"customer": ResourceEntry(' in registry
+    assert "search=SearchSpec(" in registry
+    # Default search column comes from link.name.
+    assert "columns=('name'" in registry
+    # Link builder pulled from the per-app LINKS map (aliased).
+    assert "_inventory_LINKS['customer']" in registry
 
 
-def test_ref_filter_points_at_target_values_endpoint(
+def test_ref_filter_targets_registered_resource(
     files: dict[str, str],
 ) -> None:
-    """Product's customer_id filter targets /customers/_values."""
-    routes = files["inventory/routes/product.py"]
+    """Product's customer_id filter is a Ref into the registry,
+    targeting customer (the project-wide ``/_values/customer``
+    endpoint serves it)."""
+    registry = files["resources/__init__.py"]
 
-    assert '"endpoint": "/customers/_values"' in routes
-    assert '"type": "customer"' in routes
-    assert '"kind": "ref"' in routes
+    assert "Ref('customer_id', target='customer'" in registry
 
 
 def test_custom_serializer_replaces_auto_dump(
