@@ -1310,17 +1310,6 @@ class ProjectConfig(FoundryConfig):
                     )
                     raise ValueError(msg)
 
-                if resource.searchable:
-                    msg = (
-                        f"Resource {resource.model!r} sets "
-                        f"searchable=True but the project has no "
-                        f"auth configured.  The resource-level "
-                        f"`_values` endpoint passes `session` to "
-                        f"the link builder; configure project.auth "
-                        f"or drop the flag."
-                    )
-                    raise ValueError(msg)
-
                 for op in resource.operations:
                     if op.can is not None:
                         msg = (

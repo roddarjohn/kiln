@@ -11,6 +11,7 @@ from be.config.schema import (
     DatabaseConfig,
     FieldSpec,
     FilterConfig,
+    LinkConfig,
     OperationConfig,
     ProjectConfig,
     ResourceConfig,
@@ -560,6 +561,75 @@ def test_field_spec_load_on_scalar_rejected():
 
     with pytest.raises(ValidationError, match="`load` is only meaningful"):
         FieldSpec(name="title", type="str", load="joined")
+
+
+def test_field_spec_nested_with_enum_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="`enum` is only allowed when"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+            fields=[FieldSpec(name="id", type="uuid")],
+            enum="blog.models.Status",
+        )
+
+
+def test_field_spec_enum_requires_enum_class() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires"):
+        FieldSpec(name="status", type="enum")
+
+
+def test_field_spec_enum_with_nested_fields_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(
+        ValidationError, match='only allowed when `type: "nested"`'
+    ):
+        FieldSpec(
+            name="status",
+            type="enum",
+            enum="blog.models.Status",
+            many=True,
+        )
+
+
+def test_link_config_builder_with_shorthand_rejected() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="provide either `builder` or"):
+        LinkConfig(
+            kind="id_name",
+            name="title",
+            builder="app.links.build_project_link",
+        )
+
+
+def test_link_config_kind_name_requires_name_attr() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires either"):
+        LinkConfig(kind="name")
+
+
+def test_link_config_kind_id_name_requires_name_attr() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires either"):
+        LinkConfig(kind="id_name")
+
+
+def test_link_config_builder_only_is_valid() -> None:
+    cfg = LinkConfig(kind="id_name", builder="app.links.build_link")
+    assert cfg.builder == "app.links.build_link"
+    assert cfg.name is None
+    assert cfg.id is None
 
 
 # ---------------------------------------------------------------------------
