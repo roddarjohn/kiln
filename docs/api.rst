@@ -133,6 +133,12 @@ be.operations
 .. automodule:: be.operations.routing
    :members:
 
+.. automodule:: be.operations.links
+   :members:
+
+.. automodule:: be.operations.resource_registry
+   :members:
+
 .. automodule:: ingot
    :members:
 
@@ -148,6 +154,9 @@ be.operations
 .. automodule:: ingot.files
    :members:
 
+.. automodule:: ingot.filter_values
+   :members:
+
 .. automodule:: ingot.filters
    :members:
 
@@ -161,6 +170,12 @@ be.operations
    :members:
 
 .. automodule:: ingot.rate_limit
+   :members:
+
+.. automodule:: ingot.resource_registry
+   :members:
+
+.. automodule:: ingot.saved_views
    :members:
 
 .. automodule:: ingot.utils

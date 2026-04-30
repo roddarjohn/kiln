@@ -9,7 +9,6 @@ from foundry import (
     create_jinja_env,
     prefix_import,
     render_template,
-    split_dotted_class,
     write_files,
 )
 
@@ -124,20 +123,6 @@ def test_name_from_dotted():
     module, name = Name.from_dotted("myapp.models.Article")
     assert module == "myapp.models"
     assert name.pascal == "Article"
-
-
-# -------------------------------------------------------------------
-# split_dotted_class
-# -------------------------------------------------------------------
-
-
-def test_split_dotted_class():
-    assert split_dotted_class("a.B") == ("a", "B")
-
-
-def test_split_dotted_class_invalid():
-    with pytest.raises(ValueError, match="not a valid"):
-        split_dotted_class("NoDot")
 
 
 # ---------------------------------------------------------------------------

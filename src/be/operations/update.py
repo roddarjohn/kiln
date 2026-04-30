@@ -64,14 +64,16 @@ class Update:
         )
         _, model = Name.from_dotted(resource.model)
         request_schema = model.suffixed("UpdateRequest")
+        field_dicts, enum_imports = _field_dicts(options.fields)
 
         yield SchemaClass(
             name=request_schema,
             fields=[
                 Field(name=f.name, py_type=f.py_type, optional=True)
-                for f in _field_dicts(options.fields)
+                for f in field_dicts
             ],
             doc=f"Request body for updating a {model.pascal}.",
+            extra_imports=enum_imports,
         )
 
         gate_ctx, gate_imports = gate_wiring(

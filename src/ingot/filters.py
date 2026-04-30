@@ -1,6 +1,6 @@
 """Filter-clause construction for typed Pydantic filter trees."""
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import and_, or_
 
@@ -22,6 +22,7 @@ FilterOp = Literal[
     "contains",
     "starts_with",
     "in",
+    "is_null",
 ]
 """Operator keys accepted by a condition node's ``op`` field.
 
@@ -30,16 +31,24 @@ Callers' Pydantic condition models should declare ``op`` as a
 """
 
 
-_FILTER_OPS: dict[FilterOp, str] = {
-    "eq": "__eq__",
-    "neq": "__ne__",
-    "gt": "__gt__",
-    "gte": "__ge__",
-    "lt": "__lt__",
-    "lte": "__le__",
-    "contains": "contains",
-    "starts_with": "startswith",
-    "in": "in_",
+# Each entry takes ``(column, value)`` and returns the SQL clause.
+# A callable map (rather than a method-name string) keeps unary-ish
+# operators like ``is_null`` in the same dispatch table as the binary
+# ones — value semantics differ per op but the call site doesn't.
+_FILTER_OPS: dict[FilterOp, Callable[[Any, Any], ColumnElement[bool]]] = {
+    "eq": lambda col, v: col == v,
+    "neq": lambda col, v: col != v,
+    "gt": lambda col, v: col > v,
+    "gte": lambda col, v: col >= v,
+    "lt": lambda col, v: col < v,
+    "lte": lambda col, v: col <= v,
+    "contains": lambda col, v: col.contains(v),
+    "starts_with": lambda col, v: col.startswith(v),
+    "in": lambda col, v: col.in_(v),
+    # Truthy ``value`` → ``IS NULL``; falsy → ``IS NOT NULL``.
+    # Matches how most filter UIs render an "is empty / is not
+    # empty" toggle.
+    "is_null": lambda col, v: col.is_(None) if v else col.is_not(None),
 }
 
 _COMBINERS = {"and_": and_, "or_": or_}
@@ -110,7 +119,7 @@ def _build_filter_clause(
     op: FilterOp = getattr(node, "op", "eq")
     value = getattr(node, "value", None)
     col = getattr(model, field_name)
-    return getattr(col, _FILTER_OPS[op])(value)
+    return _FILTER_OPS[op](col, value)
 
 
 def _combine(

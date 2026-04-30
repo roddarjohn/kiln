@@ -20,7 +20,17 @@ class Post(Base):
 
 class Condition(BaseModel):
     field: Literal["title", "author", "id"]
-    op: Literal["eq", "neq", "gt", "gte", "lt", "lte", "contains", "in"] = "eq"
+    op: Literal[
+        "eq",
+        "neq",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "contains",
+        "in",
+        "is_null",
+    ] = "eq"
     value: object
 
 
@@ -111,3 +121,21 @@ def test_contains_operator():
     )
     sql = _sql(stmt)
     assert "post.title LIKE" in sql
+
+
+def test_is_null_operator_truthy():
+    stmt = apply_filters(
+        select(Post),
+        Condition(field="title", op="is_null", value=True),
+        Post,
+    )
+    assert "post.title IS NULL" in _sql(stmt)
+
+
+def test_is_null_operator_falsy():
+    stmt = apply_filters(
+        select(Post),
+        Condition(field="title", op="is_null", value=False),
+        Post,
+    )
+    assert "post.title IS NOT NULL" in _sql(stmt)

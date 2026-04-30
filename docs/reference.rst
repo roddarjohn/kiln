@@ -86,11 +86,36 @@ be config schema
    :members:
    :undoc-members:
 
+.. autoclass:: be.config.schema.StructuredFilterField
+   :members:
+   :undoc-members:
+
+.. autodata:: be.config.schema.FilterValueKind
+   :no-value:
+
+.. autodata:: be.config.schema.FilterOperator
+   :no-value:
+
+.. autoclass:: be.config.schema.LinkConfig
+   :members:
+   :undoc-members:
+
+.. autodata:: be.config.schema.LinkKind
+   :no-value:
+
+.. autoclass:: be.config.schema.SearchConfig
+   :members:
+   :undoc-members:
+
 .. autoclass:: be.config.schema.OrderConfig
    :members:
    :undoc-members:
 
 .. autoclass:: be.config.schema.PaginateConfig
+   :members:
+   :undoc-members:
+
+.. autoclass:: be.config.schema.ResourceRegistryConfig
    :members:
    :undoc-members:
 
@@ -481,8 +506,6 @@ Naming and imports
    :members:
 
 .. autofunction:: foundry.naming.prefix_import
-
-.. autofunction:: foundry.naming.split_dotted_class
 
 .. autoclass:: foundry.imports.ImportCollector
    :members:

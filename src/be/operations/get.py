@@ -53,6 +53,7 @@ class Get:
         )
         model_module, model = Name.from_dotted(resource.model)
         include_actions = resource.include_actions_in_dump
+        custom_serializer = ctx.instance.serializer
 
         dump = _construct_dump(
             model,
@@ -67,8 +68,14 @@ class Get:
         # so they render before the parent class that references them.
         yield from dump.nested_schemas
         yield dump.main_schema
-        yield from dump.nested_serializers
-        yield dump.main_serializer
+
+        # Auto-generated serializers are skipped when the op
+        # carries a custom serializer; the schema is still emitted
+        # so other ops on the resource and any FE consumer of the
+        # schema name keep working.
+        if custom_serializer is None:
+            yield from dump.nested_serializers
+            yield dump.main_serializer
 
         gate_ctx, gate_imports = gate_wiring(
             ctx.instance,
@@ -76,6 +83,39 @@ class Get:
             ctx.package_prefix,
             is_object_scope=True,
         )
+
+        if custom_serializer is not None:
+            try:
+                ser_module, ser_name_obj = Name.from_dotted(custom_serializer)
+
+            except ValueError as exc:
+                msg = (
+                    f"Operation {ctx.instance.name!r}: serializer "
+                    f"must be a dotted path (got "
+                    f"{custom_serializer!r})"
+                )
+                raise ValueError(msg) from exc
+
+            serializer_fn = ser_name_obj.raw
+            serializer_fn_module = ser_module
+            response_model: str | None = None
+            return_type = "dict[str, Any]"
+
+        else:
+            serializer_fn = dump.main_serializer.function_name
+            serializer_fn_module = None
+            response_model = dump.main_schema.name
+            return_type = dump.main_schema.name
+
+        extra_imports: list[tuple[str, str]] = [
+            ("sqlalchemy", "select"),
+            FETCH_OR_404_IMPORT,
+            *dump.load_imports,
+            *gate_imports,
+        ]
+
+        if custom_serializer is not None:
+            extra_imports.append(("typing", "Any"))
 
         yield RouteHandler(
             method="GET",
@@ -88,22 +128,19 @@ class Get:
                     annotation=PYTHON_TYPES[resource.pk_type],
                 )
             ],
-            response_model=dump.main_schema.name,
-            serializer_fn=dump.main_serializer.function_name,
-            return_type=dump.main_schema.name,
+            response_model=response_model,
+            serializer_fn=serializer_fn,
+            serializer_fn_module=serializer_fn_module,
+            return_type=return_type,
             doc=f"Get a {model.pascal} by {resource.pk}.",
             body_template="fastapi/ops/get.py.j2",
             body_context={
                 "load_options": dump.load_options,
                 "serializer_async": include_actions,
+                "custom_serializer": custom_serializer is not None,
                 **gate_ctx,
             },
-            extra_imports=[
-                ("sqlalchemy", "select"),
-                FETCH_OR_404_IMPORT,
-                *dump.load_imports,
-                *gate_imports,
-            ],
+            extra_imports=extra_imports,
         )
 
         yield TestCase(
@@ -112,5 +149,7 @@ class Get:
             path=f"/{{{resource.pk}}}",
             status_success=200,
             status_not_found=404,
-            response_schema=dump.main_schema.name,
+            response_schema=(
+                dump.main_schema.name if custom_serializer is None else None
+            ),
         )

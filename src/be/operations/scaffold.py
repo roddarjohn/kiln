@@ -19,6 +19,7 @@ runtime helpers in :mod:`ingot.queue` (``get_queue``,
 
 from typing import TYPE_CHECKING
 
+from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -141,15 +142,20 @@ class AuthScaffold:
             context={},
         )
 
-        creds_module, creds_name = auth.credentials_schema.rsplit(".", 1)
-        session_module, session_name = auth.session_schema.rsplit(".", 1)
-        validate_module, validate_name = auth.validate_fn.rsplit(".", 1)
+        creds_module, creds_obj = Name.from_dotted(auth.credentials_schema)
+        creds_name = creds_obj.raw
+        session_module, session_obj = Name.from_dotted(auth.session_schema)
+        session_name = session_obj.raw
+        validate_module, validate_obj = Name.from_dotted(auth.validate_fn)
+        validate_name = validate_obj.raw
 
         store_module: str | None = None
         store_name: str | None = None
 
         if auth.session_store is not None:
-            store_module, store_name = auth.session_store.rsplit(".", 1)
+            store_mod, store_obj = Name.from_dotted(auth.session_store)
+            store_module = store_mod
+            store_name = store_obj.raw
 
         yield StaticFile(
             path="auth/dependencies.py",

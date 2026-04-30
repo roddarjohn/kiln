@@ -76,38 +76,78 @@ class Name:
 
         Returns:
             A ``(module, Name)`` tuple, e.g.
-            ``("myapp.models", Name("Article"))``.
+            ``("myapp.models", Name("Article"))``.  Callers that
+            need the raw class-name string can read it from
+            ``Name.raw``.
+
+        Raises:
+            ValueError: If *dotted_path* contains fewer than two
+                parts.
 
         """
-        module, class_name = split_dotted_class(dotted_path)
+        if "." not in dotted_path:
+            msg = (
+                f"'{dotted_path}' is not a valid dotted import path. "
+                f"Expected 'module.ClassName', "
+                f"e.g. 'myapp.models.Article'."
+            )
+            raise ValueError(msg)
+
+        module, _, class_name = dotted_path.rpartition(".")
         return module, cls(class_name)
+
+    @staticmethod
+    def parent_path(dotted: str, *, levels: int = 1) -> str:
+        """Return *dotted*'s ancestor module path.
+
+        Drops the last *levels* dot-separated segments.  When the
+        path runs out of segments before *levels* are stripped, it
+        stops and returns whatever remains rather than producing
+        an empty string — so callers can chain the op without
+        guarding for short paths::
+
+            >>> Name.parent_path("blog.models.Article")
+            'blog.models'
+            >>> Name.parent_path("blog.models.Article", levels=2)
+            'blog'
+            >>> Name.parent_path("single", levels=2)
+            'single'
+
+        ``levels=2`` is the common idiom for "app module from
+        model dotted path" -- ``"blog.models.Article" -> "blog"``.
+        """
+        for _ in range(levels):
+            head, sep, _ = dotted.rpartition(".")
+
+            if not sep:
+                return dotted
+
+            dotted = head
+
+        return dotted
 
 
 def split_dotted_class(dotted_path: str) -> tuple[str, str]:
-    """Split a dotted import path into ``(module, class_name)``.
+    """Split a fully-qualified class path into ``(module, class_name)``.
+
+    Convenience for callers that just want both pieces as strings —
+    skip the :class:`Name` wrapper that :meth:`Name.from_dotted`
+    returns when the only thing they need is the bare class-name
+    string for an import line.
 
     Args:
-        dotted_path: A fully-qualified class path such as
+        dotted_path: Fully-qualified class path, e.g.
             ``"myapp.models.Article"``.
 
     Returns:
-        A ``(module, class_name)`` tuple, e.g.
-        ``("myapp.models", "Article")``.
+        ``(module, class_name)`` tuple of plain strings.
 
     Raises:
         ValueError: If *dotted_path* contains fewer than two parts.
 
     """
-    if "." not in dotted_path:
-        msg = (
-            f"'{dotted_path}' is not a valid dotted import path. "
-            f"Expected 'module.ClassName', "
-            f"e.g. 'myapp.models.Article'."
-        )
-        raise ValueError(msg)
-
-    module, _, class_name = dotted_path.rpartition(".")
-    return module, class_name
+    module, name = Name.from_dotted(dotted_path)
+    return module, name.raw
 
 
 def prefix_import(prefix: str, *parts: str) -> str:

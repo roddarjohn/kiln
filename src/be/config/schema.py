@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from foundry.config import FoundryConfig
+from foundry.naming import Name
 from foundry.scope import Scoped
 
 NESTED: Literal["nested"] = "nested"
@@ -32,7 +33,16 @@ FieldType = Literal[
     "datetime",
     "date",
     "json",
+    "enum",
+    "nested",
 ]
+
+ENUM: Literal["enum"] = "enum"
+"""Sentinel value for :attr:`FieldSpec.type` that marks a field as
+backed by a Python :class:`enum.Enum` class.  Pairs with
+:attr:`FieldSpec.enum` (dotted path) so the schema renderer can
+import the class and use it as the field's annotation."""
+
 
 PYTHON_TYPES: dict[FieldType, str] = {
     "uuid": "uuid.UUID",
@@ -49,6 +59,11 @@ PYTHON_TYPES: dict[FieldType, str] = {
 
 Used by op builders to render pk/field type annotations into the
 generated Pydantic schemas and route handlers.
+
+``"enum"`` and ``"nested"`` aren't keyed here — both resolve to a
+consumer-supplied class name (the enum / model class) that the
+schema renderer imports from :attr:`FieldSpec.enum` /
+:attr:`FieldSpec.model`.
 """
 
 
@@ -112,6 +127,13 @@ class AuthConfig(BaseModel):
     secret_env: str = "JWT_SECRET"  # noqa: S105
     algorithm: str = "HS256"
     token_url: str = "/auth/token"  # noqa: S105
+
+    user_id_attr: str = "user_id"
+    """Attribute name on the parsed session schema that the
+    generated saved-view CRUD reads to scope rows by owner.
+    Defaults to ``"user_id"``; override (e.g. to ``"sub"`` or
+    ``"id"``) when the consumer's session model names it
+    differently."""
 
     session_store: str | None = None
     """Dotted path to an :class:`ingot.auth.SessionStore` instance
@@ -365,6 +387,26 @@ class RateLimitConfig(BaseModel):
     """Emit ``X-RateLimit-*`` response headers (slowapi default on)."""
 
 
+class ResourceRegistryConfig(BaseModel):
+    """Project-wide resource-registry endpoint config.
+
+    Per-resource filter declarations stay on each list op's
+    ``filter`` modifier; per-resource search opt-in lives on the
+    resource itself.  This block governs the cross-cutting
+    properties of the *project-wide* registry routes
+    (``_filters`` / ``_values`` today; future ``_actions`` /
+    ``_dump`` join the same surface) — a single place to set auth
+    (and, in time, rate-limit / telemetry) on those routes
+    regardless of how many resources contribute.
+    """
+
+    require_auth: bool | None = None
+    """Whether the project-wide registry routes require an
+    authenticated session.  ``None`` (the default) infers from the
+    project: ``True`` when :attr:`ProjectConfig.auth` is set,
+    ``False`` otherwise.  Set explicitly to override."""
+
+
 class TemplateSource(BaseModel):
     """Pointer to a file containing a template.
 
@@ -542,12 +584,17 @@ class FieldSpec(BaseModel):
     """A named, typed field — used in operation schemas and action params.
 
     Most fields are scalars: ``{name, type}`` where ``type`` is one
-    of the :data:`~be.config.schema.FieldType` values.  A field
-    can also be *nested* — a dump of a related model — by setting
-    ``type: "nested"`` and
-    supplying ``model`` (dotted import path to the related
-    SQLAlchemy class) and ``fields`` (the sub-field list).  Set
-    ``many=True`` when the relationship returns a collection.
+    of the :data:`~be.config.schema.FieldType` values.  Two
+    type-driven extensions:
+
+    * ``type: "nested"`` — a dump of a related SQLAlchemy model.
+      Set :attr:`model` (dotted import path) and :attr:`fields`
+      (the sub-field list); add ``many=True`` when the
+      relationship returns a collection.
+    * ``type: "enum"`` — a Python :class:`enum.Enum` value.  Set
+      :attr:`enum` (dotted import path) so the generated schema
+      annotates the field with the imported enum class instead of
+      ``str``.
 
     Nested fields are only meaningful on read-op dumps (``get``,
     ``list``).  Write-op request schemas (``create`` / ``update``)
@@ -555,7 +602,7 @@ class FieldSpec(BaseModel):
     """
 
     name: str
-    type: FieldType | Literal["nested"]
+    type: FieldType
     model: str | None = None
     """Dotted import path of the related SQLAlchemy model, e.g.
     ``"blog.models.Project"``.  Required when ``type == "nested"``;
@@ -575,49 +622,99 @@ class FieldSpec(BaseModel):
     many-to-one scalars) or ``"subquery"`` for an older-style
     correlated subquery load.  Only meaningful when
     ``type == "nested"``."""
+    enum: str | None = None
+    """Dotted import path of the Python :class:`enum.Enum` class
+    backing the field.  Required when ``type == "enum"``; must be
+    omitted otherwise.  The schema renderer imports the class and
+    uses it as the field's annotation so the OpenAPI spec carries
+    the enum's choices."""
 
     @model_validator(mode="after")
-    def _validate_nested(self) -> FieldSpec:
+    def _validate_kind(self) -> FieldSpec:
         if self.type == NESTED:
-            if self.model is None or self.fields is None:
-                msg = (
-                    f"Field {self.name!r}: nested fields require "
-                    f"`model` and `fields`."
-                )
-                raise ValueError(msg)
+            self._validate_nested()
 
-            if not self.fields:
-                msg = f"Field {self.name!r}: nested `fields` must be non-empty."
-                raise ValueError(msg)
+        elif self.type == ENUM:
+            self._validate_enum()
 
         else:
-            if self.model is not None or self.fields is not None:
-                msg = (
-                    f"Field {self.name!r}: `model` and `fields` are "
-                    f'only allowed when `type: "nested"`.'
-                )
-                raise ValueError(msg)
-
-            if self.many:
-                msg = (
-                    f"Field {self.name!r}: `many` is only meaningful "
-                    f'when `type: "nested"`.'
-                )
-                raise ValueError(msg)
-
-            if self.load != _DEFAULT_LOAD:
-                msg = (
-                    f"Field {self.name!r}: `load` is only meaningful "
-                    f'when `type: "nested"`.'
-                )
-                raise ValueError(msg)
+            self._validate_scalar()
 
         return self
+
+    def _validate_nested(self) -> None:
+        """Required-and-rejected fields for ``type: "nested"``."""
+        if self.model is None or self.fields is None:
+            msg = (
+                f"Field {self.name!r}: nested fields require "
+                f"`model` and `fields`."
+            )
+            raise ValueError(msg)
+
+        if not self.fields:
+            msg = f"Field {self.name!r}: nested `fields` must be non-empty."
+            raise ValueError(msg)
+
+        if self.enum is not None:
+            msg = (
+                f"Field {self.name!r}: `enum` is only allowed "
+                f'when `type: "enum"`.'
+            )
+            raise ValueError(msg)
+
+    def _validate_enum(self) -> None:
+        """Required-and-rejected fields for ``type: "enum"``."""
+        if self.enum is None:
+            msg = (
+                f'Field {self.name!r}: `type: "enum"` requires '
+                f"`enum` (dotted path to a Python Enum class)."
+            )
+            raise ValueError(msg)
+
+        if self.model is not None or self.fields is not None or self.many:
+            msg = (
+                f"Field {self.name!r}: `model` / `fields` / `many` "
+                f'are only allowed when `type: "nested"`.'
+            )
+            raise ValueError(msg)
+
+    def _validate_scalar(self) -> None:
+        """Reject nested-only / enum-only fields on scalar entries."""
+        if (
+            self.model is not None
+            or self.fields is not None
+            or self.enum is not None
+        ):
+            msg = (
+                f"Field {self.name!r}: `model` / `fields` / `enum` "
+                f"are only allowed when `type` is "
+                f'``"nested"`` or ``"enum"``.'
+            )
+            raise ValueError(msg)
+
+        if self.many:
+            msg = (
+                f"Field {self.name!r}: `many` is only meaningful "
+                f'when `type: "nested"`.'
+            )
+            raise ValueError(msg)
+
+        if self.load != _DEFAULT_LOAD:
+            msg = (
+                f"Field {self.name!r}: `load` is only meaningful "
+                f'when `type: "nested"`.'
+            )
+            raise ValueError(msg)
 
     @property
     def is_nested(self) -> bool:
         """Whether this spec describes a nested dump of a related model."""
         return self.type == NESTED
+
+    @property
+    def is_enum(self) -> bool:
+        """Whether this spec describes a Python ``Enum``-typed field."""
+        return self.type == ENUM
 
 
 class ModifierConfig(BaseModel):
@@ -704,6 +801,24 @@ class OperationConfig(BaseModel):
     rate limiting on this op specifically.  A string (e.g.
     ``"5/minute"``) sets a per-op limit using the ``limits``
     library's syntax."""
+    serializer: str | None = None
+    """Dotted path to a custom async serializer for read-op
+    responses, e.g. ``"myapp.serializers.dump_view_hydrated"``.
+
+    Signature: ``async (obj, session, db) -> Any``.  When set, the
+    generated ``get`` / ``list`` route calls this function instead
+    of the auto-generated ``to_<model>_resource`` /
+    ``to_<model>_list_item`` serializer.  ``response_model`` is
+    omitted on the route, so the function may return any
+    JSON-serializable shape (typically ``dict[str, Any]``).
+
+    Useful for custom dump shapes — saved-view payload hydration
+    via :func:`ingot.saved_views.hydrate_view`, joined-row
+    flattening, computed fields that need DB access, etc.
+    Auto-generated schemas (``{Model}Resource`` /
+    ``{Model}ListItem``) are still emitted so request schemas and
+    other ops on the resource keep working.
+    """
     can: str | None = None
     """Dotted path to an async ``(resource, session) -> bool`` guard.
 
@@ -790,6 +905,86 @@ matching op's ``build()`` and Jinja template must wire the hook
 calls (see ``be.operations.create`` / ``be.operations.update``)."""
 
 
+class SearchConfig(BaseModel):
+    """Resource-level search configuration.
+
+    Drives the project-wide ``POST /_values`` endpoint when called
+    with ``fields=[]`` for this resource: each name in
+    :attr:`fields` becomes a column in a pg_trgm union, ranked by
+    similarity to ``q``.  Empty ``fields`` defaults to the
+    resource's :attr:`LinkConfig.name` column.
+    """
+
+    fields: list[str] = Field(default_factory=list)
+    """Model attribute names to trigram-match against ``q``.
+    Defaults to ``[link.name]`` when empty."""
+
+
+LinkKind = Literal["name", "id", "id_name"]
+"""Built-in link-schema kinds.  Each generates a per-resource
+``{Model}Link`` Pydantic class in the resource's schemas file:
+
+* ``"name"`` → ``{Model}Link`` with ``type`` + ``name``.
+* ``"id"`` → ``{Model}Link`` with ``type`` + ``id``.
+* ``"id_name"`` → ``{Model}Link`` with ``type`` + ``id`` + ``name``.
+
+``type`` is always a ``Literal[<slug>]`` so the FE-side OpenAPI
+client narrows on resource type without a manual cast."""
+
+
+class LinkConfig(BaseModel):
+    """How a resource serializes when referenced as a link.
+
+    Either declare model-attribute shorthands (``name`` / ``id``)
+    so the codegen generates a builder that pulls those attributes
+    directly off the model, or provide a ``builder:`` dotted path
+    for arbitrary logic.  Mutually exclusive — if ``builder`` is
+    set, shorthand fields must be omitted.
+    """
+
+    kind: LinkKind
+    """Which built-in link schema this resource produces.  See
+    :data:`LinkKind`."""
+
+    name: str | None = None
+    """Model attribute holding the display name, used by shorthand
+    when ``kind`` is ``"name"`` or ``"id_name"``.  Required for
+    those kinds unless ``builder`` is set."""
+
+    id: str | None = None
+    """Model attribute holding the link id, used by shorthand when
+    ``kind`` is ``"id"`` or ``"id_name"``.  Defaults to the
+    resource's primary key (``ResourceConfig.pk``); set explicitly
+    to override."""
+
+    builder: str | None = None
+    """Dotted import path to an async callable
+    ``(instance, session) -> LinkSchema`` that returns the link
+    schema instance.  Overrides shorthand."""
+
+    @model_validator(mode="after")
+    def _validate_shorthand(self) -> LinkConfig:
+        if self.builder is not None:
+            if self.name is not None or self.id is not None:
+                msg = (
+                    "LinkConfig: provide either `builder` or "
+                    "shorthand fields (`name` / `id`), not both."
+                )
+                raise ValueError(msg)
+
+            return self
+
+        if self.kind in {"name", "id_name"} and self.name is None:
+            msg = (
+                f"LinkConfig: kind={self.kind!r} requires either "
+                f"`name` (model attribute holding the display name) "
+                f"or `builder`."
+            )
+            raise ValueError(msg)
+
+        return self
+
+
 class ResourceConfig(BaseModel):
     """A resource: a consumer-defined Python model plus its operations.
 
@@ -864,6 +1059,28 @@ class ResourceConfig(BaseModel):
     full resource fetch.  Independent of
     :attr:`include_actions_in_dump`."""
 
+    searchable: bool = False
+    """When ``True``, generate ``POST /{prefix}/_values`` — a
+    resource-level search endpoint returning items shaped by the
+    resource's :attr:`link` schema.  Powers ``ref`` filter inputs
+    on other resources and any FE "search this table" affordance.
+    Requires :attr:`link` to be set."""
+
+    search: SearchConfig | None = None
+    """Search-field configuration for the resource-level
+    ``_values`` endpoint.  When unset, the endpoint ILIKE's the
+    resource's :attr:`LinkConfig.name` column (or skips
+    ``q``-filtering entirely for builder-only / id-only links).
+    Set to override with an explicit list of model attributes —
+    e.g. when the consumer wants free-text search across both
+    ``sku`` and ``name``.  Only meaningful when :attr:`searchable`
+    is on."""
+
+    link: LinkConfig | None = None
+    """How this resource serializes as a link.  Required when
+    :attr:`searchable` is on, and when any other resource's
+    filter has ``values: "ref"`` pointing here."""
+
     generate_tests: bool = False
     """When ``True``, emit a pytest test file for this resource's
     generated routes and serializers."""
@@ -900,6 +1117,18 @@ class ResourceConfig(BaseModel):
                     raise ValueError(msg)
 
         return self
+
+
+def _resource_class_lower(resource: ResourceConfig) -> str:
+    """Lower-cased class name of *resource*'s model.
+
+    Matches :func:`be.operations.routing._resource_module_slug`
+    so ``ref_resource`` strings resolve to the same identifier the
+    URL prefix uses.
+    """
+    _, model = Name.from_dotted(resource.model)
+
+    return model.lower
 
 
 class AppConfig(BaseModel):
@@ -953,6 +1182,15 @@ class ProjectConfig(FoundryConfig):
     generated app emits zero rate-limit references; set to a
     :class:`RateLimitConfig` to opt in.  Per-resource and per-op
     ``rate_limit`` overrides are only allowed when this is set."""
+    resource_registry: ResourceRegistryConfig = Field(
+        default_factory=ResourceRegistryConfig
+    )
+    """Project-wide resource-registry configuration.  Per-resource
+    filter modifiers (under each list op) and ``searchable`` opt-ins
+    feed into the project-wide registry routes (``_filters`` /
+    ``_values`` today, more later); this block carries the
+    endpoint-level cross-cutting knobs (auth today; rate-limit /
+    telemetry as needed).  Defaults to a permissive config."""
     comms: CommsConfig | None = None
     """Communication-platform configuration.  ``None`` (the default)
     means the generator emits no ``comms.py``; set to a
@@ -1086,6 +1324,25 @@ class ProjectConfig(FoundryConfig):
 
         return self
 
+    @model_validator(mode="after")
+    def _link_required_for_searchable_and_ref_targets(
+        self,
+    ) -> ProjectConfig:
+        """Reject opt-ins that need a link without one.
+
+        ``searchable=True`` serializes results via the resource's
+        :class:`LinkConfig`; any other resource's filter using
+        ``values: "ref"`` to point here does the same on the
+        target side.  Each requires :attr:`ResourceConfig.link`.
+        """
+        ref_targets = _collect_ref_targets(self)
+
+        for app in self.apps:
+            for resource in app.config.resources:
+                _check_resource_link(resource, ref_targets)
+
+        return self
+
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
         """Return the :class:`DatabaseConfig` selected by *db_key*.
 
@@ -1121,6 +1378,90 @@ class ProjectConfig(FoundryConfig):
         return matched
 
 
+def _collect_ref_targets(project: ProjectConfig) -> set[str]:
+    """Return the ``ref_resource`` slugs referenced in *project*.
+
+    Walks every filter modifier across every resource and pulls
+    the target slug out of each ``values: "ref"`` entry.
+    """
+    targets: set[str] = set()
+
+    for app in project.apps:
+        for resource in app.config.resources:
+            for op in resource.operations:
+                for modifier in op.modifiers:
+                    if modifier.type != "filter":
+                        continue
+
+                    for entry in modifier.options.get("fields", []) or []:
+                        target = _ref_target_from_entry(entry)
+
+                        if target is not None:
+                            targets.add(target)
+
+    return targets
+
+
+def _ref_target_from_entry(entry: object) -> str | None:
+    """Pull the ``ref_resource`` value off a filter-fields entry."""
+    if not isinstance(entry, dict):
+        return None
+
+    if entry.get("values") != "ref":
+        return None
+
+    target = entry.get("ref_resource")
+
+    return target if isinstance(target, str) and target else None
+
+
+def _has_self_filter(resource: ResourceConfig) -> bool:
+    """Whether any filter on *resource* uses ``values: "self"``."""
+    for op in resource.operations:
+        for modifier in op.modifiers:
+            if modifier.type != "filter":
+                continue
+
+            for entry in modifier.options.get("fields", []) or []:
+                if isinstance(entry, dict) and entry.get("values") == "self":
+                    return True
+
+    return False
+
+
+def _check_resource_link(
+    resource: ResourceConfig, ref_targets: set[str]
+) -> None:
+    """Raise if *resource* needs a link config but doesn't have one."""
+    slug = _resource_class_lower(resource)
+    referenced = slug in ref_targets
+    has_self = _has_self_filter(resource)
+    needs_link = resource.searchable or referenced or has_self
+
+    if not needs_link or resource.link is not None:
+        return
+
+    reasons: list[str] = []
+
+    if resource.searchable:
+        reasons.append("searchable=True")
+
+    if referenced:
+        reasons.append(
+            f"another resource's filter targets it via ref_resource={slug!r}"
+        )
+
+    if has_self:
+        reasons.append('its own filters include `values: "self"`')
+
+    msg = (
+        f"Resource {resource.model!r} requires `link` because "
+        f"{', '.join(reasons)}; set `link: {{ kind: ..., name: ... }}` "
+        f"or provide a `link.builder` dotted path."
+    )
+    raise ValueError(msg)
+
+
 # -------------------------------------------------------------------
 # List-extension option shapes.  These are read by the Filter / Order
 # / Paginate ops, which run at operation scope with ``type: "filter"``
@@ -1129,15 +1470,152 @@ class ProjectConfig(FoundryConfig):
 # -------------------------------------------------------------------
 
 
+FilterValueKind = Literal["enum", "bool", "ref", "self", "free_text", "literal"]
+"""Discriminator for how a filter field's values are sourced and rendered.
+
+* ``"enum"`` — points at a Python :class:`enum.Enum` class via
+  ``enum:``; choices are inlined in the discovery payload and also
+  served queryably from the per-field ``_values`` endpoint.
+* ``"bool"`` — first-class; FE renders toggle/checkbox.  No
+  ``_values`` endpoint.
+* ``"ref"`` — FK to *another* resource.  Delegates to the target
+  resource's resource-level ``_values`` endpoint for autocomplete.
+* ``"self"`` — the resource's own primary key.  Discovery emits
+  ``{"kind": "self", "type": <slug>, "endpoint"?: <_values URL>}``
+  so the FE renders an autocomplete tied to this resource (when
+  it's :attr:`~ResourceConfig.searchable`) or a plain typed input
+  otherwise.  Useful for ``id`` filters and bulk-row operations
+  via ``op: "in"``.
+* ``"free_text"`` — string column, served from the field's
+  ``_values`` endpoint via ILIKE.
+* ``"literal"`` — numeric / date / datetime.  FE renders a native
+  input.  No ``_values`` endpoint.
+"""
+
+
+FilterOperator = Literal[
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "starts_with",
+    "in",
+    "is_null",
+]
+"""Operators supported by :func:`ingot.filters.apply_filters` and
+the generated ``FilterCondition`` schemas.  Kept in sync with
+:data:`ingot.filters.FilterOp`."""
+
+
+_DEFAULT_OPERATORS: dict[FilterValueKind, list[FilterOperator]] = {
+    "enum": ["eq", "in"],
+    "bool": ["eq"],
+    "ref": ["eq", "in"],
+    "self": ["eq", "in"],
+    "free_text": ["eq", "contains", "starts_with"],
+    "literal": ["eq", "gt", "gte", "lt", "lte"],
+}
+"""Default operator vocabulary per :data:`FilterValueKind`,
+applied when a :class:`StructuredFilterField` omits ``operators``."""
+
+
+class StructuredFilterField(BaseModel):
+    """Structured spec for one filterable field.
+
+    Used inside :attr:`FilterConfig.fields` to describe operators,
+    value source, and any source-specific metadata for the field.
+    """
+
+    name: str
+    """Column / attribute name on the model."""
+
+    values: FilterValueKind
+    """How values are sourced and rendered.  Drives validation of
+    the other fields below."""
+
+    operators: list[FilterOperator] = Field(default_factory=list)
+    """Operators allowed on this field.  When empty, defaults are
+    derived from a per-kind table keyed by ``values`` (e.g.
+    ``["eq", "in"]`` for enum/ref, ``["eq"]`` for bool, etc.)."""
+
+    enum: str | None = None
+    """Dotted import path to a Python :class:`enum.Enum` class.
+    Required iff ``values == "enum"``; rejected otherwise."""
+
+    type: FieldType | None = None
+    """Scalar type for ``values == "literal"`` (e.g. ``"datetime"``,
+    ``"int"``, ``"float"``).  Required iff ``values == "literal"``;
+    rejected otherwise."""
+
+    ref_resource: str | None = None
+    """Resource model name this field FK-references.  Required iff
+    ``values == "ref"``; rejected otherwise."""
+
+    @model_validator(mode="after")
+    def _apply_defaults_and_validate(self) -> StructuredFilterField:
+        if not self.operators:
+            self.operators = list(_DEFAULT_OPERATORS[self.values])
+
+        if self.values == "enum":
+            self._require("enum", present=self.enum is not None)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
+        elif self.values == "literal":
+            self._require("type", present=self.type is not None)
+            self._reject("enum", self.enum)
+            self._reject("ref_resource", self.ref_resource)
+
+        elif self.values == "ref":
+            self._require("ref_resource", present=self.ref_resource is not None)
+            self._reject("type", self.type)
+            self._reject("enum", self.enum)
+
+        elif self.values == "self":
+            # Target is the resource being filtered; nothing extra
+            # to declare.  Discovery payload fills in the slug and
+            # ``_values`` endpoint at codegen time.
+            self._reject("enum", self.enum)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
+        else:
+            self._reject("enum", self.enum)
+            self._reject("type", self.type)
+            self._reject("ref_resource", self.ref_resource)
+
+        return self
+
+    def _require(self, attr: str, *, present: bool) -> None:
+        if not present:
+            msg = (
+                f"Filter field {self.name!r}: `values: "
+                f"{self.values!r}` requires `{attr}`."
+            )
+            raise ValueError(msg)
+
+    def _reject(self, attr: str, value: object) -> None:
+        if value is not None:
+            msg = (
+                f"Filter field {self.name!r}: `{attr}` is not "
+                f"allowed when `values: {self.values!r}`."
+            )
+            raise ValueError(msg)
+
+
 class FilterConfig(BaseModel):
     """Configuration for list filtering.
 
-    When ``fields`` is empty or omitted, all of the list op's
-    ``fields`` become filterable; otherwise only the named fields
-    are filterable.
+    Each entry in ``fields`` is a :class:`StructuredFilterField`
+    declaring a field's operators, value source, and any
+    source-specific metadata.  Required — there is no implicit
+    "all fields filterable" default.
     """
 
-    fields: list[str] | None = None
+    fields: list[StructuredFilterField] = Field(..., min_length=1)
 
 
 class OrderConfig(BaseModel):

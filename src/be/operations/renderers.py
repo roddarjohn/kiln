@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, cast
 
 from be.config.schema import PYTHON_TYPES
 from be.operations._naming import (
-    app_module_for,
     collection_specs_const,
     object_specs_const,
 )
@@ -105,7 +104,7 @@ def _resource_info(ctx: RenderCtx) -> _ResourceInfo:
 
     model_dotted: str = getattr(resource, "model", "")
     model_module, model = Name.from_dotted(model_dotted)
-    app = app_module_for(model_dotted)
+    app = Name.parent_path(model_dotted, levels=2)
 
     db = config.resolve_database(getattr(resource, "db_key", None))
     route_prefix = getattr(resource, "route_prefix", None)
@@ -286,7 +285,7 @@ def _handler_fragment(
         imports.add_from(response_mod, response_schema)
 
     if handler.serializer_fn:
-        serializer_mod = prefix_import(
+        serializer_mod = handler.serializer_fn_module or prefix_import(
             info.package_prefix, info.app, "serializers", info.model.lower
         )
         imports.add_from(serializer_mod, handler.serializer_fn)
@@ -611,7 +610,8 @@ def _wire_action_dump(
         )
         raise ValueError(msg)
 
-    session_module, session_name = info.session_schema.rsplit(".", 1)
+    session_module, session_name_obj = Name.from_dotted(info.session_schema)
+    session_name = session_name_obj.raw
     actions_module = prefix_import(info.package_prefix, info.app, "actions")
     object_const = object_specs_const(info.model)
     collection_const = collection_specs_const(info.model)
@@ -646,7 +646,9 @@ def gate_wiring(
 
     _, model = Name.from_dotted(resource.model)
     actions_module = prefix_import(
-        package_prefix, app_module_for(resource.model), "actions"
+        package_prefix,
+        Name.parent_path(resource.model, levels=2),
+        "actions",
     )
     const = (
         object_specs_const(model)
@@ -685,15 +687,17 @@ def hooks_wiring(
         if dotted is None:
             continue
 
-        module, _, attr = dotted.rpartition(".")
+        try:
+            module, attr_name = Name.from_dotted(dotted)
 
-        if not module or not attr:
+        except ValueError as exc:
             msg = (
                 f"Operation {op.name!r}: {slot.removesuffix('_call')!r} "
                 f"must be a dotted path (got {dotted!r})"
             )
-            raise ValueError(msg)
+            raise ValueError(msg) from exc
 
+        attr = attr_name.raw
         ctx[slot] = attr
         imports.append((module, attr))
 

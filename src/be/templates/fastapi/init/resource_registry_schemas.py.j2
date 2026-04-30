@@ -1,0 +1,123 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Each resource's per-field filter classes and resource container
+live in their own ``{app}/resources/{slug}.py``; this module
+imports them and assembles the project-wide discriminated unions
+plus the request/response shapes the router endpoints reference.
+
+The split keeps any single file small even as the resource count
+grows, and lets consumers import a per-resource module directly
+when they only care about one resource's schema.
+{% endset %}
+{{ file_header("Project-wide resource discovery schemas", extra=_extra) }}
+
+
+from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+{% for line in resource_imports %}
+{{ line }}
+{% endfor %}
+
+
+# -------------------------------------------------------------------
+# Resource slug literal — the set of resource keys the registry
+# knows about.  Used as the discriminator on
+# :data:`RegisteredResource` and as the element type of
+# :class:`ProjectFilterDiscoveryRequest.resources`.
+# -------------------------------------------------------------------
+
+
+ResourceSlug = Literal[
+{%- for entry in entries %} {{ entry.slug | tojson }}{% if not loop.last %},{% endif %}{% endfor %}
+]
+
+
+# -------------------------------------------------------------------
+# Top-level discriminated unions + project-wide payloads.
+# -------------------------------------------------------------------
+
+
+{% if entries | length > 1 %}
+RegisteredResource = Annotated[
+    {{ registered_resource_src }},
+    Field(discriminator="resource"),
+]
+"""Discriminated union of every registered resource's discovery."""
+
+RegisteredFieldRef = Annotated[
+    {{ registered_field_ref_src }},
+    Field(discriminator="resource"),
+]
+"""Discriminated union of every resource's typed field reference."""
+{% else %}
+RegisteredResource = {{ registered_resource_src }}
+"""The sole registered resource."""
+
+RegisteredFieldRef = {{ registered_field_ref_src }}
+{% endif %}
+
+
+class Discovery(BaseModel):
+    """Project-wide discovery response."""
+
+    resources: list[RegisteredResource]
+
+
+class FieldsDiscovery(BaseModel):
+    """Multi-field discovery response."""
+
+    fields: list[{{ fields_discovery_inner_src }}]
+
+
+# -------------------------------------------------------------------
+# Request bodies — narrowed to known slugs / fields so the FE
+# OpenAPI client can constrain inputs at compile time.
+# -------------------------------------------------------------------
+
+
+class ProjectFilterDiscoveryRequest(BaseModel):
+    """Project-narrowed counterpart of :class:`FilterDiscoveryRequest`.
+
+    ``resources`` is constrained to the registered slugs at codegen
+    time, so callers can't ask for a resource that doesn't exist.
+    Same semantics as the ingot base: ``None`` returns every
+    registered resource.
+    """
+
+    resources: list[ResourceSlug] | None = None
+
+
+class ProjectFieldDiscoveryRequest(BaseModel):
+    """Project-narrowed counterpart of :class:`FieldDiscoveryRequest`.
+
+    ``fields`` carries one of the per-resource ``*FieldRef`` typed
+    references; the union is discriminated on ``resource`` so a
+    valid combination of ``(resource, field)`` is enforced at the
+    schema layer.
+    """
+
+    fields: list[RegisteredFieldRef] = Field(default_factory=list)
+
+
+# -------------------------------------------------------------------
+# Values request — one discriminated body covering both
+# resource-level search (``field is None``) and per-field value
+# providers (``field`` set).  Replaces the two-route shape.
+# -------------------------------------------------------------------
+
+
+{% if entries | length > 1 %}
+RegisteredValuesRequest = Annotated[
+    {{ registered_values_request_src }},
+    Field(discriminator="resource"),
+]
+"""Discriminated union over per-resource values-request shapes.
+Field is constrained to that resource's filter fields (or
+``None`` for the resource-level search)."""
+{% else %}
+RegisteredValuesRequest = {{ registered_values_request_src }}
+{% endif %}

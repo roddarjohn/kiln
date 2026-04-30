@@ -1,0 +1,39 @@
+{% from "_macros.j2" import file_header %}
+{% set _extra %}
+Mount the routes via :mod:`.router`::
+
+    from .resources.router import router as resource_router
+    app.include_router(resource_router)
+
+The registry holds one :class:`ResourceEntry` per resource that
+contributed a filter modifier or set ``searchable=True``; routes
+delegate every request to it.
+{% endset %}
+{{ file_header("Project-wide resource registry", extra=_extra) }}
+
+
+from __future__ import annotations
+
+{% for line in imports %}
+{{ line }}
+{% endfor %}
+
+
+resource_registry = ResourceRegistry({
+{% for entry in entries %}
+    "{{ entry.slug }}": ResourceEntry(
+        model={{ entry.model_name }},
+        pk="{{ entry.pk }}",
+{% if entry.fields %}
+        fields=(
+{% for field_src in entry.fields %}
+            {{ field_src }},
+{% endfor %}
+        ),
+{% endif %}
+{% if entry.search_columns %}
+        search_columns=({{ entry.search_columns }}),
+{% endif %}
+    ),
+{% endfor %}
+})

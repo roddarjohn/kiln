@@ -11,22 +11,39 @@ overwrites this file verbatim; treat any post-bootstrap edits
 as "re-apply on next re-bootstrap".
 ================================================================
 
-Mixes in :class:`ingot.comms.NotificationPreferenceMixin` to
-inherit the four storage columns
-:class:`{{ module }}.comms.DbPreferenceResolver` queries on
-every send: ``subject_key`` (recipient identifier, typically
+Stores the four columns
+:class:`{{ module }}.comms.DbPreferenceResolver` queries on every
+send: ``subject_key`` (recipient identifier, typically
 ``str(user.id)``), ``comm_type`` (registry key from
 ``comms.py``), ``method`` (``"email"``, ``"sms"``, ...), and
 ``enabled``.
+{% if pgcraft %}
+
+Columns are declared inline rather than via
+:class:`ingot.comms.NotificationPreferenceMixin` because the
+mixin's own ``id`` column would collide with pgcraft's
+:class:`pgcraft.plugins.pk.UUIDV4PKPlugin` -- both want to own
+the primary-key column.  ``DbPreferenceResolver`` queries by
+column name, not class identity, so as long as the names line up
+the storage shape stays compatible with ``ingot.comms``.
+{% else %}
 
 The mixin's own ``id`` is the primary key, so no PK plugin is
 needed.  Migrate the table via your usual alembic flow.
+{% endif %}
 """
 
 from __future__ import annotations
+{% if pgcraft %}
+
+from pgcraft.plugins.pk import UUIDV4PKPlugin
+from sqlalchemy import Boolean, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+{% else %}
 
 from ingot.comms import NotificationPreferenceMixin
 from sqlalchemy import UniqueConstraint
+{% endif %}
 
 # Adjust this import to match your project's declarative ``Base``
 # location.  ``db.base`` matches the path the be_root ``pgcraft``
@@ -36,6 +53,54 @@ from sqlalchemy import UniqueConstraint
 from db.base import Base
 
 
+{% if pgcraft %}
+class NotificationPreference(Base):
+    """One row per (subject_key, comm_type, method) opt-in/out."""
+
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        # The natural-key triple identifies the row.
+        # ``DbPreferenceResolver`` selects on this combination, so
+        # a unique index here makes each lookup an index seek and
+        # rules out duplicate rows for the same recipient+channel.
+        UniqueConstraint(
+            "subject_key",
+            "comm_type",
+            "method",
+            name="uq_notification_preferences_natural_key",
+        ),
+        # pgcraft requires an explicit schema declaration on
+        # every model that runs through its plugin pipeline.
+        {"schema": "public"},
+    )
+
+    # UUIDv4 PK provided by pgcraft's plugin (mirrors the
+    # ``RateLimitBucket`` convention) instead of the mixin so
+    # there's only one ``id`` column in the raw table.
+    __plugins__ = [UUIDV4PKPlugin()]
+
+    subject_key: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+    """Identifier of the recipient whose preferences this row
+    captures (typically a user id formatted as a string)."""
+
+    comm_type: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    """Registry key (:attr:`ingot.comms.CommType.name`)."""
+
+    method: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    """Delivery method this opt-in covers (``"email"``,
+    ``"sms"``, ...)."""
+
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    """``True`` to receive, ``False`` to suppress."""
+{% else %}
 class NotificationPreference(Base, NotificationPreferenceMixin):
     """One row per (subject_key, comm_type, method) opt-in/out."""
 
@@ -52,3 +117,4 @@ class NotificationPreference(Base, NotificationPreferenceMixin):
             name="uq_notification_preferences_natural_key",
         ),
     )
+{% endif %}

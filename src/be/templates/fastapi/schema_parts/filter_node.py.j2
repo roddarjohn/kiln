@@ -12,6 +12,7 @@ class {{ model_name }}FilterCondition(BaseModel):
         "contains",
         "starts_with",
         "in",
+        "is_null",
     ] = "eq"
     value: Any = None
 

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 from be.operations._introspect import introspect_action_fn
 from be.operations._naming import collection_specs_const, object_specs_const
+from foundry.imports import ImportCollector
 from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
@@ -83,7 +84,7 @@ class Actions:
         module = app.config.module
 
         resources_ctx: list[dict[str, object]] = []
-        guard_imports: dict[str, set[str]] = {}
+        guard_imports = ImportCollector()
 
         for _, resource_obj in ctx.store.children(
             ctx.instance_id, child_scope="resource"
@@ -101,18 +102,12 @@ class Actions:
         if not resources_ctx:
             return
 
-        # Sort imports for deterministic output.  Each entry is a
-        # ``(module, [name, ...])`` tuple with names alphabetized.
-        sorted_imports = [
-            (mod, sorted(names)) for mod, names in sorted(guard_imports.items())
-        ]
-
         yield StaticFile(
             path=f"{module}/actions.py",
             template="fastapi/actions.py.j2",
             context={
                 "module": module,
-                "guard_imports": sorted_imports,
+                "guard_imports": guard_imports.sorted_from_imports,
                 "resources": resources_ctx,
             },
         )
@@ -135,7 +130,7 @@ def _resource_participates(resource: ResourceConfig) -> bool:
 
 def _build_resource_entry(
     resource: ResourceConfig,
-    guard_imports: dict[str, set[str]],
+    guard_imports: ImportCollector,
 ) -> dict[str, object] | None:
     """Build the template context for one resource's registries.
 
@@ -211,7 +206,7 @@ def _classify(
 
 def _resolve_can_ref(
     op: OperationConfig,
-    guard_imports: dict[str, set[str]],
+    guard_imports: ImportCollector,
 ) -> str:
     """Return the Python expression naming this op's guard.
 
@@ -225,13 +220,15 @@ def _resolve_can_ref(
     if op.can is None:
         return "always_true"
 
-    module_path, _, attr = op.can.rpartition(".")
+    try:
+        module_path, attr_name = Name.from_dotted(op.can)
 
-    if not module_path or not attr:
+    except ValueError as exc:
         msg = (
             f"Operation {op.name!r}: can must be a dotted path (got {op.can!r})"
         )
-        raise ValueError(msg)
+        raise ValueError(msg) from exc
 
-    guard_imports.setdefault(module_path, set()).add(attr)
+    attr = attr_name.raw
+    guard_imports.add_from(module_path, attr)
     return attr

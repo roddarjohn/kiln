@@ -23,6 +23,9 @@ from fastapi import APIRouter
 {% if has_auth %}
 from {{ auth_module }}.router import router as auth_router
 {% endif %}
+{% if has_resource_registry %}
+from {{ resource_registry_module }}.router import router as resource_router
+{% endif %}
 {% for app in apps %}
 from {{ app.module }}.routes import router as {{ app.alias }}_router
 {% endfor %}
@@ -30,6 +33,9 @@ from {{ app.module }}.routes import router as {{ app.alias }}_router
 router = APIRouter()
 {% if has_auth %}
 router.include_router(auth_router)
+{% endif %}
+{% if has_resource_registry %}
+router.include_router(resource_router)
 {% endif %}
 {% for app in apps %}
 router.include_router({{ app.alias }}_router, prefix="{{ app.prefix }}")

@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from be.config.schema import FieldSpec  # noqa: TC001
 from be.operations._naming import (
-    app_module_for,
     collection_specs_const,
 )
 from be.operations.types import (
@@ -103,6 +102,7 @@ class List:
         model_module, model = Name.from_dotted(resource.model)
         pk_name = getattr(resource, "pk", "id")
         include_actions = resource.include_actions_in_dump
+        custom_serializer = ctx.instance.serializer
 
         dump = _construct_dump(
             model,
@@ -127,7 +127,28 @@ class List:
             },
         )
 
-        response_model = f"list[{list_item.name}]"
+        if custom_serializer is not None:
+            try:
+                ser_module, ser_name_obj = Name.from_dotted(custom_serializer)
+
+            except ValueError as exc:
+                msg = (
+                    f"Operation {ctx.instance.name!r}: serializer "
+                    f"must be a dotted path (got "
+                    f"{custom_serializer!r})"
+                )
+                raise ValueError(msg) from exc
+
+            serializer_fn = ser_name_obj.raw
+            serializer_fn_module: str | None = ser_module
+            response_model: str | None = None
+            return_type = "list[dict[str, Any]]"
+
+        else:
+            serializer_fn = serializer.function_name
+            serializer_fn_module = None
+            response_model = f"list[{list_item.name}]"
+            return_type = response_model
 
         body_context: dict[str, object] = {
             "has_filter": False,
@@ -139,6 +160,7 @@ class List:
             "cursor_field": pk_name,
             "load_options": dump.load_options,
             "serializer_async": include_actions,
+            "custom_serializer": custom_serializer is not None,
             "include_actions": include_actions,
         }
 
@@ -147,10 +169,13 @@ class List:
             *dump.load_imports,
         ]
 
+        if custom_serializer is not None:
+            extra_imports.append(("typing", "Any"))
+
         if include_actions:
             actions_module = prefix_import(
                 ctx.package_prefix,
-                app_module_for(resource.model),
+                Name.parent_path(resource.model, levels=2),
                 "actions",
             )
             collection_const = collection_specs_const(model)
@@ -172,8 +197,9 @@ class List:
                 RouteParam(name="body", annotation=search_request_name),
             ],
             response_model=response_model,
-            return_type=response_model,
-            serializer_fn=serializer.function_name,
+            return_type=return_type,
+            serializer_fn=serializer_fn,
+            serializer_fn_module=serializer_fn_module,
             request_schema=search_request_name,
             doc=f"List {model.pascal} records.",
             body_template="fastapi/ops/search.py.j2",
@@ -195,8 +221,11 @@ class List:
         # so they render before the parent class that references them.
         yield from dump.nested_schemas
         yield list_item
-        yield from dump.nested_serializers
-        yield serializer
+
+        if custom_serializer is None:
+            yield from dump.nested_serializers
+            yield serializer
+
         yield search_request
         yield handler
         yield test_case

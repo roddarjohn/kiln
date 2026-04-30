@@ -10,9 +10,12 @@ from be.config.schema import (
     AuthConfig,
     DatabaseConfig,
     FieldSpec,
+    FilterConfig,
+    LinkConfig,
     OperationConfig,
     ProjectConfig,
     ResourceConfig,
+    StructuredFilterField,
 )
 from foundry.config import load_config
 from foundry.errors import ConfigError
@@ -560,6 +563,160 @@ def test_field_spec_load_on_scalar_rejected():
         FieldSpec(name="title", type="str", load="joined")
 
 
+def test_field_spec_nested_with_enum_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="`enum` is only allowed when"):
+        FieldSpec(
+            name="project",
+            type="nested",
+            model="blog.models.Project",
+            fields=[FieldSpec(name="id", type="uuid")],
+            enum="blog.models.Status",
+        )
+
+
+def test_field_spec_enum_requires_enum_class() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires"):
+        FieldSpec(name="status", type="enum")
+
+
+def test_field_spec_enum_with_nested_fields_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(
+        ValidationError, match='only allowed when `type: "nested"`'
+    ):
+        FieldSpec(
+            name="status",
+            type="enum",
+            enum="blog.models.Status",
+            many=True,
+        )
+
+
+def test_link_config_builder_with_shorthand_rejected() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="provide either `builder` or"):
+        LinkConfig(
+            kind="id_name",
+            name="title",
+            builder="app.links.build_project_link",
+        )
+
+
+def test_link_config_kind_name_requires_name_attr() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires either"):
+        LinkConfig(kind="name")
+
+
+def test_link_config_kind_id_name_requires_name_attr() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="requires either"):
+        LinkConfig(kind="id_name")
+
+
+def test_link_config_builder_only_is_valid() -> None:
+    cfg = LinkConfig(kind="id_name", builder="app.links.build_link")
+    assert cfg.builder == "app.links.build_link"
+    assert cfg.name is None
+    assert cfg.id is None
+
+
+def test_searchable_resource_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(model="app.models.Item", searchable=True)
+
+    with pytest.raises(
+        ValidationError, match=r"requires `link`.*searchable=True"
+    ):
+        ProjectConfig(
+            **_project_with(
+                resource,
+                auth=AuthConfig(
+                    credentials_schema="app.auth.LoginCredentials",
+                    session_schema="app.auth.Session",
+                    validate_fn="app.auth.validate",
+                ),
+            ),
+        )
+
+
+def test_resource_referenced_by_ref_filter_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    target = ResourceConfig(model="app.models.Customer")
+    referrer = ResourceConfig(
+        model="app.models.Order",
+        operations=[
+            OperationConfig(
+                name="list",
+                modifiers=[
+                    {
+                        "type": "filter",
+                        "fields": [
+                            {
+                                "name": "customer_id",
+                                "values": "ref",
+                                "ref_resource": "customer",
+                            },
+                        ],
+                    },
+                ],
+            ),
+        ],
+    )
+
+    with pytest.raises(ValidationError, match=r"requires `link`.*ref_resource"):
+        ProjectConfig(
+            databases=[DatabaseConfig(key="primary", default=True)],
+            apps=[
+                {
+                    "config": {
+                        "module": "app",
+                        "resources": [
+                            target.model_dump(),
+                            referrer.model_dump(),
+                        ],
+                    },
+                    "prefix": "",
+                },
+            ],
+        )
+
+
+def test_self_filter_without_link_rejected() -> None:
+    from pydantic import ValidationError
+
+    resource = ResourceConfig(
+        model="app.models.Item",
+        operations=[
+            OperationConfig(
+                name="list",
+                modifiers=[
+                    {
+                        "type": "filter",
+                        "fields": [{"name": "id", "values": "self"}],
+                    },
+                ],
+            ),
+        ],
+    )
+
+    with pytest.raises(ValidationError, match=r'requires `link`.*"self"'):
+        ProjectConfig(**_project_with(resource))
+
+
 # ---------------------------------------------------------------------------
 # Loader tests
 # ---------------------------------------------------------------------------
@@ -739,3 +896,142 @@ def test_load_jsonnet_stdlib_resource_action_require_auth(tmp_path: Path):
     assert not isinstance(archive, str)
     assert publish.require_auth is False
     assert archive.require_auth is None
+
+
+# ---------------------------------------------------------------------------
+# StructuredFilterField + FilterConfig
+# ---------------------------------------------------------------------------
+
+
+def test_structured_filter_enum_defaults():
+    field = StructuredFilterField(
+        name="status", values="enum", enum="myapp.OrderStatus"
+    )
+    assert field.operators == ["eq", "in"]
+    assert field.enum == "myapp.OrderStatus"
+
+
+def test_structured_filter_bool_defaults():
+    field = StructuredFilterField(name="archived", values="bool")
+    assert field.operators == ["eq"]
+
+
+def test_structured_filter_ref_defaults():
+    field = StructuredFilterField(
+        name="customer_id", values="ref", ref_resource="customer"
+    )
+    assert field.operators == ["eq", "in"]
+
+
+def test_structured_filter_free_text_defaults():
+    field = StructuredFilterField(name="sku", values="free_text")
+    assert field.operators == ["eq", "contains", "starts_with"]
+
+
+def test_structured_filter_literal_defaults():
+    field = StructuredFilterField(
+        name="created_at", values="literal", type="datetime"
+    )
+    assert field.operators == ["eq", "gt", "gte", "lt", "lte"]
+
+
+def test_structured_filter_explicit_operators_kept():
+    field = StructuredFilterField(
+        name="status",
+        values="enum",
+        enum="myapp.OrderStatus",
+        operators=["eq"],
+    )
+    assert field.operators == ["eq"]
+
+
+def test_structured_filter_unknown_operator_rejected():
+    # Pydantic's Literal validation rejects unknown operators
+    # before any custom validator runs.
+    with pytest.raises(ValueError, match="literal_error"):
+        StructuredFilterField(
+            name="status",
+            values="enum",
+            enum="myapp.OrderStatus",
+            operators=["nonsense"],
+        )
+
+
+def test_structured_filter_enum_requires_enum_path():
+    with pytest.raises(ValueError, match="requires `enum`"):
+        StructuredFilterField(name="status", values="enum")
+
+
+def test_structured_filter_literal_requires_type():
+    with pytest.raises(ValueError, match="requires `type`"):
+        StructuredFilterField(name="created_at", values="literal")
+
+
+def test_structured_filter_ref_requires_ref_resource():
+    with pytest.raises(ValueError, match="requires `ref_resource`"):
+        StructuredFilterField(name="customer_id", values="ref")
+
+
+def test_structured_filter_enum_rejects_type():
+    with pytest.raises(ValueError, match="`type` is not allowed"):
+        StructuredFilterField(
+            name="status",
+            values="enum",
+            enum="myapp.OrderStatus",
+            type="str",
+        )
+
+
+def test_structured_filter_bool_rejects_enum():
+    with pytest.raises(ValueError, match="`enum` is not allowed"):
+        StructuredFilterField(name="archived", values="bool", enum="myapp.X")
+
+
+def test_structured_filter_free_text_rejects_ref_resource():
+    with pytest.raises(ValueError, match="`ref_resource` is not allowed"):
+        StructuredFilterField(
+            name="sku", values="free_text", ref_resource="customer"
+        )
+
+
+def test_filter_config_requires_structured_fields():
+    """Filter config rejects bare-string entries; only StructuredFilterField."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        FilterConfig.model_validate({"fields": ["sku", "name"]})
+
+
+def test_filter_config_requires_at_least_one_field():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        FilterConfig(fields=[])
+
+
+def test_filter_config_passes_structured_through():
+    cfg = FilterConfig.model_validate(
+        {
+            "fields": [
+                {
+                    "name": "status",
+                    "values": "enum",
+                    "enum": "myapp.OrderStatus",
+                },
+            ]
+        }
+    )
+    assert len(cfg.fields) == 1
+    assert isinstance(cfg.fields[0], StructuredFilterField)
+    assert cfg.fields[0].operators == ["eq", "in"]
+    assert cfg.fields[0].enum == "myapp.OrderStatus"
+
+
+def test_structured_filter_self_defaults():
+    field = StructuredFilterField(name="id", values="self")
+    assert field.operators == ["eq", "in"]
+
+
+def test_structured_filter_self_rejects_other_fields():
+    with pytest.raises(ValueError, match="not allowed"):
+        StructuredFilterField(name="id", values="self", ref_resource="customer")

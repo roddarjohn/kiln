@@ -486,6 +486,196 @@ which reads three env vars:
 For tests, monkey-patch ``ingot.files.default_storage`` to return
 a mock :class:`ingot.files.S3Storage`.
 
+.. _filtering:
+
+Filtering, search, and saved views
+----------------------------------
+
+be ships an opt-in surface for table-style UIs: structured
+filter specs, BE-powered value providers, a project-wide search
+endpoint, and a serializer hook saved-view resources can use for
+ref hydration.  The rest of this section is the user-facing
+surface.
+
+Structured filter blocks
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``filter`` modifier on a list op accepts a richer spec than
+the bare-string field list.  Each entry can declare its
+operators, value source, and any source-specific metadata:
+
+.. code-block:: jsonnet
+
+   list.searchable(
+     fields=[
+       { name: "id", type: "uuid" },
+       { name: "sku", type: "str" },
+       { name: "status", type: "str" },
+       { name: "is_archived", type: "bool" },
+     ],
+     filter={
+       fields: [
+         { name: "status", operators: ["eq", "in"],
+           values: "enum", enum: "myapp.models.OrderStatus" },
+         { name: "is_archived", values: "bool" },
+         { name: "sku", values: "free_text" },
+         { name: "customer_id", values: "ref",
+           ref_resource: "customer" },
+         "name",  // shorthand: free_text + full operator vocab
+       ],
+     },
+     order={ fields: ["sku", "name"], default: "sku" },
+   )
+
+This generates three things:
+
+* The existing ``POST /search`` filter execution (unchanged).
+* ``GET /_filters`` — discovery payload describing every
+  filterable field, with ``enum`` choices inlined.  Sort metadata
+  from the ``order`` modifier rides on the same response.
+* ``GET /_filters/{field}`` — per-field discovery for lazy UIs
+  that render one filter at a time.
+* ``POST /_values/{field}`` — value provider per ``enum`` /
+  ``free_text`` field.  ``bool`` and ``literal`` modes have no
+  endpoint (the FE renders them natively).
+* For ``ref`` fields, the discovery payload's ``endpoint``
+  points at the *target* resource's resource-level
+  ``_values``; no route is emitted on the source side.
+
+Operator vocabulary: ``eq``, ``neq``, ``gt``, ``gte``, ``lt``,
+``lte``, ``contains``, ``starts_with``, ``in``, ``is_null`` --
+matched 1:1 with :data:`ingot.filters.FilterOp`.  Defaults are
+derived from the ``values`` kind so most fields don't need an
+explicit ``operators`` list.
+
+Resource search
+^^^^^^^^^^^^^^^
+
+``searchable: true`` on a resource generates ``POST /_values``
+returning items shaped by the resource's :ref:`link config
+<links>`.  Powers ``ref`` filter inputs on other resources and
+any FE "search this table" affordance.  ``search.fields``
+overrides the default ILIKE target (``link.name``):
+
+.. code-block:: jsonnet
+
+   {
+     model: "myapp.models.Customer",
+     searchable: true,
+     link: { kind: "id_name", name: "name" },
+     search: { fields: ["name", "email"] },  // optional
+     // ...
+   }
+
+Body: ``{q, cursor?, limit?}``.  Response:
+``{results: [{type, id, name}, ...], next_cursor}``.  Auth is
+required (the link builder receives the session).
+
+.. _links:
+
+Link schemas
+^^^^^^^^^^^^
+
+Resources that show up as cross-resource references — search
+results, ``ref`` filter values, saved-view items — declare a
+``link:`` block describing how they serialize.  The BE returns
+structured fields, the FE assembles display strings:
+
+.. code-block:: jsonnet
+
+   // Shorthand: pulls fields straight off the model.
+   link: { kind: "id_name", name: "title" }
+
+   // Custom: any logic, returns the link schema instance.
+   link: { kind: "id_name",
+           builder: "myapp.labels.order_link" }
+
+Each linked resource gets a per-resource ``{Model}Link``
+Pydantic class generated into its schemas file (e.g.
+``CustomerLink``, ``ProductLink``).  ``type`` is a
+``Literal[<slug>]`` so the FE-side OpenAPI client narrows on
+resource type:
+
+* ``name`` -> ``{Model}Link{type, name}`` -- label-only.
+* ``id`` -> ``{Model}Link{type, id}`` -- id-only.
+* ``id_name`` -> ``{Model}Link{type, id, name}`` -- the default
+  for most resources.
+
+A custom builder is an ``async (instance, session) ->
+LinkSchema`` function (matching the ``can`` guard signature so
+session is available for permission-aware redaction).
+
+The codegen emits ``{app_module}/links.py`` per app with two
+maps keyed by slug: ``LINKS`` (link builder per resource) and
+``REF_RESOLVERS`` (fetch-by-id-and-link per resource).  The
+saved-view hydration helper consumes ``REF_RESOLVERS``.
+
+.. _saved-views:
+
+Saved views
+^^^^^^^^^^^
+
+Saved views are not a special opt-in.  The consumer subclasses
+:class:`ingot.saved_views.SavedViewMixin` on their own
+``DeclarativeBase`` and points a normal kiln resource at it,
+using the ``resource.saved_views(...)`` jsonnet preset to wire
+the standard CRUD ops:
+
+.. code-block:: python
+
+   # myapp/models.py
+   from ingot.saved_views import SavedViewMixin
+   from myapp.db import Base
+
+   class SavedView(Base, SavedViewMixin):
+       __tablename__ = "saved_views"
+
+.. code-block:: jsonnet
+
+   local resource = import "be/resources/presets.libsonnet";
+
+   {
+     model: "myapp.models.SavedView",
+     pk: "id", pk_type: "str",
+     require_auth: true,
+     operations: resource.saved_views(
+       serializer="myapp.serializers.dump_view_hydrated",
+       owner_guard="myapp.guards.is_view_owner",
+     ),
+   }
+
+The user's serializer wraps :func:`ingot.saved_views.hydrate_view`:
+
+.. code-block:: python
+
+   # myapp/serializers.py
+   from _generated.myapp.links import REF_RESOLVERS
+   from ingot.saved_views import hydrate_view
+
+   async def dump_view_hydrated(view, session, db):
+       return await hydrate_view(view, REF_RESOLVERS, db, session)
+
+The mixin owns ``resource_type``, ``owner_id``, ``name``,
+``payload`` (JSON), ``created_at``, ``updated_at``.  Per-user
+scoping is the ``is_view_owner`` guard
+(``async (resource, session) -> bool``).  Resource-type
+filtering rides on the structured filter machinery.  Stored
+``ref`` filter values keep raw ids; ``hydrate_view`` runs them
+through the per-app ``REF_RESOLVERS`` at read time.
+
+Custom serializers
+^^^^^^^^^^^^^^^^^^
+
+The ``serializer:`` hook on read ops (``get`` / ``list``) is
+generic.  Set it to a dotted path to an
+``async (obj, session, db) -> Any`` function and the generated
+route calls it instead of the auto-generated
+``to_<model>_resource`` / ``to_<model>_list_item``.
+``response_model`` is dropped so the function may return any
+JSON-serializable shape.  Useful for joined-row flattening,
+computed fields that need DB access, or anything else the
+auto-dump path can't express.
+
 Testing the generated code
 --------------------------
 

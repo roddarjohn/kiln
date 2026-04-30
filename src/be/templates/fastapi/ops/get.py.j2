@@ -9,18 +9,23 @@
         {{ opt }},
 {% endfor %}
     )
+
     obj = await get_object_from_query_or_404(
         db, stmt, detail="{{ model_name }} not found",
     )
+
 {% else %}
     obj = await get_object_from_query_or_404(
         db,
         select({{ model_name }}).where({{ model_name }}.{{ pk_name }} == {{ pk_name }}),
         detail="{{ model_name }} not found",
     )
+
 {% endif %}
 {{ gate(gate_specs_const|default(none), gate_op_name|default(""), "obj") }}
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+    return await {{ serializer_fn }}(obj, session, db)
+{% elif serializer_async|default(false) %}
     return await {{ serializer_fn }}(obj, session)
 {% else %}
     return {{ serializer_fn }}(obj)

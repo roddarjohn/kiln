@@ -13,6 +13,7 @@ limiter module.  Mirrors ``be.operations.telemetry.TelemetryScaffold``.
 
 from typing import TYPE_CHECKING
 
+from foundry.naming import Name
 from foundry.operation import operation
 from foundry.outputs import StaticFile
 
@@ -78,10 +79,14 @@ class RateLimitScaffold:
             f"{package_prefix}.rate_limit" if package_prefix else "rate_limit"
         )
 
-        bucket_module, bucket_class = rate_limit.bucket_model.rsplit(".", 1)
+        bucket_module, bucket_name_obj = Name.from_dotted(
+            rate_limit.bucket_model
+        )
+        bucket_class = bucket_name_obj.raw
 
         key_func_dotted = rate_limit.key_func or _DEFAULT_KEY_FUNC
-        key_func_module, key_func_name = key_func_dotted.rsplit(".", 1)
+        key_func_module, key_func_name_obj = Name.from_dotted(key_func_dotted)
+        key_func_name = key_func_name_obj.raw
 
         database = config.resolve_database(rate_limit.db_key)
 

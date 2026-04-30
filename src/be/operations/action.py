@@ -67,7 +67,8 @@ class Action:
         )
         action_name = Name(ctx.instance.name)
         info = introspect_action_fn(options.fn, resource.model)
-        fn_module, fn_name = options.fn.rsplit(".", 1)
+        fn_module, fn_name_obj = Name.from_dotted(options.fn)
+        fn_name = fn_name_obj.raw
 
         if info.is_object_action:
             path = f"/{{{resource.pk}}}/{action_name.slug}"

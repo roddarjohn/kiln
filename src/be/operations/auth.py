@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from be.operations.types import RouteHandler, TestCase
 from foundry.cascade import cascade
-from foundry.naming import prefix_import
+from foundry.naming import Name, prefix_import
 from foundry.operation import operation
 
 if TYPE_CHECKING:
@@ -47,7 +47,10 @@ class Auth:
         """
         auth_cfg = ctx.config.auth
         assert auth_cfg is not None  # noqa: S101 -- guaranteed by when()
-        session_module, session_name = auth_cfg.session_schema.rsplit(".", 1)
+        session_module, session_name_obj = Name.from_dotted(
+            auth_cfg.session_schema
+        )
+        session_name = session_name_obj.raw
         deps_module = prefix_import(ctx.package_prefix, "auth", "dependencies")
 
         # Cascade: op.require_auth → resource.require_auth.
@@ -60,11 +63,16 @@ class Auth:
         # If include_actions_in_dump or permissions_endpoint is
         # set, force-include the dep on every handler under this
         # resource regardless of the per-op require_auth setting --
-        # otherwise the generated handler/serializer code would
+        # otherwise the generated handler / serializer code would
         # reference an undeclared ``session`` parameter.
+        # ``searchable`` is included because the resource-level
+        # ``_values`` endpoint passes ``session`` through to the
+        # link builder, and any consumer using a ``serializer:``
+        # hook also expects session in scope.
         force_session = (
             ctx.instance.include_actions_in_dump
             or ctx.instance.permissions_endpoint
+            or ctx.instance.searchable
         )
 
         for handler in ctx.store.outputs_under(ctx.instance_id, RouteHandler):

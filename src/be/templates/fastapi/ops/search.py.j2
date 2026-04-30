@@ -7,10 +7,12 @@
         {{ opt }},
 {% endfor %}
     )
+
 {% endif %}
 {% if has_filter %}
     if body.filter is not None:
         stmt = apply_filters(stmt, body.filter, {{ model_name }})
+
 {% endif %}
 {% if has_sort %}
     stmt = apply_ordering(
@@ -20,6 +22,7 @@
         default_field="{{ default_sort_field }}",
         default_dir="{{ default_sort_dir }}",
     )
+
 {% endif %}
 {% if pagination_mode == "keyset" %}
     stmt, page_size = apply_keyset_pagination(
@@ -30,8 +33,10 @@
         page_size=body.page_size,
         max_page_size={{ max_page_size }},
     )
+
     result = await db.execute(stmt)
     rows = list(result.scalars())
+
 {% if include_actions|default(false) %}
     rows = await filter_visible(
         rows,
@@ -46,8 +51,11 @@
         if has_more and items
         else None
     )
+
     return {{ model_name }}Page(
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session, db) for obj in items],
+{% elif serializer_async|default(false) %}
         items=[await {{ serializer_fn }}(obj, session) for obj in items],
 {% else %}
         items=[{{ serializer_fn }}(obj) for obj in items],
@@ -61,6 +69,7 @@
         limit=body.limit,
         max_page_size={{ max_page_size }},
     )
+
     total = (await db.execute(count_stmt)).scalar_one()
     # ceil(total / effective_limit), clamped at 0 when there
     # are no rows so callers don't render a phantom "Page 1".
@@ -69,8 +78,10 @@
         if total > 0
         else 0
     )
+
     result = await db.execute(stmt)
     rows = list(result.scalars())
+
 {% if include_actions|default(false) %}
     rows = await filter_visible(
         rows,
@@ -78,8 +89,11 @@
         find_can({{ collection_specs_const }}, "list"),
     )
 {% endif %}
+
     return {{ model_name }}Page(
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+        items=[await {{ serializer_fn }}(obj, session, db) for obj in rows],
+{% elif serializer_async|default(false) %}
         items=[await {{ serializer_fn }}(obj, session) for obj in rows],
 {% else %}
         items=[{{ serializer_fn }}(obj) for obj in rows],
@@ -97,7 +111,9 @@
         find_can({{ collection_specs_const }}, "list"),
     )
 {% endif %}
-{% if serializer_async|default(false) %}
+{% if custom_serializer|default(false) %}
+    return [await {{ serializer_fn }}(obj, session, db) for obj in rows]
+{% elif serializer_async|default(false) %}
     return [await {{ serializer_fn }}(obj, session) for obj in rows]
 {% else %}
     return [{{ serializer_fn }}(obj) for obj in rows]

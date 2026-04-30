@@ -17,6 +17,7 @@ from be.config.schema import (
     PaginateConfig,
     ProjectConfig,
     ResourceConfig,
+    StructuredFilterField,
     TelemetryConfig,
 )
 from be.operations.auth import Auth as AuthOp
@@ -873,10 +874,24 @@ class TestCrudHelpers:
             FieldSpec(name="title", type="str"),
             FieldSpec(name="count", type="int"),
         ]
-        result = _field_dicts(fields)
+        result, enum_imports = _field_dicts(fields)
         assert len(result) == 2
         assert result[0] == Field(name="title", py_type="str")
         assert result[1] == Field(name="count", py_type="int")
+        assert enum_imports == []
+
+    def test_field_dicts_enum(self):
+        fields = [
+            FieldSpec(
+                name="status",
+                type="enum",
+                enum="myapp.models.Status",
+            ),
+        ]
+        result, enum_imports = _field_dicts(fields)
+        assert len(result) == 1
+        assert result[0] == Field(name="status", py_type="Status")
+        assert enum_imports == [("myapp.models", "Status")]
 
     def test_field_dicts_rejects_nested(self):
         import pytest
@@ -964,6 +979,19 @@ class TestGet:
         assert handler.params[0].name == "user_id"
         assert handler.params[0].annotation == "int"
 
+    def test_get_serializer_must_be_dotted_path(self):
+        """Non-dotted serializer values raise at build time."""
+        import pytest
+
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="get", serializer="bareword"),
+        )
+
+        with pytest.raises(ValueError, match="must be a dotted path"):
+            list(Get().build(ctx, _FieldsOpts(fields=_FIELDS)))
+
     def test_get_with_nested_field_emits_sub_schema_and_serializer(self):
         """A nested field adds its own schema + serializer alongside main."""
         fields = [
@@ -1013,6 +1041,39 @@ class TestGet:
         main_ser = sers[1]
         assert main_ser.model_module == "blog.models"
         assert main_ser.model_name == "Task"
+
+    def test_get_with_nested_enum_field_imports_enum_class(self):
+        """Enum specs nested under a parent get expanded inline,
+        contributing an import for the enum class."""
+        fields = [
+            FieldSpec(name="id", type="uuid"),
+            FieldSpec(
+                name="project",
+                type="nested",
+                model="blog.models.Project",
+                fields=[
+                    FieldSpec(name="id", type="uuid"),
+                    FieldSpec(
+                        name="status",
+                        type="enum",
+                        enum="blog.models.ProjectStatus",
+                    ),
+                ],
+            ),
+        ]
+        resource = ResourceConfig(model="blog.models.Task")
+        ctx = _operation_ctx(resource, OperationConfig(name="get"))
+        result = list(Get().build(ctx, _FieldsOpts(fields=fields)))
+
+        sers = [r for r in result if isinstance(r, SerializerFn)]
+        nested = next(
+            s for s in sers if s.schema_name == "TaskResourceProjectNested"
+        )
+        # The enum field is rendered with the enum class name as its
+        # Python type, and the (module, class) pair lands in the
+        # nested schema's enum_imports.
+        status_field = next(f for f in nested.fields if f.name == "status")
+        assert status_field.py_type == "ProjectStatus"
 
     def test_get_with_nested_many_wraps_in_list(self):
         fields = [
@@ -1415,6 +1476,19 @@ def _drive_extension(
 class TestList:
     """Tests for the bare List op (no extensions)."""
 
+    def test_list_serializer_must_be_dotted_path(self):
+        """Non-dotted serializer values raise at build time."""
+        import pytest
+
+        resource = ResourceConfig(model="app.models.User")
+        ctx = _operation_ctx(
+            resource,
+            OperationConfig(name="list", serializer="bareword"),
+        )
+
+        with pytest.raises(ValueError, match="must be a dotted path"):
+            list(List().build(ctx, List.Options(fields=_FIELDS)))
+
     def test_emits_list_item_schema_and_serializer(self):
         resource = ResourceConfig(model="app.models.User")
         ctx = _operation_ctx(resource, OperationConfig(name="list"))
@@ -1538,7 +1612,11 @@ class TestFilter:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         schemas = [r for r in outputs if isinstance(r, SchemaClass)]
         assert [s.name for s in schemas] == ["UserFilterCondition"]
@@ -1551,7 +1629,11 @@ class TestFilter:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         search_req = _find_output(
             list_ctx.store, SchemaClass, name="UserSearchRequest"
@@ -1560,31 +1642,6 @@ class TestFilter:
         assert search_req.body_context["has_filter"] is True
         assert handler.body_context["has_filter"] is True
         assert ("ingot.filters", "apply_filters") in handler.extra_imports
-
-    def test_empty_fields_defaults_to_list_fields(self):
-        """FilterConfig() with no fields list uses all list fields."""
-        resource = ResourceConfig(
-            model="app.models.User",
-            operations=[
-                OperationConfig(
-                    name="list",
-                    fields=[f.model_dump() for f in _FIELDS],
-                ),
-            ],
-        )
-        list_ctx = _drive_list(resource)
-        outputs = _drive_extension(
-            list_ctx,
-            type_name="filter",
-            op_instance=Filter(),
-            options=FilterConfig(),
-        )
-        schema = next(
-            s
-            for s in outputs
-            if isinstance(s, SchemaClass) and s.name == "UserFilterCondition"
-        )
-        assert schema.body_context["allowed_fields"] == ["name", "age"]
 
 
 class TestOrder:
@@ -2034,7 +2091,11 @@ class TestListExtensionsCompose:
             list_ctx,
             type_name="filter",
             op_instance=Filter(),
-            options=FilterConfig(fields=["name"]),
+            options=FilterConfig(
+                fields=[
+                    StructuredFilterField(name="name", values="free_text"),
+                ],
+            ),
         )
         _drive_extension(
             list_ctx,

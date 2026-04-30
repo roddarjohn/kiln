@@ -8,6 +8,10 @@
 //   - Write-only resource with route_prefix, db_key, and
 //     email/json/datetime fields
 //   - Actions with and without params, with and without auth
+//   - Structured filter blocks (enum / bool / ref / free_text)
+//   - Resource search via `searchable: true` + `link:`
+//   - Saved-view CRUD wired through the `serializer:` hook +
+//     `resource.saved_views(...)` preset
 
 local list = import "be/operations/list.libsonnet";
 local resource = import "be/resources/presets.libsonnet";
@@ -46,7 +50,35 @@ local resource = import "be/resources/presets.libsonnet";
             { name: "unit_price", type: "float" },
             { name: "active", type: "bool" },
           ],
-          filter={ fields: ["sku", "name", "unit_price", "active"] },
+          // Structured filter spec — every entry declares its
+          // operators, value source, and any source-specific
+          // metadata so the discovery payload can drive a typed
+          // filter UI.  Demonstrates every value-kind:
+          //   self      — filter by Product's own id (eq / in)
+          //   ref       — filter by FK to Customer (autocomplete
+          //               into /customers/_values)
+          //   free_text — ILIKE on string columns
+          //   literal   — typed numeric input
+          //   bool      — toggle
+          filter={
+            fields: [
+              { name: "id", values: "self" },
+              {
+                name: "customer_id",
+                values: "ref",
+                ref_resource: "customer",
+              },
+              { name: "sku", values: "free_text" },
+              { name: "name", values: "free_text" },
+              {
+                name: "unit_price",
+                values: "literal",
+                type: "float",
+                operators: ["eq", "gte", "lte"],
+              },
+              { name: "active", values: "bool" },
+            ],
+          },
           order={
             fields: ["name", "unit_price"],
             default: "name",

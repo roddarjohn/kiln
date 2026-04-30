@@ -24,7 +24,7 @@ from foundry.engine import BuildContext, Engine
 from foundry.env import create_jinja_env, render_template
 from foundry.errors import CLIError, ConfigError, GenerationError
 from foundry.imports import ImportCollector
-from foundry.naming import Name, prefix_import, split_dotted_class
+from foundry.naming import Name, prefix_import
 from foundry.operation import EmptyOptions, OperationMeta, operation
 from foundry.output import write_files
 from foundry.outputs import StaticFile
@@ -63,6 +63,5 @@ __all__ = [
     "operation",
     "prefix_import",
     "render_template",
-    "split_dotted_class",
     "write_files",
 ]
