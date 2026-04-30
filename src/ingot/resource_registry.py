@@ -588,23 +588,20 @@ class ResourceRegistry:
         db: AsyncSession,
         session: Any,
     ) -> ValuesPage:
-        """Resource-level search; falls back to a pk-ordered page.
+        """Resource-level search; ORDER BY pk in every branch.
 
-        When the entry has a :class:`SearchSpec`, runs the
-        configured search (tsvector if a vector column is set,
-        ILIKE otherwise) and shapes results through the link
-        builder.
+        Three paths share the same shape — tsvector if a vector
+        column is configured + ``q`` is set, ILIKE if columns are
+        configured + ``q`` is set, otherwise an unfiltered
+        pk-ordered page.
 
-        When there's no SearchSpec, returns the first N rows
-        ordered by pk with ``{value: pk, label: str(pk)}``
-        items — gives the FE *something* to show even for
-        ref-only resources without a configured search.
+        Resources with no :class:`SearchSpec` get a synthetic one
+        on the fly: empty ``columns``, a default link builder
+        that returns ``{value: pk, label: str(pk)}``.  Same
+        dispatch, same single-column ordering — no special-case
+        runner.
         """
-        if entry.search is None:
-            return await _pk_only_search(entry, request, db)
-
-        search = entry.search
-        primary_key_column = getattr(entry.model, entry.pk)
+        search = entry.search or _default_search_spec(entry)
         query = request.q
 
         if query and search.vector_column is not None:
@@ -625,7 +622,6 @@ class ResourceRegistry:
                 request=request,
                 db=db,
                 session=session,
-                primary_key_column=primary_key_column,
             )
 
         return await _run_unfiltered_search(
@@ -634,7 +630,6 @@ class ResourceRegistry:
             request=request,
             db=db,
             session=session,
-            primary_key_column=primary_key_column,
         )
 
 
@@ -648,37 +643,66 @@ class ResourceRegistry:
 # -------------------------------------------------------------------
 
 
-async def _pk_only_search(
-    entry: ResourceEntry,
+# -------------------------------------------------------------------
+# Single-column keyset helper.
+#
+# Every value-provider runner that returns scalar rows
+# (free-text, enum, pk-only, ref fallback) shares the same
+# shape: SELECT one column, optionally WHERE-filter it, then
+# paginate with a cursor on that column.  This helper does that
+# work; callers add their own WHERE and shape the resulting list.
+# -------------------------------------------------------------------
+
+
+async def _scalar_page(
+    *,
+    statement: Select[Any],
+    ordering_column: ColumnElement[Any],
     request: FilterValuesRequest,
     db: AsyncSession,
-) -> ValuesPage:
-    """Fallback search for entries without a :class:`SearchSpec`.
+) -> tuple[list[Any], str | None]:
+    """Run *statement* with single-column keyset pagination.
 
-    Used when a Ref points at a resource that doesn't define a
-    search.  Returns ``{"value": <pk>, "label": str(<pk>)}`` rows
-    paginated by pk — enough for the FE to render a typeable
-    autocomplete fallback even when the consumer never wired a
-    proper search.  ``q`` is ignored (no column to apply it to).
+    Adds ``WHERE col > previous_cursor`` (when a cursor is set),
+    ``ORDER BY col ASC``, and ``LIMIT n+1``.  Returns the page of
+    scalar rows plus the next cursor (encoded from the last row's
+    value) or ``None`` when the page exhausts the result set.
     """
-    primary_key_column = getattr(entry.model, entry.pk)
     page_size = resolved_limit(request.limit)
-    statement, _ = apply_keyset_pagination(
-        select(primary_key_column).order_by(primary_key_column.asc()),
-        entry.model,
-        cursor=_decode_cursor(request.cursor),
-        cursor_field=entry.pk,
-        page_size=page_size,
-        max_page_size=page_size,
-    )
+
+    if request.cursor:
+        statement = statement.where(ordering_column > request.cursor)
+
+    statement = statement.order_by(ordering_column.asc()).limit(page_size + 1)
     rows = list((await db.execute(statement)).scalars().all())
-    page, next_cursor = _finalise_scalar_page(rows, page_size)
-    return ValuesPage(
-        results=[
-            {"value": str(value), "label": str(value)} for value in page
-        ],
-        next_cursor=next_cursor,
-    )
+    return _finalise_scalar_page(rows, page_size)
+
+
+# -------------------------------------------------------------------
+# Search-mode runners.
+#
+# Each branch builds + runs its own statement, then shapes rows
+# through the link builder.  Pulled out so :meth:`_search_resource`
+# stays a thin dispatcher.  All three use single-column keyset
+# pagination — pk-only by default, ts_rank for the tsvector path.
+# -------------------------------------------------------------------
+
+
+def _default_search_spec(entry: ResourceEntry) -> SearchSpec:
+    """Synthetic :class:`SearchSpec` for entries without one configured.
+
+    No search columns, no ``q``-filtering; the link builder
+    returns ``{"value": <pk>, "label": str(<pk>)}`` so the FE
+    sees a usable autocomplete fallback even when the consumer
+    never wired a real search.
+    """
+    pk_attr = entry.pk
+
+    async def _pk_link(instance: Any, _session: Any) -> dict[str, Any]:
+        pk_value = getattr(instance, pk_attr)
+        return {"value": str(pk_value), "label": str(pk_value)}
+
+    return SearchSpec(columns=(), link=_pk_link)
 
 
 async def _run_unfiltered_search(
@@ -688,22 +712,16 @@ async def _run_unfiltered_search(
     request: FilterValuesRequest,
     db: AsyncSession,
     session: Any,
-    primary_key_column: ColumnElement[Any],
 ) -> ValuesPage:
-    """No query: ORDER BY pk; pk-keyset cursor."""
-    page_size = resolved_limit(request.limit)
-    statement, _ = apply_keyset_pagination(
-        select(entry.model).order_by(primary_key_column.asc()),
-        entry.model,
-        cursor=_decode_cursor(request.cursor),
-        cursor_field=entry.pk,
-        page_size=page_size,
-        max_page_size=page_size,
+    """No query: ORDER BY pk; pk-keyset cursor; shape via link builder."""
+    return await _run_model_search(
+        statement=select(entry.model),
+        entry=entry,
+        search=search,
+        request=request,
+        db=db,
+        session=session,
     )
-    rows = list((await db.execute(statement)).scalars().all())
-    page, next_cursor = _finalise_pk_page(rows, entry.pk, page_size)
-    items = await _shape_link_items(page, search, session)
-    return ValuesPage(results=items, next_cursor=next_cursor)
 
 
 async def _run_ilike_search(
@@ -714,17 +732,41 @@ async def _run_ilike_search(
     request: FilterValuesRequest,
     db: AsyncSession,
     session: Any,
-    primary_key_column: ColumnElement[Any],
 ) -> ValuesPage:
     """Query + ILIKE: WHERE matches; ORDER BY pk; pk-keyset cursor."""
     columns = [getattr(entry.model, name) for name in search.columns]
+    return await _run_model_search(
+        statement=select(entry.model).where(
+            or_(*[column.ilike(f"%{query}%") for column in columns])
+        ),
+        entry=entry,
+        search=search,
+        request=request,
+        db=db,
+        session=session,
+    )
+
+
+async def _run_model_search(
+    *,
+    statement: Select[Any],
+    entry: ResourceEntry,
+    search: SearchSpec,
+    request: FilterValuesRequest,
+    db: AsyncSession,
+    session: Any,
+) -> ValuesPage:
+    """ORDER BY pk + pk-keyset; execute; shape rows via link builder.
+
+    Used by both the unfiltered and ILIKE search runners — they
+    only differ in their WHERE clause.
+    """
+    primary_key_column = getattr(entry.model, entry.pk)
     page_size = resolved_limit(request.limit)
     statement, _ = apply_keyset_pagination(
-        select(entry.model)
-        .where(or_(*[column.ilike(f"%{query}%") for column in columns]))
-        .order_by(primary_key_column.asc()),
+        statement.order_by(primary_key_column.asc()),
         entry.model,
-        cursor=_decode_cursor(request.cursor),
+        cursor=request.cursor or None,
         cursor_field=entry.pk,
         page_size=page_size,
         max_page_size=page_size,
@@ -769,10 +811,15 @@ async def _run_tsvector_search(
         .order_by(rank_expression.desc())
         .limit(page_size + 1)
     )
-    previous_rank = _decode_rank_cursor(request.cursor)
+    if request.cursor:
+        try:
+            previous_rank = float(request.cursor)
 
-    if previous_rank is not None:
-        statement = statement.where(rank_expression < previous_rank)
+        except ValueError:
+            previous_rank = None
+
+        if previous_rank is not None:
+            statement = statement.where(rank_expression < previous_rank)
 
     raw_rows = (await db.execute(statement)).all()
     rows = [(row[0], float(row[1])) for row in raw_rows]
@@ -801,6 +848,10 @@ async def _shape_link_items(
 
 # -------------------------------------------------------------------
 # Free-text + enum value providers.
+#
+# Both follow the single-column keyset pattern: pick a column,
+# optionally ILIKE-filter, paginate.  The runners are thin —
+# :func:`_scalar_page` does the keyset bookkeeping.
 # -------------------------------------------------------------------
 
 
@@ -811,26 +862,18 @@ async def _free_text_values(
     db: AsyncSession,
 ) -> ValuesPage:
     """Distinct-column ILIKE search; single-column keyset on the column."""
-    column_name = spec.column or spec.name
-    column = getattr(entry.model, column_name)
-    query = request.q
-    page_size = resolved_limit(request.limit)
-    statement = select(column).distinct().order_by(column.asc())
+    column = getattr(entry.model, spec.column or spec.name)
+    statement = select(column).distinct()
 
-    if query:
-        statement = statement.where(column.ilike(f"%{query}%"))
+    if request.q:
+        statement = statement.where(column.ilike(f"%{request.q}%"))
 
-    statement, _ = apply_keyset_pagination(
-        statement,
-        entry.model,
-        cursor=_decode_cursor(request.cursor),
-        cursor_field=column_name,
-        page_size=page_size,
-        max_page_size=page_size,
+    page, next_cursor = await _scalar_page(
+        statement=statement,
+        ordering_column=column,
+        request=request,
+        db=db,
     )
-
-    rows = list((await db.execute(statement)).scalars().all())
-    page, next_cursor = _finalise_scalar_page(rows, page_size)
     return ValuesPage(
         results=[{"value": row, "label": row} for row in page],
         next_cursor=next_cursor,
@@ -838,15 +881,15 @@ async def _free_text_values(
 
 
 @dataclass(frozen=True)
-class _ChoiceRow:
-    """Plain dataclass row for the enum-values ``VALUES`` clause.
+class _LabelRow:
+    """One-column row for the enum-values ``VALUES`` clause.
 
-    :class:`Choice` is the public Pydantic type (lives on the
-    discovery payload); ``values_table`` introspects dataclass
-    fields, so the SQL path uses this lightweight shadow.
+    Only ``label`` makes it to SQL — the corresponding ``value``
+    is looked up Python-side from the enum-member map, since
+    Python already has the enum and the SQL roundtrip exists
+    only to filter + paginate consistently with everything else.
     """
 
-    value: str
     label: str
 
 
@@ -855,94 +898,47 @@ async def _enum_values(
     request: FilterValuesRequest,
     db: AsyncSession,
 ) -> ValuesPage:
-    """Enum search via Postgres ``VALUES`` — same pipeline as SQL tables.
-
-    Builds a ``VALUES`` selectable from the enum's members and
-    runs the same single-column keyset / ILIKE machinery against
-    it.  Result: enum search composes with everything else
-    (pagination, ordering, future filtering extensions) without
-    a parallel in-memory code path.
-    """
+    """Enum search via Postgres ``VALUES`` — same pipeline as SQL tables."""
+    label_to_value = {
+        member.name: str(member.value) for member in enum_class
+    }
     table = values_table(
-        _ChoiceRow,
-        [
-            _ChoiceRow(value=str(member.value), label=member.name)
-            for member in enum_class
-        ],
+        _LabelRow,
+        [_LabelRow(label=name) for name in label_to_value],
         name="enum_values",
     )
     label_column = table.c.label
-    value_column = table.c.value
-    query = request.q
-    page_size = resolved_limit(request.limit)
 
-    statement = select(value_column, label_column).order_by(label_column.asc())
+    statement = select(label_column)
 
-    if query:
-        statement = statement.where(label_column.ilike(f"%{query}%"))
+    if request.q:
+        statement = statement.where(label_column.ilike(f"%{request.q}%"))
 
-    previous_label = _decode_cursor(request.cursor)
-
-    if previous_label is not None:
-        statement = statement.where(label_column > previous_label)
-
-    statement = statement.limit(page_size + 1)
-
-    rows = (await db.execute(statement)).all()
-    page = list(rows[:page_size])
-    has_more = len(rows) > page_size
-    next_cursor = (
-        _encode_cursor(str(page[-1].label)) if has_more and page else None
+    page, next_cursor = await _scalar_page(
+        statement=statement,
+        ordering_column=label_column,
+        request=request,
+        db=db,
     )
     return ValuesPage(
-        results=[{"value": row.value, "label": row.label} for row in page],
+        results=[
+            {"value": label_to_value[label], "label": label}
+            for label in page
+        ],
         next_cursor=next_cursor,
     )
 
 
 # -------------------------------------------------------------------
-# Cursor + page-finalise helpers.
+# Page finalisers.
 #
-# Two cursor formats — single-column (``"k:<value>"``) for the
-# common case and rank (``"r:<float>"``) for the ts_rank ordering
-# whose ordering key isn't a string.
+# The cursor is just the previous-key value as a string — no
+# prefix tag, no format discrimination.  Each endpoint orders by
+# its own canonical key (pk for resource search, label for enum,
+# the column itself for free-text, ts_rank for tsvector); the
+# cursor carries the last-row's key value verbatim and the
+# endpoint decodes it back when handed a follow-up call.
 # -------------------------------------------------------------------
-
-
-_CURSOR_PREFIX = "k:"
-_RANK_CURSOR_PREFIX = "r:"
-
-
-def _encode_cursor(value: str) -> str:
-    """Encode the column value as a single-key keyset cursor."""
-    return f"{_CURSOR_PREFIX}{value}"
-
-
-def _decode_cursor(cursor: str | None) -> str | None:
-    """Strip the cursor tag; return ``None`` for empty/wrong-tag cursors."""
-    if not cursor or not cursor.startswith(_CURSOR_PREFIX):
-        return None
-
-    return cursor.removeprefix(_CURSOR_PREFIX) or None
-
-
-def _encode_rank_cursor(rank: float) -> str:
-    """Encode a ts_rank value as a keyset cursor."""
-    return f"{_RANK_CURSOR_PREFIX}{rank!r}"
-
-
-def _decode_rank_cursor(cursor: str | None) -> float | None:
-    """Decode ``r:<rank>`` into a float; ``None`` when missing/invalid."""
-    if not cursor or not cursor.startswith(_RANK_CURSOR_PREFIX):
-        return None
-
-    raw = cursor.removeprefix(_RANK_CURSOR_PREFIX)
-
-    try:
-        return float(raw)
-
-    except ValueError:
-        return None
 
 
 def _finalise_pk_page(
@@ -950,29 +946,28 @@ def _finalise_pk_page(
     pk_attr: str,
     page_size: int,
 ) -> tuple[list[Any], str | None]:
-    """Trim the over-fetch row, build pk-only cursor for an ORM-row page."""
+    """Trim the over-fetch row, build pk cursor for an ORM-row page."""
     has_more = len(rows) > page_size
     page = rows[:page_size]
 
     if not has_more or not page:
         return page, None
 
-    last_pk = getattr(page[-1], pk_attr)
-    return page, _encode_cursor(str(last_pk))
+    return page, str(getattr(page[-1], pk_attr))
 
 
 def _finalise_scalar_page(
     rows: list[Any],
     page_size: int,
 ) -> tuple[list[Any], str | None]:
-    """Trim + build single-column cursor for a scalar-row page."""
+    """Trim + build cursor for a scalar-row page."""
     has_more = len(rows) > page_size
     page = rows[:page_size]
 
     if not has_more or not page:
         return page, None
 
-    return page, _encode_cursor(str(page[-1]))
+    return page, str(page[-1])
 
 
 def _finalise_rank_page(
@@ -987,4 +982,4 @@ def _finalise_rank_page(
         return page, None
 
     _, last_rank = page[-1]
-    return page, _encode_rank_cursor(last_rank)
+    return page, repr(last_rank)
