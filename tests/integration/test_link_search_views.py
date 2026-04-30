@@ -316,12 +316,13 @@ def test_auto_serializer_still_works_when_not_overridden(
     """Resources that *don't* set ``serializer:`` keep the
     auto-generated dump path.
 
-    Customer's list op inherits the resource's ``default``
-    representation (no per-op ``representation:`` or ``fields:``
-    override), so the rendered list handler imports the
-    representation's auto-generated serializer.
+    Customer's list op carries its own ``fields:`` so it uses the
+    ad-hoc legacy path -- the rendered handler imports
+    ``to_customer_list_item`` from the auto-generated serializers.
+    The resource's ``default_representation`` is reserved for
+    cross-resource hydration (saved-view, ref autocomplete) and
+    doesn't silently override per-op response shapes.
     """
     customer_routes = files["inventory/routes/customer.py"]
 
-    # The representation-driven serializer is imported normally.
-    assert "to_customer_default" in customer_routes
+    assert "to_customer_list_item" in customer_routes
