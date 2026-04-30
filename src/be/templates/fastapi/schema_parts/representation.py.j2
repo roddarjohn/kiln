@@ -1,5 +1,5 @@
 class {{ schema_name }}(BaseModel):
-    """Link schema for {{ schema_name | replace("Link", "") }}."""
+    """{{ schema_name }} -- {{ slug }} representation."""
 
     type: Literal["{{ slug }}"] = "{{ slug }}"
 {% for field in fields %}
