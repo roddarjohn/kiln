@@ -775,7 +775,13 @@ def test_resource_slug_collision_across_apps_rejected() -> None:
     module, ref filter target, and saved-view registry."""
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match=r"slug 'customer' collides"):
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"slugs collide.*'customer' \(between "
+            r"'billing\.models\.Customer' and 'support\.models\.Customer'\)"
+        ),
+    ):
         ProjectConfig(
             databases=[DatabaseConfig(key="primary", default=True)],
             apps=[

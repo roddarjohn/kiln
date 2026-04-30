@@ -15,49 +15,66 @@ if TYPE_CHECKING:
 
 
 def _reject_duplicates(
-    keys: Iterable[str],
+    items: Iterable[tuple[str, str]],
     *,
     message: str,
 ) -> None:
-    """Raise ``ValueError`` if *keys* repeats any value.
+    """Raise ``ValueError`` if any key in *items* repeats.
 
-    Shared backend for the recurring "no duplicates in this list"
-    check across configs (e.g. :attr:`AuthConfig.sources`,
-    :attr:`CommsConfig.types`, :attr:`ResourceConfig.representations`).
-    The message is suffixed with the sorted list of offenders so
-    the error pinpoints which entries collided rather than just
-    flagging "some duplicate exists".
+    Shared backend for every "no duplicates" config validator:
+    :attr:`AuthConfig.sources`, :attr:`CommsConfig.types`,
+    :attr:`ResourceConfig.representations`, and the
+    cross-resource slug-collision check on :class:`ProjectConfig`.
 
-    Typed for string keys -- every dup-check in this module is
-    over identifier-shaped strings (transport names, comm-type
-    names, representation names, ...) and stringy ``Literal`` enum
-    values.  Generalize when a non-string surface appears.
+    Each item is a ``(key, source)`` pair.  The *key* is what gets
+    deduplicated (a transport literal, a name, a slug); the
+    *source* labels which input owns it -- typically equal to the
+    key (uniqueness within a flat list) but distinct for the
+    cross-resource case where two different resource models can
+    snake to the same slug.  When a collision pairs different
+    sources the error names both so the broken pair is
+    pinpointed; when sources match the key, only the key is
+    shown.
+
+    All keys are collected before raising so a single error names
+    every offender at once rather than failing fast on the first.
 
     Args:
-        keys: Pre-extracted comparison keys.  Callers pass the
-            list itself for plain-value uniqueness checks, or
-            ``(entry.name for entry in items)`` for
-            uniqueness-by-attribute.
-        message: Human-readable preamble for the exception --
-            typically names the surface being validated
-            (``"comm types must have unique names"``).
+        items: Iterable of ``(key, source)`` string pairs.  For
+            the simple per-list case pass
+            ``((value, value) for value in self.list)``; for
+            cross-source collision pass
+            ``((extracted_key, owning_source) for ...)``.
+        message: Human-readable preamble for the exception.
 
     Raises:
-        ValueError: With ``f"{message}: {sorted(set(dupes))!r}"``
-            when *keys* contains repeats.
+        ValueError: When *items* contains any repeated key.
 
     """
-    seen: set[str] = set()
-    dupes: list[str] = []
+    first: dict[str, str] = {}
+    collisions: list[str] = []
 
-    for key in keys:
-        if key in seen:
-            dupes.append(key)
+    for key, source in items:
+        prior = first.get(key)
 
-        seen.add(key)
+        if prior is None:
+            first[key] = source
+            continue
 
-    if dupes:
-        msg = f"{message}: {sorted(set(dupes))!r}"
+        # Render the colliding labels only when they add information
+        # over the key itself -- the simple flat-list case
+        # ("bearer" appearing twice as both key and source) reads
+        # better as just ``'bearer'``.
+        if prior == key and source == key:
+            collisions.append(repr(key))
+
+        else:
+            collisions.append(
+                f"{key!r} (between {prior!r} and {source!r})",
+            )
+
+    if collisions:
+        msg = f"{message}: {', '.join(collisions)}"
         raise ValueError(msg)
 
 
@@ -250,7 +267,10 @@ class AuthConfig(BaseModel):
 
     @model_validator(mode="after")
     def _sources_unique(self) -> AuthConfig:
-        _reject_duplicates(self.sources, message="sources must not repeat")
+        _reject_duplicates(
+            ((source, source) for source in self.sources),
+            message="sources must not repeat",
+        )
         return self
 
     @model_validator(mode="after")
@@ -627,7 +647,7 @@ class CommsConfig(BaseModel):
         useful diagnostic at runtime beyond "already registered".
         """
         _reject_duplicates(
-            (entry.name for entry in self.types),
+            ((entry.name, entry.name) for entry in self.types),
             message="comm types must have unique names",
         )
         return self
@@ -1194,7 +1214,7 @@ class ResourceConfig(BaseModel):
         with the same name would race to register the same class.
         """
         _reject_duplicates(
-            (rep.name for rep in self.representations),
+            ((rep.name, rep.name) for rep in self.representations),
             message=(
                 f"Resource {self.model!r}: duplicate representation names"
             ),
@@ -1509,32 +1529,26 @@ class ProjectConfig(FoundryConfig):
         cross-resource surface: the route module name, the
         ``ref_resource:`` filter target, the saved-view /
         ref-autocomplete registry, the project-wide ``_values``
-        endpoint dispatch.  Two resources with class names that
+        endpoint dispatch.  Two resources whose class names
         collapse to the same slug -- ``app1.models.Customer`` and
         ``app2.models.Customer``, ``Foo`` and ``foo`` -- collide on
-        all of them silently.  Catch the collision at config-load
-        time with a message naming both offenders.
+        all of them silently.  ``_reject_duplicates`` reports the
+        offending pair (slug + each resource's dotted model path)
+        so the error pinpoints which two classes need renaming.
         """
-        seen: dict[str, str] = {}
-
-        for app in self.apps:
-            for resource in app.config.resources:
-                slug = resource.slug
-                first = seen.get(slug)
-
-                if first is not None:
-                    msg = (
-                        f"Resource slug {slug!r} collides between "
-                        f"{first!r} and {resource.model!r}.  Slugs "
-                        f"are derived from the model class name "
-                        f"(snake-cased) and key cross-resource "
-                        f"surfaces (routes, ref filters, saved "
-                        f"views).  Rename one of the model classes."
-                    )
-                    raise ValueError(msg)
-
-                seen[slug] = resource.model
-
+        _reject_duplicates(
+            (
+                (resource.slug, resource.model)
+                for app in self.apps
+                for resource in app.config.resources
+            ),
+            message=(
+                "resource slugs collide across apps "
+                "(rename one of the model classes; slugs key the "
+                "route module, ref filter target, saved-view "
+                "registry, and ``_values`` dispatch)"
+            ),
+        )
         return self
 
     def resolve_database(self, db_key: str | None) -> DatabaseConfig:
